@@ -35,7 +35,6 @@ export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh }: 
   const { language, t } = useLanguage();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showRefreshSuccess, setShowRefreshSuccess] = useState(false);
-  const isAdmin = user?.role?.trim().toLowerCase() === "admin";
   const updaterName = user?.name?.trim() || updatedBy || t("systemAdmin");
 
   const handleRefresh = async () => {
@@ -70,8 +69,8 @@ export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh }: 
         <button
           type="button"
           onClick={handleRefresh}
-          disabled={isRefreshing || !isAdmin}
-          title={isAdmin ? t("refreshSystemData") : t("adminRefreshOnly")}
+          disabled={isRefreshing}
+          title={t("refreshSystemData")}
           className="inline-flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2 text-xs font-semibold text-brand-600 transition-all hover:border-brand-300 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/20"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={isRefreshing ? "animate-spin" : ""}>

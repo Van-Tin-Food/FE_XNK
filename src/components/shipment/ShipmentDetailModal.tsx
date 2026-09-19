@@ -8,7 +8,6 @@ import { analyzeDocument, checkDocumentProgress, fetchReturnItems, getArchivedDo
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listDatabaseRows, passDriveDocument, savePostgresBlOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
@@ -1014,7 +1013,7 @@ function getOcrDocumentType(documentCode: string): OcrDocumentType | null {
 }
 
 export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefresh }: ShipmentDetailModalProps) {
-  const { user } = useAuth();
+  const { user, permissions } = useAuth();
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
   const { language, t } = useLanguage();
@@ -1211,13 +1210,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   const isCancelled = shipment.status === "cancelled";
   const isArchived = archived?.archived === true;
-  const archiveStatusResolved = archived !== null;
-  const canUploadDocuments = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "uploadDocument");
-  const canPassDocuments = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "passDocument");
-  const canArchiveDocuments = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "archiveDocuments");
-  const canEditReturnItem = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "editReturnItem");
-  const canEditDetails = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "editShipmentDetails");
-  const canCancelShipment = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "cancelShipment");
+  const canUploadDocuments = !isCancelled && !isArchived && permissions.uploadDocument;
+  const canPassDocuments = !isCancelled && !isArchived && permissions.passDocument;
+  const canArchiveDocuments = !isCancelled && !isArchived && permissions.archiveDocuments;
+  const canEditReturnItem = !isCancelled && !isArchived && permissions.editReturnItem;
+  const canEditDetails = !isCancelled && !isArchived && permissions.editShipmentDetails;
+  const canCancelShipment = !isCancelled && !isArchived && permissions.cancelShipment;
   const shipmentContainers = flattenShipmentContainers(shipment.database);
   const billContainerRows = shipment.database?.bills.flatMap((bill) => (
     bill.containers.length > 0
@@ -2734,8 +2732,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <p className="text-sm font-semibold text-gray-800 dark:text-white">{t("emptyReturnInformation")}</p>
                 <p className="mt-1 text-xs text-gray-400">{t("emptyReturnSource")}</p>
               </div>
-              {canEditReturnItem && returnItems.length > 0 && (
-                <button type="button" onClick={() => setIsReturnEditing((current) => !current)} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+              {canEditReturnItem && (
+                <button
+                  type="button"
+                  disabled={isReturnLoading || returnItems.length === 0}
+                  onClick={() => setIsReturnEditing((current) => !current)}
+                  className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300"
+                >
                   {isReturnEditing ? t("closeEdit") : t("edit")}
                 </button>
               )}

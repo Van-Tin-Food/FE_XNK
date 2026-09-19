@@ -2,11 +2,19 @@
 
 import { clearStoredUser, getStoredUser } from "@/services/authApi";
 import type { AuthUser } from "@/types/auth";
-import React, { createContext, useContext, useEffect, useState } from "react";
+import {
+  canPerformShipmentAction,
+  SHIPMENT_ACTION_PERMISSIONS,
+  type ShipmentActionPermissionKey,
+} from "@/config/shipmentActionPermissions";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+
+type AuthPermissions = Record<ShipmentActionPermissionKey, boolean>;
 
 interface AuthContextValue {
   user: AuthUser | null;
   isInitialized: boolean;
+  permissions: AuthPermissions;
   setUser: (user: AuthUser | null) => void;
   logout: () => void;
 }
@@ -18,6 +26,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // localStorage chỉ được đọc sau khi component đã hydrate.
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const permissions = useMemo(() => Object.fromEntries(
+    (Object.keys(SHIPMENT_ACTION_PERMISSIONS) as ShipmentActionPermissionKey[])
+      .map((action) => [action, canPerformShipmentAction(user, action)]),
+  ) as AuthPermissions, [user]);
 
   const logout = () => {
     clearStoredUser();
@@ -38,7 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  return <AuthContext.Provider value={{ user, isInitialized, setUser, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, isInitialized, permissions, setUser, logout }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
