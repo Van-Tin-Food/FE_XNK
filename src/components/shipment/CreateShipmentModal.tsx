@@ -11,6 +11,8 @@ import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
+import { formatInternationalNumber, toDatabaseNumber } from "@/utils/internationalNumber";
+import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
 
 interface CreateShipmentModalProps {
   isOpen: boolean;
@@ -74,25 +76,6 @@ function normalizeDatabaseDate(value: string): string | null {
   const local = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
   if (!local) return raw;
   return `${local[3]}-${local[2].padStart(2, "0")}-${local[1].padStart(2, "0")}`;
-}
-
-function normalizeDatabaseNumber(value: string): number | null {
-  const raw = value.trim().replace(/[^\d,.-]/g, "");
-  if (!raw) return null;
-
-  const lastComma = raw.lastIndexOf(",");
-  const lastDot = raw.lastIndexOf(".");
-  let normalized = raw;
-  if (lastComma > lastDot) {
-    normalized = raw.replace(/\./g, "").replace(",", ".");
-  } else if (lastDot > lastComma && lastComma >= 0) {
-    normalized = raw.replace(/,/g, "");
-  } else if (lastComma >= 0) {
-    normalized = raw.replace(",", ".");
-  }
-
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function readField(data: Record<string, string>, names: string[]): string {
@@ -209,7 +192,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     const selected = event.target.files?.[0];
     event.target.value = "";
     if (!selected) return;
-    if (!selected.name.toLowerCase().endsWith(".pdf")) {
+    if (!isSupportedDocumentFile(selected)) {
       setError(t("piPdfOnly"));
       return;
     }
@@ -230,7 +213,12 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       setFields(supplier
         ? { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: supplier.ten_ncc, supplierId: supplier.id_ncc, origin: String(supplier.quoc_gia || "") }
         : { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: mapped.supplier, supplierId: mapped.supplierId, origin: mapped.origin });
-      setItems(mappedRows.map(({ product, totalPrice, unitPrice, itemCode }) => ({ product, totalPrice, unitPrice, itemCode })));
+      setItems(mappedRows.map(({ product, totalPrice, unitPrice, itemCode }) => ({
+        product,
+        totalPrice: formatInternationalNumber(totalPrice),
+        unitPrice: formatInternationalNumber(unitPrice),
+        itemCode,
+      })));
     } catch (err) {
       setFile(null);
       setFileData("");
@@ -304,6 +292,11 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       setError(t("supplierNotFound", { supplier: fields.supplier.trim() }));
       return;
     }
+    const invalidMoneyIndex = items.findIndex((item) => toDatabaseNumber(item.unitPrice) == null || toDatabaseNumber(item.totalPrice) == null);
+    if (invalidMoneyIndex >= 0) {
+      setError(`Mặt hàng ${invalidMoneyIndex + 1}: tiền phải dùng dấu chấm cho phần thập phân, ví dụ 1,234.56`);
+      return;
+    }
     setIsSaving(true);
     setError("");
     try {
@@ -322,8 +315,8 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
           net_weight: null,
           so_kien: null,
           don_vi_kien: null,
-          don_gia: normalizeDatabaseNumber(item.unitPrice),
-          tong_gia: normalizeDatabaseNumber(item.totalPrice),
+          don_gia: toDatabaseNumber(item.unitPrice),
+          tong_gia: toDatabaseNumber(item.totalPrice),
         });
         if (!item.itemCode.trim()) continue;
         if (!createdDetail.id_chi_tiet) throw new Error(t("missingPurchaseDetailId"));
@@ -340,6 +333,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         documentCode: "PI",
         fileName: file.name,
         fileData,
+        mimeType: getDocumentMimeType(file),
         requestId: uploadRequestIdRef.current || (uploadRequestIdRef.current = crypto.randomUUID()),
       });
       recordActivity(user, {
@@ -377,7 +371,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("selectPiDescription")}</p>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-6 py-5 custom-scrollbar">
-        <input ref={inputRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={handleFileChange} />
+        <input ref={inputRef} type="file" accept={DOCUMENT_FILE_ACCEPT} className="hidden" onChange={handleFileChange} />
         <button type="button" onClick={() => inputRef.current?.click()} disabled={!canCreateShipment || isAnalyzing || isSaving} className="rounded-xl border border-dashed border-brand-300 bg-brand-50 px-4 py-5 text-sm font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300">
           {file ? file.name : t("selectPi")}
         </button>
@@ -438,7 +432,16 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
                     ] as Array<[keyof ReviewItemFields, string, boolean]>).map(([key, label, required]) => (
                       <label key={key} className={`flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300 ${key === "product" ? "sm:col-span-2" : ""}`}>
                         <span>{label}{required && <span className="text-error-500"> *</span>}</span>
-                        <input type="text" value={item[key]} onChange={(event) => updateItemField(index, key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                        <input
+                          type="text"
+                          inputMode={key === "unitPrice" || key === "totalPrice" ? "decimal" : undefined}
+                          value={item[key]}
+                          onChange={(event) => updateItemField(index, key, event.target.value)}
+                          onBlur={() => {
+                            if (key === "unitPrice" || key === "totalPrice") updateItemField(index, key, formatInternationalNumber(item[key]));
+                          }}
+                          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                        />
                       </label>
                     ))}
                   </div>

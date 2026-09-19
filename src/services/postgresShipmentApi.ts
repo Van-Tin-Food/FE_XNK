@@ -18,6 +18,7 @@ import type {
 } from "@/types/postgresShipment";
 import type { ReturnItem } from "@/types/shipment";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
+import { toDatabaseNumber } from "@/utils/internationalNumber";
 
 
 type JsonRecord = Record<string, unknown>;
@@ -192,19 +193,9 @@ function nullableDate(value: string | undefined): string | null | undefined {
 
 function nullableNumber(value: string | undefined): number | null | undefined {
   if (value === undefined) return undefined;
-  const raw = value.trim().replace(/[^\d,.-]/g, "");
-  if (!raw) return null;
-  const lastComma = raw.lastIndexOf(",");
-  const lastDot = raw.lastIndexOf(".");
-  const normalized = lastComma > lastDot
-    ? raw.replace(/\./g, "").replace(",", ".")
-    : lastDot > lastComma && lastComma >= 0
-      ? raw.replace(/,/g, "")
-      : lastComma >= 0
-        ? raw.replace(",", ".")
-        : raw;
-  const parsed = Number(normalized);
-  if (!Number.isFinite(parsed)) throw new Error(`Giá trị số không hợp lệ: ${value}`);
+  if (!value.trim()) return null;
+  const parsed = toDatabaseNumber(value);
+  if (parsed == null) throw new Error(`Giá trị số không hợp lệ: ${value}. Dùng dấu chấm cho phần thập phân, ví dụ 1,234.56`);
   return parsed;
 }
 

@@ -372,6 +372,7 @@ export interface UploadDocumentPayload {
   documentCode: string;
   fileName: string;
   fileData: string;
+  mimeType: string;
   referenceCode?: string;
   idChiTiet?: string;
   requestId: string;
@@ -380,7 +381,7 @@ export async function uploadDocument(payload: UploadDocumentPayload): Promise<Dr
   const result = await requestJson<DriveDataResponse>("uploadDocument", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload, mimeType: "application/pdf" }),
+    body: JSON.stringify(payload),
   });
   if (!result.fileUrl) throw new Error("[Upload chứng từ] Backend không trả fileUrl sau khi lưu file Drive");
 

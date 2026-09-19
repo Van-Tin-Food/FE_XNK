@@ -19,6 +19,8 @@ import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCa
 import { toDocumentPreviewUrl } from "@/utils/documentPreview";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { shouldValidateContainerPackages } from "@/utils/containerPackageValidation";
+import { formatInternationalNumber, parseInternationalNumber, toDatabaseNumber } from "@/utils/internationalNumber";
+import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
 
 interface ShipmentDetailModalProps {
   shipment: Shipment | null;
@@ -400,7 +402,18 @@ function isMoneyDetailField(field: string): boolean {
 }
 
 function isQuantityDetailField(field: string): boolean {
-  return ["soluong", "sokien", "sohop", "socontainer"].includes(normalizeSheetField(field));
+  return [
+    "soluong",
+    "sokien",
+    "sohop",
+    "socontainer",
+    "trongluong",
+    "trongluongcabi",
+    "netweight",
+    "grossweight",
+    "khoiluongnet",
+    "khoiluonggross",
+  ].includes(normalizeSheetField(field));
 }
 
 function CalendarIcon() {
@@ -693,23 +706,7 @@ function flattenShipmentContainers(database?: PostgresShipmentRelations): Shipme
 }
 
 function parseDisplayNumber(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const source = String(value ?? "").trim().replace(/\s/g, "").replace(/[^0-9,.-]/g, "");
-  if (!source) return null;
-  const lastComma = source.lastIndexOf(",");
-  const lastDot = source.lastIndexOf(".");
-  let normalized = source;
-  if (lastComma >= 0 && lastDot >= 0) {
-    const decimalSeparator = lastComma > lastDot ? "," : ".";
-    const groupSeparator = decimalSeparator === "," ? "." : ",";
-    normalized = source.split(groupSeparator).join("").replace(decimalSeparator, ".");
-  } else if (/^-?\d{1,3}([.,]\d{3})+$/.test(source)) {
-    normalized = source.replace(/[.,]/g, "");
-  } else {
-    normalized = source.replace(",", ".");
-  }
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseInternationalNumber(value);
 }
 
 function numericAmount(value: unknown): number {
@@ -717,17 +714,18 @@ function numericAmount(value: unknown): number {
 }
 
 function formatQuantity(value: unknown): string {
-  if (value == null || String(value).trim() === "") return "";
-  return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(numericAmount(value));
+  return formatInternationalNumber(value, 3);
 }
 
 function formatMoney(value: unknown): string {
-  if (value == null || String(value).trim() === "") return "";
-  const parsed = parseDisplayNumber(value);
-  if (parsed == null) return String(value);
-  const currency = String(value).match(/\b(USD|VND|EUR|GBP|CNY|JPY)\b/i)?.[1]?.toUpperCase();
-  const formatted = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 }).format(parsed);
-  return currency ? `${formatted} ${currency}` : formatted;
+  return formatInternationalNumber(value, 4);
+}
+
+function databaseNumberOrNull(value: unknown): number | null {
+  if (value == null || String(value).trim() === "") return null;
+  const parsed = toDatabaseNumber(value);
+  if (parsed == null) throw new Error(`Giá trị số không hợp lệ: ${String(value)}. Dùng dấu chấm cho phần thập phân, ví dụ 1,234.56`);
+  return parsed;
 }
 
 function PurchaseDetailsTable({
@@ -836,7 +834,15 @@ function EditableTableCell({ value, editing, onChange, suffix, displayFormatter 
   return (
     <td className="px-4 py-3">
       {editing ? (
-        <input value={text} onChange={(event) => onChange(event.target.value)} className="h-9 w-full min-w-24 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+        <input
+          value={text}
+          inputMode={displayFormatter ? "decimal" : undefined}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={() => {
+            if (displayFormatter && text.trim()) onChange(displayFormatter(value));
+          }}
+          className="h-9 w-full min-w-24 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+        />
       ) : (
         <span className="text-sm text-gray-700 dark:text-gray-300">{displayText || "—"}{displayText && suffix ? ` ${suffix}` : ""}</span>
       )}
@@ -941,7 +947,7 @@ function ContainerCargoDetailsTable({
                   </td>
                   <EditableTableCell value={detail.so_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "so_kien", value)} displayFormatter={formatQuantity} />
                   <EditableTableCell value={detail.don_vi_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "don_vi_kien", value)} />
-                  <EditableTableCell value={detail.net_weight} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "net_weight", value)} />
+                  <EditableTableCell value={detail.net_weight} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "net_weight", value)} displayFormatter={formatQuantity} />
                 </tr>
               );
             })}
@@ -984,6 +990,13 @@ function normalizeOcrFields(data: Record<string, string>, documentType: OcrDocum
     normalized[field] = String(found?.[1] ?? "").trim();
   });
   return normalized;
+}
+
+function formatOcrNumericField(field: string, value: string): string {
+  if (!value.trim()) return value;
+  if (isMoneyDetailField(field)) return formatMoney(value);
+  if (isQuantityDetailField(field)) return formatQuantity(value);
+  return value;
 }
 
 function getMissingOcrFields(fields: Record<string, string>, documentType: OcrDocumentType | null): string[] {
@@ -1228,6 +1241,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     ? formatQuantity(overviewInfo.packageCount)
     : overviewInfo.packageCount;
   const overviewGoodsValue = overviewInfo.goodsValue ? formatMoney(overviewInfo.goodsValue) : "";
+  const packageUnits = Array.from(new Set(
+    (shipment.database?.details || [])
+      .map((detail) => String(detail.don_vi_kien || "").trim().toUpperCase())
+      .filter(Boolean),
+  ));
+  const overviewPackageUnit = packageUnits.length === 1 ? packageUnits[0] : "CARTONS";
+  const overviewPackageDisplay = overviewPackageCount ? `${overviewPackageCount} ${overviewPackageUnit}` : "";
+  const overviewNetWeightDisplay = overviewInfo.netWeight ? `${formatQuantity(overviewInfo.netWeight)} KG` : "";
+  const overviewGoodsValueDisplay = overviewGoodsValue ? `${overviewGoodsValue} USD` : "";
   const etaRemaining = shipment.ata ? null : formatEtaRemaining(shipment.eta, currentDay, language);
   const piDate = getSummaryValue(summaryFields, ["Ngày HĐ PI", "Ngày PI", "PI Date"]);
   const piDateDisplay = piDate ? formatSheetDateOnly(piDate) : "";
@@ -1525,8 +1547,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       ? shipment.database.details[0].id_chi_tiet
       : "");
     try {
-      if (files.some((selectedFile) => !selectedFile.name.toLowerCase().endsWith(".pdf"))) {
-        setOcrUploadError("Chứng từ chỉ hỗ trợ file PDF.");
+      if (files.some((selectedFile) => !isSupportedDocumentFile(selectedFile))) {
+        setOcrUploadError("Định dạng file không được hỗ trợ.");
         return;
       }
       if (documentType && files.length > 1) {
@@ -1546,6 +1568,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             documentCode: docId,
             fileName: selectedFile.name,
             fileData,
+            mimeType: getDocumentMimeType(selectedFile),
             requestId,
           });
         }
@@ -1596,7 +1619,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             normalizedFields["Hãng tàu"] = carrier.ten_hang_tau;
           }
         }
-        return normalizedFields;
+        return Object.fromEntries(Object.entries(normalizedFields).map(([field, value]) => [
+          field,
+          formatOcrNumericField(field, value),
+        ]));
       });
       setOcrUploadRows(normalizedRows);
     } catch (error) {
@@ -1641,6 +1667,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         documentCode: ocrUploadDocId,
         fileName: ocrUploadFile.name,
         fileData: ocrUploadFileData,
+        mimeType: getDocumentMimeType(ocrUploadFile),
         requestId: ocrUploadRequestId,
         ...(documentType === "BL" ? { referenceCode: ocrUploadRows[0]?.["BL NO."]?.trim() } : {}),
         ...(documentType === "PKL" ? { idChiTiet: pklTargetDetailId } : {}),
@@ -1867,10 +1894,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           detail.id_chi_tiet,
           {
             ten_hang: detail.ten_hang,
-            so_kien: detail.so_kien === "" ? null : detail.so_kien,
-            net_weight: detail.net_weight === "" ? null : detail.net_weight,
-            don_gia: detail.don_gia === "" ? null : detail.don_gia,
-            tong_gia: detail.tong_gia === "" ? null : detail.tong_gia,
+            so_kien: databaseNumberOrNull(detail.so_kien),
+            net_weight: databaseNumberOrNull(detail.net_weight),
+            don_gia: databaseNumberOrNull(detail.don_gia),
+            tong_gia: databaseNumberOrNull(detail.tong_gia),
           },
         )),
         ...changedItemCodes.map((item) => updateDatabaseRow<PurchaseItemCodeRecord>(
@@ -1887,9 +1914,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           {
             id_bl_container: detail.id_bl_container,
             id_item_code: detail.id_item_code,
-            so_kien: detail.so_kien === "" ? null : detail.so_kien,
+            so_kien: databaseNumberOrNull(detail.so_kien),
             don_vi_kien: detail.don_vi_kien || null,
-            net_weight: detail.net_weight === "" ? null : detail.net_weight,
+            net_weight: databaseNumberOrNull(detail.net_weight),
           },
         )),
       ]);
@@ -1897,10 +1924,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         const created = await createDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, {
           ma_hop_dong: shipment.database.purchase.ma_hop_dong,
           ten_hang: detail.ten_hang.trim(),
-          so_kien: detail.so_kien === "" ? null : detail.so_kien,
-          net_weight: detail.net_weight === "" ? null : detail.net_weight,
-          don_gia: detail.don_gia === "" ? null : detail.don_gia,
-          tong_gia: detail.tong_gia === "" ? null : detail.tong_gia,
+          so_kien: databaseNumberOrNull(detail.so_kien),
+          net_weight: databaseNumberOrNull(detail.net_weight),
+          don_gia: databaseNumberOrNull(detail.don_gia),
+          tong_gia: databaseNumberOrNull(detail.tong_gia),
           don_vi_kien: detail.don_vi_kien || null,
         });
         for (const item of detail.itemCodes) {
@@ -1924,9 +1951,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         await createDatabaseRow<ContainerDetailRecord>(databaseEndpoints.containerDetails, {
           id_bl_container: detail.id_bl_container,
           id_item_code: detail.id_item_code,
-          so_kien: detail.so_kien === "" ? null : detail.so_kien,
+          so_kien: databaseNumberOrNull(detail.so_kien),
           don_vi_kien: detail.don_vi_kien || null,
-          net_weight: detail.net_weight === "" ? null : detail.net_weight,
+          net_weight: databaseNumberOrNull(detail.net_weight),
         });
       }
       const logChanges = [
@@ -2082,7 +2109,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         ))}
       </div>
 
-      <input id="shipment-document-upload" type="file" className="hidden" accept=".pdf,application/pdf" onChange={handleUploadSelected} />
+      <input id="shipment-document-upload" type="file" className="hidden" accept={DOCUMENT_FILE_ACCEPT} onChange={handleUploadSelected} />
 
       {/* Tab Content */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 custom-scrollbar sm:px-6 sm:py-5">
@@ -2184,7 +2211,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                             {DESTINATION_PORT_OPTIONS.map((port) => <option key={port} value={port}>{port}</option>)}
                           </select>
                         ) : (
-                          <input type="text" value={value} readOnly={normalizeSheetField(key) === normalizeSheetField("XUẤT XỨ")} onChange={(event) => updateOcrRowField(rowIndex, key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:read-only:bg-gray-800" />
+                          <input
+                            type="text"
+                            value={value}
+                            inputMode={isMoneyDetailField(key) || isQuantityDetailField(key) ? "decimal" : undefined}
+                            readOnly={normalizeSheetField(key) === normalizeSheetField("XUẤT XỨ")}
+                            onChange={(event) => updateOcrRowField(rowIndex, key, event.target.value)}
+                            onBlur={() => updateOcrRowField(rowIndex, key, formatOcrNumericField(key, value))}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:read-only:bg-gray-800"
+                          />
                         )}
                       </label>
                     ))}
@@ -2218,9 +2253,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <div className="flex flex-col gap-2">
                   <InfoRow label={t("productName")} value={shipment.shipName || t("notAvailable")} />
                   <InfoRow label={t("invoiceNumber")} value={overviewInfo.invoice || t("notAvailable")} mono />
-                  <InfoRow label={t("packageCount")} value={overviewPackageCount || t("notAvailable")} />
-                  <InfoRow label={t("netWeight")} value={overviewInfo.netWeight || t("notAvailable")} />
-                  <InfoRow label={t("goodsValue")} value={overviewGoodsValue || t("notAvailable")} />
+                  <InfoRow label={t("packageCount")} value={overviewPackageDisplay || t("notAvailable")} />
+                  <InfoRow label={t("netWeight")} value={overviewNetWeightDisplay || t("notAvailable")} />
+                  <InfoRow label={t("goodsValue")} value={overviewGoodsValueDisplay || t("notAvailable")} />
                 </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
@@ -3013,7 +3048,17 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                                     : detailForm[field] || ""
                                 : detailForm[field] || ""}
                               disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field) || isDatabaseReadOnlyField(group.key, field)}
+                              inputMode={isMoneyDetailField(field) || isQuantityDetailField(field) ? "decimal" : undefined}
                               onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))}
+                              onBlur={() => {
+                                if (!detailForm[field]?.trim()) return;
+                                const formattedValue = isMoneyDetailField(field)
+                                  ? formatMoney(detailForm[field])
+                                  : isQuantityDetailField(field)
+                                    ? formatQuantity(detailForm[field])
+                                    : detailForm[field];
+                                setDetailForm((current) => ({ ...current, [field]: formattedValue }));
+                              }}
                               className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-800 outline-none transition-colors focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
                             />
                           )}

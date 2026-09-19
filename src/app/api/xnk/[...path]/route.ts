@@ -6,8 +6,8 @@ type RouteContext = { params: Promise<{ path: string[] }> };
 
 async function forward(request: NextRequest, { params }: RouteContext) {
   const baseUrl = process.env.BE_XNK_API_URL?.trim();
-  const gatewayToken = process.env.BE_XNK_API_BEARER_TOKEN?.trim();
-  if (!baseUrl || !gatewayToken) {
+  // const gatewayToken = process.env.BE_XNK_API_BEARER_TOKEN?.trim();
+  if (!baseUrl ) {
     return NextResponse.json({ success: false, message: "Thiếu BE_XNK_API_URL hoặc BE_XNK_API_BEARER_TOKEN trên server" }, { status: 500 });
   }
 
@@ -39,7 +39,7 @@ async function forward(request: NextRequest, { params }: RouteContext) {
 
   const headers = new Headers({
     Accept: request.headers.get("accept") || "application/json",
-    Authorization: `Bearer ${gatewayToken}`,
+    // Authorization: `Bearer ${gatewayToken}`,
   });
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("Content-Type", contentType);
