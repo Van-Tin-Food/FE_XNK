@@ -148,6 +148,7 @@ export interface ReturnItem {
   tenTaiXe: string;
   bienSoXe: string;
   noiDi: string;
+  noiTraContainer: string;
   idKho: string;
   tenKho: string;
   ghiChu: string;

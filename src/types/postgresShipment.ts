@@ -79,6 +79,7 @@ export interface ContainerTransportRecord {
   ten_tai_xe?: string | null;
   bien_so_xe?: string | null;
   noi_di?: string | null;
+  noi_tra_container?: string | null;
   id_kho?: string | null;
   ghi_chu?: string | null;
 }

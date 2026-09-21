@@ -121,6 +121,7 @@ const RETURN_FIELD_GROUPS: Array<{
     labelKey: "transportLocationsGroup",
     fields: [
       { key: "noiDi", labelKey: "departureLocation" },
+      { key: "noiTraContainer", labelKey: "containerReturnLocation" },
       { key: "idKho", labelKey: "warehouseCode" },
       { key: "tenKho", labelKey: "warehouseName" },
       { key: "ghiChu", labelKey: "note" },
@@ -2895,7 +2896,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             )}
             {canEditReturnItem && isReturnEditing && (
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => { setReturnForm(returnItem || { idVanChuyen: "", idBlContainer: "", ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", tenTaiXe: "", bienSoXe: "", noiDi: "", idKho: "", tenKho: "", ghiChu: "" }); setIsReturnEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
+                <button type="button" onClick={() => { setReturnForm(returnItem || { idVanChuyen: "", idBlContainer: "", ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", tenTaiXe: "", bienSoXe: "", noiDi: "", noiTraContainer: "", idKho: "", tenKho: "", ghiChu: "" }); setIsReturnEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
                 <button type="button" onClick={handleSaveReturn} disabled={isSavingReturn} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingReturn ? t("saving") : t("save")}</button>
               </div>
             )}

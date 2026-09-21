@@ -485,6 +485,7 @@ export async function fetchPostgresReturnItems(contractCode: string): Promise<Re
         tenTaiXe: transport?.ten_tai_xe || "",
         bienSoXe: transport?.bien_so_xe || "",
         noiDi: transport?.noi_di || "",
+        noiTraContainer: transport?.noi_tra_container || "",
         idKho: transport?.id_kho || "",
         tenKho: warehouse?.ten_kho || "",
         ghiChu: transport?.ghi_chu || "",
@@ -505,6 +506,7 @@ export async function savePostgresReturnItem(item: ReturnItem): Promise<void> {
     ten_tai_xe: item.tenTaiXe || null,
     bien_so_xe: item.bienSoXe || null,
     noi_di: item.noiDi || null,
+    noi_tra_container: item.noiTraContainer || null,
     id_kho: item.idKho || null,
     ghi_chu: item.ghiChu || null,
   };
