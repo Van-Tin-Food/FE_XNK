@@ -18,7 +18,7 @@ import type {
 } from "@/types/postgresShipment";
 import type { ReturnItem } from "@/types/shipment";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
-import { toDatabaseNumber } from "@/utils/internationalNumber";
+import { toDatabaseNumber, toDatabasePackageCount } from "@/utils/internationalNumber";
 
 
 type JsonRecord = Record<string, unknown>;
@@ -199,6 +199,14 @@ function nullableNumber(value: string | undefined): number | null | undefined {
   return parsed;
 }
 
+function nullablePackageCount(value: string | undefined): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (!value.trim()) return null;
+  const parsed = toDatabasePackageCount(value);
+  if (parsed == null) throw new Error(`Số kiện không hợp lệ: ${value}. Có thể nhập 1377`);
+  return parsed;
+}
+
 export async function updatePostgresShipmentFields(
   relations: PostgresShipmentRelations,
   fields: Record<string, string | number>,
@@ -230,7 +238,7 @@ export async function updatePostgresShipmentFields(
   const totalPrice = fieldValue(fields, ["Giá tổng", "Tổng tiền"]);
   if (productName !== undefined) detailPatch.ten_hang = productName;
   if (netWeight !== undefined) detailPatch.net_weight = nullableNumber(netWeight);
-  if (packageCount !== undefined) detailPatch.so_kien = nullableNumber(packageCount);
+  if (packageCount !== undefined) detailPatch.so_kien = nullablePackageCount(packageCount);
   if (unitPrice !== undefined) detailPatch.don_gia = nullableNumber(unitPrice);
   if (totalPrice !== undefined) detailPatch.tong_gia = nullableNumber(totalPrice);
   if (Object.keys(detailPatch).length > 0) {
@@ -437,7 +445,7 @@ export async function savePostgresPklOcrRow(
   const detail = relations.details.find((item) => item.id_chi_tiet === targetId);
   if (!detail) throw new Error("Vui lòng chọn mặt hàng tương ứng với file PKL");
 
-  const packageCount = nullableNumber(fieldValue(row, ["Số hộp", "Số kiện", "Quantity", "Packages"]));
+  const packageCount = nullablePackageCount(fieldValue(row, ["Số hộp", "Số kiện", "Quantity", "Packages"]));
   const netWeight = nullableNumber(fieldValue(row, ["Trọng lượng", "Trọng lượng NET", "Net weight"]));
   if (packageCount == null) throw new Error("PKL thiếu Số hộp");
   if (netWeight == null) throw new Error("PKL thiếu Trọng lượng");

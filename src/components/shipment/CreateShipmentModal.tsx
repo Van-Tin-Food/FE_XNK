@@ -11,7 +11,7 @@ import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
-import { formatInternationalNumber, toDatabaseNumber } from "@/utils/internationalNumber";
+import { toDatabaseNumber } from "@/utils/internationalNumber";
 import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
 
 interface CreateShipmentModalProps {
@@ -215,8 +215,8 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         : { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: mapped.supplier, supplierId: mapped.supplierId, origin: mapped.origin });
       setItems(mappedRows.map(({ product, totalPrice, unitPrice, itemCode }) => ({
         product,
-        totalPrice: formatInternationalNumber(totalPrice),
-        unitPrice: formatInternationalNumber(unitPrice),
+        totalPrice,
+        unitPrice,
         itemCode,
       })));
     } catch (err) {
@@ -437,9 +437,6 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
                           inputMode={key === "unitPrice" || key === "totalPrice" ? "decimal" : undefined}
                           value={item[key]}
                           onChange={(event) => updateItemField(index, key, event.target.value)}
-                          onBlur={() => {
-                            if (key === "unitPrice" || key === "totalPrice") updateItemField(index, key, formatInternationalNumber(item[key]));
-                          }}
                           className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                         />
                       </label>

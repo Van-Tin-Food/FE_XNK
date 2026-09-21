@@ -18,7 +18,17 @@ import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCa
 import { toDocumentPreviewUrl } from "@/utils/documentPreview";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { shouldValidateContainerPackages } from "@/utils/containerPackageValidation";
-import { formatInternationalNumber, parseInternationalNumber, toDatabaseNumber } from "@/utils/internationalNumber";
+import {
+  formatInternationalNumber,
+  formatMoneyAmount,
+  formatNetWeight,
+  formatPackageCount,
+  getCurrencyText,
+  parseInternationalNumber,
+  parsePackageCount,
+  toDatabaseNumber,
+  toDatabasePackageCount,
+} from "@/utils/internationalNumber";
 import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
 
 interface ShipmentDetailModalProps {
@@ -415,6 +425,21 @@ function isQuantityDetailField(field: string): boolean {
   ].includes(normalizeSheetField(field));
 }
 
+function isPackageCountDetailField(field: string): boolean {
+  return ["soluong", "sokien", "sohop"].includes(normalizeSheetField(field));
+}
+
+function isNetWeightDetailField(field: string): boolean {
+  return [
+    "trongluong",
+    "trongluongcabi",
+    "netweight",
+    "grossweight",
+    "khoiluongnet",
+    "khoiluonggross",
+  ].includes(normalizeSheetField(field));
+}
+
 function CalendarIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -704,26 +729,69 @@ function flattenShipmentContainers(database?: PostgresShipmentRelations): Shipme
   return database?.bills.flatMap((bill) => bill.containers.map((container) => ({ ...container, ma_bl: bill.ma_bl }))) || [];
 }
 
-function parseDisplayNumber(value: unknown): number | null {
-  return parseInternationalNumber(value);
-}
-
-function numericAmount(value: unknown): number {
-  return parseDisplayNumber(value) ?? 0;
-}
-
 function formatQuantity(value: unknown): string {
   return formatInternationalNumber(value, 3);
 }
 
+function packageAmount(value: unknown): number {
+  return parsePackageCount(value) ?? 0;
+}
+
+function formatPackageQuantity(value: unknown): string {
+  return formatPackageCount(value);
+}
+
 function formatMoney(value: unknown): string {
-  return formatInternationalNumber(value, 4);
+  return formatMoneyAmount(value);
+}
+
+function formatOverviewGroupedNumber(value: unknown, fractionDigits?: number): string {
+  const parsed = parseInternationalNumber(value);
+  if (parsed == null) return String(value ?? "");
+  return new Intl.NumberFormat("en-US", {
+    useGrouping: true,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits ?? 3,
+  }).format(parsed);
+}
+
+function formatOverviewPackageCount(value: unknown): string {
+  const parsed = parsePackageCount(value);
+  if (parsed == null) return String(value ?? "");
+  return new Intl.NumberFormat("en-US", { useGrouping: true, maximumFractionDigits: 0 }).format(Math.round(parsed));
+}
+
+function formatOverviewNetWeight(value: unknown): string {
+  const formatted = formatOverviewGroupedNumber(value, 2);
+  return formatted ? `${formatted} KG` : "";
+}
+
+function formatOverviewMoney(value: unknown): string {
+  const formatted = formatOverviewGroupedNumber(value, 2);
+  if (!formatted) return "";
+  const currency = getCurrencyText(value);
+  return currency ? `${formatted} ${currency}` : formatted;
+}
+
+function formatDetailNumericValue(field: string, value: unknown): string {
+  if (isMoneyDetailField(field)) return formatMoney(value);
+  if (isPackageCountDetailField(field)) return formatPackageQuantity(value);
+  if (isNetWeightDetailField(field)) return formatNetWeight(value);
+  if (isQuantityDetailField(field)) return formatQuantity(value);
+  return String(value ?? "");
 }
 
 function databaseNumberOrNull(value: unknown): number | null {
   if (value == null || String(value).trim() === "") return null;
   const parsed = toDatabaseNumber(value);
   if (parsed == null) throw new Error(`Giá trị số không hợp lệ: ${String(value)}. Dùng dấu chấm cho phần thập phân, ví dụ 1,234.56`);
+  return parsed;
+}
+
+function databasePackageCountOrNull(value: unknown): number | null {
+  if (value == null || String(value).trim() === "") return null;
+  const parsed = toDatabasePackageCount(value);
+  if (parsed == null) throw new Error(`Số kiện không hợp lệ: ${String(value)}. Có thể nhập 1377`);
   return parsed;
 }
 
@@ -758,9 +826,9 @@ function PurchaseDetailsTable({
     if (!item) return "";
     const allocations = containerDetails.filter((allocation) => allocation.id_item_code === item.id_item_code);
     if (allocations.length > 0) {
-      return formatQuantity(allocations.reduce((total, allocation) => total + numericAmount(allocation.so_kien), 0));
+      return formatPackageQuantity(allocations.reduce((total, allocation) => total + packageAmount(allocation.so_kien), 0));
     }
-    return detail.itemCodes.length === 1 ? formatQuantity(detail.so_kien) : "";
+    return detail.itemCodes.length === 1 ? formatPackageQuantity(detail.so_kien) : "";
   };
 
   return (
@@ -837,9 +905,6 @@ function EditableTableCell({ value, editing, onChange, suffix, displayFormatter 
           value={text}
           inputMode={displayFormatter ? "decimal" : undefined}
           onChange={(event) => onChange(event.target.value)}
-          onBlur={() => {
-            if (displayFormatter && text.trim()) onChange(displayFormatter(value));
-          }}
           className="h-9 w-full min-w-24 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
         />
       ) : (
@@ -871,9 +936,9 @@ function ContainerCargoDetailsTable({
   const itemOptions = purchaseDetails.flatMap((purchaseDetail) => purchaseDetail.itemCodes
     .filter((item) => !item.id_item_code.startsWith("new-item-"))
     .map((item) => ({ item, purchaseDetail })));
-  const allocatedPackages = details.reduce((total, detail) => total + numericAmount(detail.so_kien), 0);
+  const allocatedPackages = details.reduce((total, detail) => total + packageAmount(detail.so_kien), 0);
   const packagesMatch = Math.abs(allocatedPackages - expectedPackages) < 0.0001;
-  const allocationPending = !details.some((detail) => numericAmount(detail.so_kien) > 0);
+  const allocationPending = !details.some((detail) => packageAmount(detail.so_kien) > 0);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
@@ -942,7 +1007,7 @@ function ContainerCargoDetailsTable({
                       </select>
                     ) : <span className="rounded-md bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{selectedOption?.item.item_code || detail.id_item_code || "—"}</span>}
                   </td>
-                  <EditableTableCell value={detail.so_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "so_kien", value)} displayFormatter={formatQuantity} />
+                  <EditableTableCell value={detail.so_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "so_kien", value)} displayFormatter={formatPackageQuantity} />
                 </tr>
               );
             })}
@@ -952,7 +1017,7 @@ function ContainerCargoDetailsTable({
             <tr>
               <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400">{translate("containerPackageComparison")}</td>
               <td className={`px-4 py-3 text-sm font-bold ${allocationPending ? "text-gray-500 dark:text-gray-400" : packagesMatch ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400"}`}>
-                {formatQuantity(allocatedPackages)} / {formatQuantity(expectedPackages)} {allocationPending ? translate("quantityNotAllocated") : packagesMatch ? translate("quantityMatched") : translate("quantityNotMatched")}
+                {formatPackageQuantity(allocatedPackages)} / {formatPackageQuantity(expectedPackages)} {allocationPending ? translate("quantityNotAllocated") : packagesMatch ? translate("quantityMatched") : translate("quantityNotMatched")}
               </td>
             </tr>
           </tfoot>
@@ -985,13 +1050,6 @@ function normalizeOcrFields(data: Record<string, string>, documentType: OcrDocum
     normalized[field] = String(found?.[1] ?? "").trim();
   });
   return normalized;
-}
-
-function formatOcrNumericField(field: string, value: string): string {
-  if (!value.trim()) return value;
-  if (isMoneyDetailField(field)) return formatMoney(value);
-  if (isQuantityDetailField(field)) return formatQuantity(value);
-  return value;
 }
 
 function getMissingOcrFields(fields: Record<string, string>, documentType: OcrDocumentType | null): string[] {
@@ -1232,9 +1290,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     releaseOrder: getSummaryValue(summaryFields, ["Lệnh thả hàng", "Lệnh giao hàng", "Telex", "Telex release"]),
   };
   const overviewPackageCount = overviewInfo.packageCount && /^[\d\s.,]+$/.test(overviewInfo.packageCount)
-    ? formatQuantity(overviewInfo.packageCount)
+    ? formatOverviewPackageCount(overviewInfo.packageCount)
     : overviewInfo.packageCount;
-  const overviewGoodsValue = overviewInfo.goodsValue ? formatMoney(overviewInfo.goodsValue) : "";
+  const overviewGoodsValue = overviewInfo.goodsValue ? formatOverviewMoney(overviewInfo.goodsValue) : "";
   const packageUnits = Array.from(new Set(
     (shipment.database?.details || [])
       .map((detail) => String(detail.don_vi_kien || "").trim().toUpperCase())
@@ -1242,8 +1300,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   ));
   const overviewPackageUnit = packageUnits.length === 1 ? packageUnits[0] : "CARTONS";
   const overviewPackageDisplay = overviewPackageCount ? `${overviewPackageCount} ${overviewPackageUnit}` : "";
-  const overviewNetWeightDisplay = overviewInfo.netWeight ? `${formatQuantity(overviewInfo.netWeight)} KG` : "";
-  const overviewGoodsValueDisplay = overviewGoodsValue ? `${overviewGoodsValue} USD` : "";
+  const overviewNetWeightDisplay = overviewInfo.netWeight ? formatOverviewNetWeight(overviewInfo.netWeight) : "";
+  const overviewGoodsValueDisplay = overviewGoodsValue;
   const etaRemaining = shipment.ata ? null : formatEtaRemaining(shipment.eta, currentDay, language);
   const piDate = getSummaryValue(summaryFields, ["Ngày HĐ PI", "Ngày PI", "PI Date"]);
   const piDateDisplay = piDate ? formatSheetDateOnly(piDate) : "";
@@ -1613,10 +1671,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             normalizedFields["Hãng tàu"] = carrier.ten_hang_tau;
           }
         }
-        return Object.fromEntries(Object.entries(normalizedFields).map(([field, value]) => [
-          field,
-          formatOcrNumericField(field, value),
-        ]));
+        return normalizedFields;
       });
       setOcrUploadRows(normalizedRows);
     } catch (error) {
@@ -1806,10 +1861,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         !item.id_item_code.startsWith("new-item-") || String(item.ma_nha_may || "").trim()
       )
     ));
-    if (invalidItemCode) {
-      notify("Item code không được để trống khi lưu thông tin nhà máy", "error");
-      return;
-    }
+    // if (invalidItemCode) {
+    //   notify("Item code không được để trống khi lưu thông tin nhà máy", "error");
+    //   return;
+    // }
     const invalidNewRowIndex = newPurchaseDetails.findIndex((detail) => !detail.ten_hang.trim());
     if (invalidNewRowIndex >= 0) {
       notify(`Dòng mới ${invalidNewRowIndex + 1} chưa có tên hàng`, "error");
@@ -1827,12 +1882,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const containerAllocationChanged = newContainerDetails.length > 0 || changedContainerDetails.some((detail) => {
       const original = originalContainerDetails.find((item) => item.id_chi_tiet_container === detail.id_chi_tiet_container);
       return !original || detail.id_bl_container !== original.id_bl_container || detail.id_item_code !== original.id_item_code
-        || numericAmount(detail.so_kien) !== numericAmount(original.so_kien);
+        || packageAmount(detail.so_kien) !== packageAmount(original.so_kien);
     });
-    const purchaseQuantityChanged = newPurchaseDetails.some((detail) => numericAmount(detail.so_kien) !== 0)
+    const purchaseQuantityChanged = newPurchaseDetails.some((detail) => packageAmount(detail.so_kien) !== 0)
       || changedPurchaseDetails.some((detail) => {
         const original = shipment.database?.details.find((item) => item.id_chi_tiet === detail.id_chi_tiet);
-        return numericAmount(detail.so_kien) !== numericAmount(original?.so_kien);
+        return packageAmount(detail.so_kien) !== packageAmount(original?.so_kien);
       });
     const touchedContainerDetailIds = new Set([...newContainerDetails, ...changedContainerDetails].map((detail) => detail.id_chi_tiet_container));
     const invalidContainerDetailIndex = containerDetailForms.findIndex((detail) =>
@@ -1841,15 +1896,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       notify(`Dòng chi tiết container ${invalidContainerDetailIndex + 1} chưa chọn container hoặc Item Code`, "error");
       return;
     }
-    const expectedPackageTotal = purchaseDetailForms.reduce((total, detail) => total + numericAmount(detail.so_kien), 0);
-    const allocatedPackageTotal = containerDetailForms.reduce((total, detail) => total + numericAmount(detail.so_kien), 0);
+    const expectedPackageTotal = purchaseDetailForms.reduce((total, detail) => total + packageAmount(detail.so_kien), 0);
+    const allocatedPackageTotal = containerDetailForms.reduce((total, detail) => total + packageAmount(detail.so_kien), 0);
     const mustValidatePackages = shouldValidateContainerPackages(
-      containerDetailForms.some((detail) => numericAmount(detail.so_kien) > 0),
+      containerDetailForms.some((detail) => packageAmount(detail.so_kien) > 0),
       purchaseQuantityChanged,
       containerAllocationChanged,
     );
     if (mustValidatePackages && Math.abs(expectedPackageTotal - allocatedPackageTotal) >= 0.0001) {
-      notify(t("containerQuantityMismatch", { allocated: formatQuantity(allocatedPackageTotal), expected: formatQuantity(expectedPackageTotal) }), "error");
+      notify(t("containerQuantityMismatch", { allocated: formatPackageQuantity(allocatedPackageTotal), expected: formatPackageQuantity(expectedPackageTotal) }), "error");
       return;
     }
     const mismatchedProduct = mustValidatePackages && purchaseDetailForms.find((purchaseDetail) => {
@@ -1859,18 +1914,18 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       if (itemIds.size === 0) return false;
       const allocated = containerDetailForms
         .filter((detail) => itemIds.has(detail.id_item_code))
-        .reduce((total, detail) => total + numericAmount(detail.so_kien), 0);
-      return Math.abs(allocated - numericAmount(purchaseDetail.so_kien)) >= 0.0001;
+        .reduce((total, detail) => total + packageAmount(detail.so_kien), 0);
+      return Math.abs(allocated - packageAmount(purchaseDetail.so_kien)) >= 0.0001;
     });
     if (mismatchedProduct) {
       const itemIds = new Set(mismatchedProduct.itemCodes.map((item) => item.id_item_code));
       const allocated = containerDetailForms
         .filter((detail) => itemIds.has(detail.id_item_code))
-        .reduce((total, detail) => total + numericAmount(detail.so_kien), 0);
+        .reduce((total, detail) => total + packageAmount(detail.so_kien), 0);
       notify(t("productContainerQuantityMismatch", {
         product: mismatchedProduct.ten_hang,
-        allocated: formatQuantity(allocated),
-        expected: formatQuantity(mismatchedProduct.so_kien),
+        allocated: formatPackageQuantity(allocated),
+        expected: formatPackageQuantity(mismatchedProduct.so_kien),
       }), "error");
       return;
     }
@@ -1888,7 +1943,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           detail.id_chi_tiet,
           {
             ten_hang: detail.ten_hang,
-            so_kien: databaseNumberOrNull(detail.so_kien),
+            so_kien: databasePackageCountOrNull(detail.so_kien),
             net_weight: databaseNumberOrNull(detail.net_weight),
             don_gia: databaseNumberOrNull(detail.don_gia),
             tong_gia: databaseNumberOrNull(detail.tong_gia),
@@ -1908,7 +1963,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           {
             id_bl_container: detail.id_bl_container,
             id_item_code: detail.id_item_code,
-            so_kien: databaseNumberOrNull(detail.so_kien),
+            so_kien: databasePackageCountOrNull(detail.so_kien),
           },
         )),
       ]);
@@ -1916,7 +1971,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         const created = await createDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, {
           ma_hop_dong: shipment.database.purchase.ma_hop_dong,
           ten_hang: detail.ten_hang.trim(),
-          so_kien: databaseNumberOrNull(detail.so_kien),
+          so_kien: databasePackageCountOrNull(detail.so_kien),
           net_weight: databaseNumberOrNull(detail.net_weight),
           don_gia: databaseNumberOrNull(detail.don_gia),
           tong_gia: databaseNumberOrNull(detail.tong_gia),
@@ -1943,7 +1998,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         await createDatabaseRow<ContainerDetailRecord>(databaseEndpoints.containerDetails, {
           id_bl_container: detail.id_bl_container,
           id_item_code: detail.id_item_code,
-          so_kien: databaseNumberOrNull(detail.so_kien),
+          so_kien: databasePackageCountOrNull(detail.so_kien),
         });
       }
       const logChanges = [
@@ -2207,7 +2262,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                             inputMode={isMoneyDetailField(key) || isQuantityDetailField(key) ? "decimal" : undefined}
                             readOnly={normalizeSheetField(key) === normalizeSheetField("XUẤT XỨ")}
                             onChange={(event) => updateOcrRowField(rowIndex, key, event.target.value)}
-                            onBlur={() => updateOcrRowField(rowIndex, key, formatOcrNumericField(key, value))}
                             className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:read-only:bg-gray-800"
                           />
                         )}
@@ -3036,24 +3090,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               id={inputId}
                               type="text"
                               value={!isDetailsEditing
-                                ? isMoneyDetailField(field)
-                                  ? formatMoney(detailForm[field])
-                                  : isQuantityDetailField(field)
-                                    ? formatQuantity(detailForm[field])
-                                    : detailForm[field] || ""
+                                ? isMoneyDetailField(field) || isQuantityDetailField(field)
+                                  ? formatDetailNumericValue(field, detailForm[field])
+                                  : detailForm[field] || ""
                                 : detailForm[field] || ""}
                               disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field) || isDatabaseReadOnlyField(group.key, field)}
                               inputMode={isMoneyDetailField(field) || isQuantityDetailField(field) ? "decimal" : undefined}
                               onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))}
-                              onBlur={() => {
-                                if (!detailForm[field]?.trim()) return;
-                                const formattedValue = isMoneyDetailField(field)
-                                  ? formatMoney(detailForm[field])
-                                  : isQuantityDetailField(field)
-                                    ? formatQuantity(detailForm[field])
-                                    : detailForm[field];
-                                setDetailForm((current) => ({ ...current, [field]: formattedValue }));
-                              }}
                               className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-800 outline-none transition-colors focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
                             />
                           )}
@@ -3069,7 +3112,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   details={containerDetailForms}
                   containers={shipmentContainers}
                   purchaseDetails={purchaseDetailForms}
-                  expectedPackages={purchaseDetailForms.reduce((total, detail) => total + numericAmount(detail.so_kien), 0)}
+                  expectedPackages={purchaseDetailForms.reduce((total, detail) => total + packageAmount(detail.so_kien), 0)}
                   editing={canEditDetails && isDetailsEditing}
                   translate={t}
                   onChange={(id, field, value) => setContainerDetailForms((current) => current.map((detail) => (
