@@ -899,8 +899,6 @@ function ContainerCargoDetailsTable({
               <th className="px-4 py-3">{translate("productName")}</th>
               <th className="px-4 py-3">{translate("itemCode")}</th>
               <th className="px-4 py-3">{translate("packageCount")}</th>
-              <th className="px-4 py-3">{translate("packageUnit")}</th>
-              <th className="px-4 py-3">{translate("netWeight")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -945,17 +943,15 @@ function ContainerCargoDetailsTable({
                     ) : <span className="rounded-md bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{selectedOption?.item.item_code || detail.id_item_code || "—"}</span>}
                   </td>
                   <EditableTableCell value={detail.so_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "so_kien", value)} displayFormatter={formatQuantity} />
-                  <EditableTableCell value={detail.don_vi_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "don_vi_kien", value)} />
-                  <EditableTableCell value={detail.net_weight} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "net_weight", value)} displayFormatter={formatQuantity} />
                 </tr>
               );
             })}
-            {details.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-400">{translate("noContainerCargo")}</td></tr>}
+            {details.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">{translate("noContainerCargo")}</td></tr>}
           </tbody>
           <tfoot className="border-t border-gray-200 bg-gray-50/80 dark:border-gray-700 dark:bg-gray-900/60">
             <tr>
               <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400">{translate("containerPackageComparison")}</td>
-              <td colSpan={3} className={`px-4 py-3 text-sm font-bold ${allocationPending ? "text-gray-500 dark:text-gray-400" : packagesMatch ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400"}`}>
+              <td className={`px-4 py-3 text-sm font-bold ${allocationPending ? "text-gray-500 dark:text-gray-400" : packagesMatch ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400"}`}>
                 {formatQuantity(allocatedPackages)} / {formatQuantity(expectedPackages)} {allocationPending ? translate("quantityNotAllocated") : packagesMatch ? translate("quantityMatched") : translate("quantityNotMatched")}
               </td>
             </tr>
@@ -1824,7 +1820,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const changedContainerDetails = containerDetailForms.filter((detail) => {
       if (detail.id_chi_tiet_container.startsWith("new-container-detail-")) return false;
       const original = originalContainerDetails.find((item) => item.id_chi_tiet_container === detail.id_chi_tiet_container);
-      return !original || ["id_bl_container", "id_item_code", "so_kien", "don_vi_kien", "net_weight"].some((field) => (
+      return !original || ["id_bl_container", "id_item_code", "so_kien"].some((field) => (
         String(detail[field as keyof ContainerDetailRecord] ?? "") !== String(original[field as keyof ContainerDetailRecord] ?? "")
       ));
     });
@@ -1913,8 +1909,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             id_bl_container: detail.id_bl_container,
             id_item_code: detail.id_item_code,
             so_kien: databaseNumberOrNull(detail.so_kien),
-            don_vi_kien: detail.don_vi_kien || null,
-            net_weight: databaseNumberOrNull(detail.net_weight),
           },
         )),
       ]);
@@ -1950,8 +1944,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           id_bl_container: detail.id_bl_container,
           id_item_code: detail.id_item_code,
           so_kien: databaseNumberOrNull(detail.so_kien),
-          don_vi_kien: detail.don_vi_kien || null,
-          net_weight: databaseNumberOrNull(detail.net_weight),
         });
       }
       const logChanges = [
@@ -1984,7 +1976,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           `container ${detail.id_bl_container}`,
           originalContainerDetails.find((item) => item.id_chi_tiet_container === detail.id_chi_tiet_container),
           detail,
-          { id_bl_container: "Container", id_item_code: "Item Code", so_kien: "Số kiện", don_vi_kien: "Đơn vị", net_weight: "NET" },
+          { id_bl_container: "Container", id_item_code: "Item Code", so_kien: "Số kiện" },
         )),
       ];
       recordActivity(user, {
