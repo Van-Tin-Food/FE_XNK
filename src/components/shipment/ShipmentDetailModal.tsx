@@ -616,24 +616,24 @@ const DETAIL_FIELD_GROUPS: DetailFieldGroup[] = [
       { sheetField: "XUẤT XỨ", labelKey: "origin" },
     ],
   },
-  {
-    key: "internationalPayment",
-    labelKey: "detailGroupInternationalPayment",
-    descriptionKey: "detailGroupInternationalPaymentDescription",
-    number: "02",
-    badgeClass: "bg-success-500 text-white",
-    headerClass: "bg-success-50/80 dark:bg-success-500/10",
-    fields: [
-      { sheetField: "Số tiền cọc", labelKey: "depositAmount" },
-      { sheetField: "Số tiền thanh toán", labelKey: "paymentAmount" },
-      { sheetField: "Lệnh thả hàng", labelKey: "releaseOrder" },
-    ],
-  },
+  // {
+  //   key: "internationalPayment",
+  //   labelKey: "detailGroupInternationalPayment",
+  //   descriptionKey: "detailGroupInternationalPaymentDescription",
+  //   number: "02",
+  //   badgeClass: "bg-success-500 text-white",
+  //   headerClass: "bg-success-50/80 dark:bg-success-500/10",
+  //   fields: [
+  //     { sheetField: "Số tiền cọc", labelKey: "depositAmount" },
+  //     { sheetField: "Số tiền thanh toán", labelKey: "paymentAmount" },
+  //     { sheetField: "Lệnh thả hàng", labelKey: "releaseOrder" },
+  //   ],
+  // },
   {
     key: "orderDetails",
     labelKey: "detailGroupOrderDetails",
     descriptionKey: "detailGroupOrderDetailsDescription",
-    number: "03",
+    number: "02",
     badgeClass: "bg-warning-500 text-white",
     headerClass: "bg-warning-50/80 dark:bg-warning-500/10",
     fields: [
@@ -649,7 +649,7 @@ const DETAIL_FIELD_GROUPS: DetailFieldGroup[] = [
     key: "importExport",
     labelKey: "detailGroupImportExport",
     descriptionKey: "detailGroupImportExportDescription",
-    number: "04",
+    number: "03",
     badgeClass: "bg-purple-500 text-white",
     headerClass: "bg-purple-50/80 dark:bg-purple-500/10",
     fields: [
@@ -878,7 +878,7 @@ function ContainerCargoDetailsTable({
   return (
     <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
       <div className="flex items-center gap-3 border-b border-gray-100 bg-cyan-50/70 px-4 py-3.5 dark:border-gray-800 dark:bg-cyan-500/[0.06] sm:px-5">
-        <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-cyan-600 text-xs font-bold text-white shadow-sm">05</span>
+        <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-cyan-600 text-xs font-bold text-white shadow-sm">04</span>
         <div className="min-w-0">
           <h4 className="text-sm font-bold text-gray-900 dark:text-white">{translate("containerCargoDetails")}</h4>
           <p className="mt-0.5 text-xs leading-5 text-gray-500 dark:text-gray-400">{translate("containerCargoDescription")}</p>
