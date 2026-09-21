@@ -384,15 +384,29 @@ function toDateInputValue(value?: string): string {
   return "";
 }
 
-function formatEtaRemaining(eta: string | undefined, currentDay: number, language: "vi" | "en"): string | null {
-  const normalizedEta = toDateInputValue(eta);
-  if (!normalizedEta) return null;
-  const [year, month, day] = normalizedEta.split("-").map(Number);
-  const etaDay = Date.UTC(year, month - 1, day);
-  const remainingDays = Math.round((etaDay - currentDay) / (24 * 60 * 60 * 1000));
-  if (remainingDays < 0) return null;
-  if (remainingDays === 0) return language === "en" ? "Today" : "Hôm nay";
-  return language === "en" ? `${remainingDays} days` : `${remainingDays} ngày`;
+function toUtcDay(value: string | undefined): number | null {
+  const normalized = toDateInputValue(value);
+  if (!normalized) return null;
+  const [year, month, day] = normalized.split("-").map(Number);
+  return Date.UTC(year, month - 1, day);
+}
+
+function formatEtaStatus(eta: string | undefined, ata: string | undefined, currentDay: number, language: "vi" | "en"): string | null {
+  const etaDay = toUtcDay(eta);
+  if (etaDay == null) return null;
+  const actualDay = ata ? toUtcDay(ata) : currentDay;
+  if (actualDay == null) return null;
+  const diffDays = Math.round((actualDay - etaDay) / (24 * 60 * 60 * 1000));
+
+  if (ata) {
+    if (diffDays === 0) return language === "en" ? "Arrived on time" : "Giao đúng hạn";
+    if (diffDays < 0) return language === "en" ? `${Math.abs(diffDays)} days early` : `Giao sớm ${Math.abs(diffDays)} ngày`;
+    return language === "en" ? `${diffDays} days late` : `Giao trễ ${diffDays} ngày`;
+  }
+
+  if (diffDays === 0) return language === "en" ? "Due today" : "Dự kiến đến hôm nay";
+  if (diffDays < 0) return language === "en" ? `${Math.abs(diffDays)} days remaining` : `Còn ${Math.abs(diffDays)} ngày`;
+  return language === "en" ? `${diffDays} days late` : `Đang trễ ${diffDays} ngày`;
 }
 
 function isDateDetailField(field: string): boolean {
@@ -499,16 +513,6 @@ function DateFieldInput({
 function formatDateTime(iso?: string): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function formatAtaDelta(eta: string | undefined, ata: string | undefined, language: "vi" | "en"): string | null {
-  if (!eta || !ata) return null;
-  const etaDate = new Date(`${eta}T00:00:00`);
-  const ataDate = new Date(`${ata}T00:00:00`);
-  const diffDays = Math.round((ataDate.getTime() - etaDate.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return language === "en" ? "Arrived on time" : "Giao đúng hạn";
-  if (diffDays < 0) return language === "en" ? `${Math.abs(diffDays)} days early` : `Giao sớm ${Math.abs(diffDays)} ngày`;
-  return language === "en" ? `${diffDays} days late` : `Giao muộn ${diffDays} ngày`;
 }
 
 function readFileAsBase64(file: File): Promise<string> {
@@ -1302,7 +1306,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const overviewPackageDisplay = overviewPackageCount ? `${overviewPackageCount} ${overviewPackageUnit}` : "";
   const overviewNetWeightDisplay = overviewInfo.netWeight ? formatOverviewNetWeight(overviewInfo.netWeight) : "";
   const overviewGoodsValueDisplay = overviewGoodsValue;
-  const etaRemaining = shipment.ata ? null : formatEtaRemaining(shipment.eta, currentDay, language);
+  const etaStatus = formatEtaStatus(shipment.eta, shipment.ata, currentDay, language);
   const piDate = getSummaryValue(summaryFields, ["Ngày HĐ PI", "Ngày PI", "PI Date"]);
   const piDateDisplay = piDate ? formatSheetDateOnly(piDate) : "";
   // Mã hợp đồng đã nằm ở header và ngày PI được đưa lên cạnh mã đơn.
@@ -1856,15 +1860,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           .filter((item) => item.id_item_code.startsWith("new-item-") && (item.item_code.trim() || String(item.ma_nha_may || "").trim()))
           .map((item) => ({ detailId: detail.id_chi_tiet, item }))
     ));
-    const invalidItemCode = purchaseDetailForms.flatMap((detail) => detail.itemCodes).find((item) => (
-      !item.item_code.trim() && (
-        !item.id_item_code.startsWith("new-item-") || String(item.ma_nha_may || "").trim()
-      )
-    ));
-    // if (invalidItemCode) {
-    //   notify("Item code không được để trống khi lưu thông tin nhà máy", "error");
-    //   return;
-    // }
     const invalidNewRowIndex = newPurchaseDetails.findIndex((detail) => !detail.ten_hang.trim());
     if (invalidNewRowIndex >= 0) {
       notify(`Dòng mới ${invalidNewRowIndex + 1} chưa có tên hàng`, "error");
@@ -2317,11 +2312,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <div className="flex flex-col gap-2">
                   <InfoRow label={t("estimatedDeparture")} value={formatDate(shipment.etd)} />
                   <InfoRow label={t("estimatedArrival")} value={formatDate(shipment.eta)} />
-                  {etaRemaining && <InfoRow label={t("remainingTime")} value={etaRemaining} />}
                   <InfoRow label={t("actualArrival")} value={shipment.ata ? formatDate(shipment.ata) : t("notArrived")} />
-                  {shipment.ata && shipment.eta && (
-                    <InfoRow label={t("comparedWithEta")} value={formatAtaDelta(shipment.eta, shipment.ata, language) || undefined} />
-                  )}
+                  {etaStatus && <InfoRow label={t("comparedWithEta")} value={etaStatus} />}
                 </div>
               </div>
             </div>
