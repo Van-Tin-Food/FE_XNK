@@ -62,9 +62,53 @@ function SortIcon({
   );
 }
 
-function formatDate(iso: string | undefined, language: "vi" | "en"): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString(language === "en" ? "en-GB" : "vi-VN");
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseDateStart(value: string | undefined): number | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function getArrivalState(shipment: Shipment, language: "vi" | "en" = "vi"): { text: string; className: string; sortValue: number | null } {
+  const eta = parseDateStart(shipment.eta);
+  const ata = parseDateStart(shipment.ata);
+  const today = parseDateStart(new Date().toISOString()) as number;
+
+  if (eta === null) return { text: "—", className: "text-gray-500 dark:text-gray-400", sortValue: null };
+
+  if (ata !== null) {
+    const difference = Math.round((ata - eta) / DAY_MS);
+    if (difference < 0) {
+      const days = Math.abs(difference);
+      return {
+        text: language === "en" ? `${days} days early` : `Giao sớm ${days} ngày`,
+        className: "text-success-600 dark:text-success-400",
+        sortValue: difference,
+      };
+    }
+    return {
+      text: difference === 0 ? (language === "en" ? "On time" : "Giao đúng hạn") : language === "en" ? `${difference} days late` : `Giao trễ ${difference} ngày`,
+      className: difference === 0 ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400",
+      sortValue: difference,
+    };
+  }
+
+  const remainingDays = Math.round((eta - today) / DAY_MS);
+  if (remainingDays < 0) {
+    return {
+      text: language === "en" ? `${Math.abs(remainingDays)} days overdue` : `Trễ ${Math.abs(remainingDays)} ngày`,
+      className: "text-error-600 dark:text-error-400",
+      sortValue: remainingDays,
+    };
+  }
+  return {
+    text: remainingDays === 0 ? (language === "en" ? "Due today" : "Đến hạn hôm nay") : language === "en" ? `${remainingDays} days remaining` : `Còn ${remainingDays} ngày`,
+    className: "text-blue-600 dark:text-blue-400",
+    sortValue: remainingDays,
+  };
 }
 
 function DocBar({ total, received, missingList, missingLabel }: { total: number; received: number; missingList: string; missingLabel: string }) {
@@ -155,18 +199,14 @@ function ShipmentCard({
           </p>
         </div>
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("portCarrier")}</p>
-          <p className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-300" title={[shipment.port, shipment.vessel].filter(Boolean).join(" / ")}>
-            {[shipment.port, shipment.vessel].filter(Boolean).join(" / ") || "—"}
+          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("carrier")}</p>
+          <p className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-300" title={shipment.vessel}>
+            {shipment.vessel || "—"}
           </p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-wide text-gray-400">ETD</p>
-          <p className="mt-0.5 text-xs font-medium text-gray-600 dark:text-gray-300">{formatDate(shipment.etd, language)}</p>
-        </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-gray-400">ETA</p>
-          <p className="mt-0.5 text-xs font-medium text-brand-600 dark:text-brand-400">{formatDate(shipment.eta, language)}</p>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("arrivalDuration")}</p>
+          <p className={`mt-0.5 text-xs font-medium ${getArrivalState(shipment, language).className}`}>{getArrivalState(shipment, language).text}</p>
         </div>
       </div>
 
@@ -211,12 +251,10 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         return sortDir === "asc" ? cmp : -cmp;
       }
       if (sortKey === "eta") {
-        const parsedEtaA = a.eta ? Date.parse(a.eta) : Number.NaN;
-        const parsedEtaB = b.eta ? Date.parse(b.eta) : Number.NaN;
-        const etaA = Number.isFinite(parsedEtaA) ? parsedEtaA : null;
-        const etaB = Number.isFinite(parsedEtaB) ? parsedEtaB : null;
+        const etaA = getArrivalState(a, language).sortValue;
+        const etaB = getArrivalState(b, language).sortValue;
 
-        // ETA gần nhất được ưu tiên; đơn thiếu ETA hoặc ETA sai định dạng luôn nằm cuối.
+        // Sort theo ngày còn lại, ngày giao sớm/trễ; đơn thiếu ETA luôn nằm cuối.
         if (etaA === null && etaB === null) return a.orderCode.localeCompare(b.orderCode, "vi");
         if (etaA === null) return 1;
         if (etaB === null) return -1;
@@ -232,7 +270,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
       const cmp = String(va).localeCompare(String(vb), "vi");
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [shipments, sortKey, sortDir]);
+  }, [language, shipments, sortKey, sortDir]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -341,11 +379,8 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[15%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
                 <div className="flex items-center gap-1.5">{t("supplier")} <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`}>
-                {t("portCarrier")}
-              </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
-                <div className="flex items-center gap-1.5">ETD / ETA <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
+                <div className="flex items-center gap-1.5">{t("arrivalDuration")} <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[14%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
                 <div className="flex items-center gap-1.5">{t("status")} <SortIcon col="status" sortKey={sortKey} sortDir={sortDir} /></div>
@@ -359,7 +394,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
             {paged.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-16 text-center text-sm text-gray-400">
+                <td colSpan={8} className="py-16 text-center text-sm text-gray-400">
                   <div className="flex flex-col items-center gap-2">
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
                       <circle cx="11" cy="11" r="8"/>
@@ -392,11 +427,6 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                         <span className="truncate font-mono text-sm font-semibold text-brand-600 group-hover:text-brand-700 dark:text-brand-400" title={shipment.orderCode}>
                           {shipment.orderCode}
                         </span>
-                        {shipment.bill && (
-                          <span className="text-[10px] text-gray-400 truncate max-w-[130px]" title={shipment.bill}>
-                            BL: {shipment.bill}
-                          </span>
-                        )}
                       </div>
                     </td>
 
@@ -417,20 +447,8 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
 
                     {/* Supplier */}
                     <td className="py-3.5 px-4">
-                      <p className="truncate text-xs font-medium text-gray-700 dark:text-gray-300" title={shipment.supplier}>{shipment.supplier}</p>
-                    </td>
-
-                    {/* Port / Vessel */}
-                    <td className="py-3.5 px-4">
                       <div className="flex flex-col gap-0.5">
-                        {shipment.port && (
-                          <div className="flex items-center gap-1">
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 flex-shrink-0">
-                              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-                            </svg>
-                            <span className="truncate text-xs text-gray-600 dark:text-gray-300" title={shipment.port}>{shipment.port}</span>
-                          </div>
-                        )}
+                        <span className="truncate text-xs font-medium text-gray-700 dark:text-gray-300" title={shipment.supplier}>{shipment.supplier || "—"}</span>
                         {shipment.vessel && (
                           <div className="flex items-center gap-1">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400 flex-shrink-0">
@@ -442,22 +460,12 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                       </div>
                     </td>
 
-                    {/* ETD / ETA */}
+                    {/* Arrival status */}
                     <td className="py-3.5 px-4">
-                      <div className="flex flex-col gap-0.5">
-                        {shipment.etd && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] text-gray-400 w-7">ETD</span>
-                            <span className="text-xs font-medium text-gray-600 dark:text-gray-300 truncate">{formatDate(shipment.etd, language)}</span>
-                          </div>
-                        )}
-                        {shipment.eta && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] text-brand-400 w-7">ETA</span>
-                            <span className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">{formatDate(shipment.eta, language)}</span>
-                          </div>
-                        )}
-                      </div>
+                      {(() => {
+                        const arrivalState = getArrivalState(shipment, language);
+                        return <span className={`text-xs font-medium ${arrivalState.className}`}>{arrivalState.text}</span>;
+                      })()}
                     </td>
 
                     {/* Status */}

@@ -2291,7 +2291,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">{t("shipmentInformation")}</p>
                 <div className="flex flex-col gap-2">
-                  <InfoRow label={t("productName")} value={shipment.shipName || t("notAvailable")} />
                   <InfoRow label={t("invoiceNumber")} value={overviewInfo.invoice || t("notAvailable")} mono />
                   <InfoRow label={t("packageCount")} value={overviewPackageDisplay || t("notAvailable")} />
                   <InfoRow label={t("netWeight")} value={overviewNetWeightDisplay || t("notAvailable")} />
@@ -2305,7 +2304,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <InfoRow label={t("carrier")} value={shipment.vessel || t("notAvailable")} />
                   <InfoRow label="Bill of Lading" value={shipment.bill || t("notAvailable")} mono />
                   <InfoRow label={t("destinationPort")} value={shipment.port || t("notAvailable")} />
-                  <InfoRow label={t("releaseOrder")} value={overviewInfo.releaseOrder || t("notAvailable")} />
                 </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">

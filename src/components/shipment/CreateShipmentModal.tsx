@@ -380,7 +380,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         {duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{t("duplicateOrder", { orderCode: fields.orderCode.trim() })}</p>}
         {error && !duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{error}</p>}
 
-        {file && !isAnalyzing && (
+        {file && !isAnalyzing && !error && (
           <>
             <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">
               {t("reviewOcrBeforeCreate")}
