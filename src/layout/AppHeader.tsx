@@ -182,7 +182,7 @@ const AppHeader: React.FC = () => {
           </div>
           <div
             className="flex shrink-0 items-center gap-3 text-gray-700 dark:text-gray-300"
-            title={`${user?.name || "User"} • ${user?.role || ""}`}
+            title={`${user?.name || "User"} • ${user?.role || ""} • ${user?.session || ""}`}
           >
             <AvatarText
               name={user?.name || "User"}
