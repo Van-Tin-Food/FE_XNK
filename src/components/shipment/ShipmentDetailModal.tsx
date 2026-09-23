@@ -1306,7 +1306,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const overviewPackageUnit = packageUnits.length === 1 ? packageUnits[0] : "CARTONS";
   const overviewPackageDisplay = overviewPackageCount ? `${overviewPackageCount} ${overviewPackageUnit}` : "";
   const overviewNetWeightDisplay = overviewInfo.netWeight ? formatOverviewNetWeight(overviewInfo.netWeight) : "";
-  const overviewGoodsValueDisplay = overviewGoodsValue;
+  const overviewGoodsValueDisplay = overviewGoodsValue ? `${overviewGoodsValue} USD` : "USD";
   const etaStatus = formatEtaStatus(shipment.eta, shipment.ata, currentDay, language);
   const piDate = getSummaryValue(summaryFields, ["Ngày HĐ PI", "Ngày PI", "PI Date"]);
   const piDateDisplay = piDate ? formatSheetDateOnly(piDate) : "";
