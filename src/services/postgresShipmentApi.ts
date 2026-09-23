@@ -435,6 +435,56 @@ export async function savePostgresPiOcrRows(
   }
 }
 
+/** Lưu OCR INV dạng nhiều dòng: hóa đơn và các mặt hàng đi kèm. */
+export async function savePostgresInvOcrRows(
+  relations: PostgresShipmentRelations,
+  rows: Array<Record<string, string>>,
+): Promise<void> {
+  const first = rows[0];
+  if (!first) throw new Error("OCR INV không trả về dữ liệu mặt hàng");
+
+  const invoice = fieldValue(first, ["INV", "Mã INV", "Số INV"]);
+  const invoiceDate = fieldValue(first, ["Ngày INV"]);
+  await updateDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, relations.purchase.ma_hop_dong, {
+    ma_inv: nullable(invoice),
+    ngay_inv: nullableDate(invoiceDate),
+  });
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const productName = fieldValue(row, ["Tên hàng", "Tên sản phẩm"]);
+    if (!productName) throw new Error(`Mặt hàng ${index + 1} thiếu Tên hàng`);
+    const detailPayload = {
+      ma_hop_dong: relations.purchase.ma_hop_dong,
+      ten_hang: productName,
+      don_gia: nullableNumber(fieldValue(row, ["Đơn giá"])),
+      tong_gia: nullableNumber(fieldValue(row, ["Giá tổng", "Tổng tiền"])),
+    };
+    const existingDetail = relations.details[index];
+    let detail: PurchaseDetailRecord;
+    if (existingDetail) {
+      await updateDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, existingDetail.id_chi_tiet, detailPayload);
+      detail = existingDetail;
+    } else {
+      detail = await createDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, detailPayload);
+    }
+
+    const itemCode = fieldValue(row, ["Item code"]);
+    if (!itemCode) continue;
+    const existingItem = existingDetail?.itemCodes[0];
+    if (existingItem) {
+      await updateDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, existingItem.id_item_code, { item_code: itemCode });
+    } else {
+      if (!detail.id_chi_tiet) throw new Error(`Backend không trả id_chi_tiet cho mặt hàng ${index + 1}`);
+      await createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
+        id_chi_tiet: detail.id_chi_tiet,
+        item_code: itemCode,
+        ma_nha_may: "",
+      });
+    }
+  }
+}
+
 /** Lưu một file PKL vào đúng mặt hàng người dùng đã chọn. */
 export async function savePostgresPklOcrRow(
   relations: PostgresShipmentRelations,

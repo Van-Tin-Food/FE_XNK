@@ -5,7 +5,7 @@ import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
 import { analyzeDocument, checkDocumentProgress, fetchReturnItems, getArchivedDocuments, launchEvergreenTracking, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentProgressResponse } from "@/services/shipmentApi";
-import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listDatabaseRows, passDriveDocument, savePostgresBlOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
+import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listDatabaseRows, passDriveDocument, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
 import { recordActivity } from "@/services/activityLogApi";
@@ -532,7 +532,7 @@ type OcrDocumentType = "PI" | "INV" | "PKL" | "BL";
 
 const OCR_REQUIRED_FIELDS: Record<OcrDocumentType, string[]> = {
   PI: ["Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng", "Đơn giá"],
-  INV: ["INV", "Ngày INV"],
+  INV: ["INV", "Ngày INV", "Tên hàng", "Giá tổng", "Đơn giá"],
   PKL: ["Số kiện", "Trọng lượng NET"],
   BL: ["BL NO.", "Mã Container", "Hãng tàu", "Cảng đi", "Cảng đến", "ETD"],
 };
@@ -550,6 +550,9 @@ const OCR_FIELD_ALIASES: Record<OcrDocumentType, Record<string, string[]>> = {
   INV: {
     INV: ["INV", "Mã INV", "Số INV", "Invoice No", "Invoice number"],
     "Ngày INV": ["Ngày INV", "Invoice date", "Ngày hóa đơn"],
+    "Tên hàng": ["Tên hàng", "Tên sản phẩm", "Product"],
+    "Giá tổng": ["Giá tổng", "Tổng tiền", "Total amount"],
+    "Đơn giá": ["Đơn giá", "Unit price"],
   },
   PKL: {
     "Số kiện": ["Số kiện", "Số hộp", "Quantity", "Packages"],
@@ -1046,6 +1049,8 @@ function normalizeOcrFields(data: Record<string, string>, documentType: OcrDocum
   }));
   const optionalFields = documentType === "PI"
     ? ["id_ncc", "Item code"]
+    : documentType === "INV"
+      ? ["Item code"]
     : documentType === "BL"
       ? ["id_hang_tau"]
       : [];
@@ -1424,7 +1429,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     ? carrierTrackingLink.buildUrl(trackingCode)
     : null;
   const currentOcrDocumentType = ocrUploadDocId ? getOcrDocumentType(ocrUploadDocId) : null;
-  const canAddOcrRows = currentOcrDocumentType === "PI" || currentOcrDocumentType === "BL";
+  const canAddOcrRows = currentOcrDocumentType === "PI" || currentOcrDocumentType === "INV" || currentOcrDocumentType === "BL";
   const ocrUploadFields = ocrUploadRows[0] || {};
   const missingOcrFields = getMissingOcrFields(ocrUploadFields, currentOcrDocumentType);
   ocrUploadRows.slice(1).forEach((row) => {
@@ -1448,9 +1453,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const updateOcrRowField = (rowIndex: number, key: string, value: string) => {
     const normalizedKey = normalizeSheetField(key);
     const sharedPiFields = new Set(["sohd", "ngayhdpi", "nhacungcap", "xuatxu", "idncc"]);
+    const sharedInvFields = new Set(["inv", "ngayinv"]);
     const sharedBlFields = new Set(["blno", "hangtau", "idhangtau", "cangdi", "cangden", "etd"]);
     const updateEveryRow = currentOcrDocumentType === "PI"
       ? sharedPiFields.has(normalizedKey)
+      : currentOcrDocumentType === "INV"
+        ? sharedInvFields.has(normalizedKey)
       : currentOcrDocumentType === "BL" && sharedBlFields.has(normalizedKey);
     setOcrUploadRows((current) => current.map((row, index) => (
       updateEveryRow || index === rowIndex ? { ...row, [key]: value } : row
@@ -1483,6 +1491,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       const row = normalizeOcrFields({}, currentOcrDocumentType);
       if (currentOcrDocumentType === "PI") {
         ["Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "id_ncc"].forEach((field) => { row[field] = first[field] || ""; });
+      } else if (currentOcrDocumentType === "INV") {
+        ["INV", "Ngày INV"].forEach((field) => { row[field] = first[field] || ""; });
       } else if (currentOcrDocumentType === "BL") {
         ["BL NO.", "Hãng tàu", "id_hang_tau", "Cảng đi", "Cảng đến", "ETD"].forEach((field) => { row[field] = first[field] || ""; });
       }
@@ -1740,6 +1750,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         await savePostgresBlOcrRows(shipment.database, ocrUploadRows);
       } else if (documentType === "PI") {
         await savePostgresPiOcrRows(shipment.database, ocrUploadRows);
+      } else if (documentType === "INV") {
+        await savePostgresInvOcrRows(shipment.database, ocrUploadRows);
       } else if (documentType === "PKL") {
         await savePostgresPklOcrRow(shipment.database, ocrUploadRows[0] || {}, pklTargetDetailId);
       } else {
