@@ -6,9 +6,9 @@ type RouteContext = { params: Promise<{ path: string[] }> };
 
 async function forward(request: NextRequest, { params }: RouteContext) {
   const baseUrl = process.env.BE_XNK_API_URL?.trim();
-  const gatewayToken = process.env.BE_XNK_API_BEARER_TOKEN?.trim();
-  if (!baseUrl  || !gatewayToken ) {
-    return NextResponse.json({ success: false, message: "Thiếu BE_XNK_API_URL hoặc BE_XNK_API_BEARER_TOKEN trên server" }, { status: 500 });
+  const apiKey = process.env.BE_XNK_API_KEY?.trim();
+  if (!baseUrl || !apiKey) {
+    return NextResponse.json({ success: false, message: "Thiếu BE_XNK_API_URL hoặc BE_XNK_API_KEY trên server" }, { status: 500 });
   }
 
   let backendUrl: URL;
@@ -30,6 +30,7 @@ async function forward(request: NextRequest, { params }: RouteContext) {
   const isHealth = request.method === "GET" && (path.join("/") === "health" || path.join("/") === "api/health");
   const headerToken = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   const cookieToken = request.cookies.get("xnk_auth_token")?.value?.trim();
+  const sessionToken = headerToken || cookieToken;
   const hasFrontendSession = request.method === "GET"
     ? Boolean(cookieToken)
     : Boolean(headerToken && cookieToken && headerToken === cookieToken);
@@ -39,8 +40,9 @@ async function forward(request: NextRequest, { params }: RouteContext) {
 
   const headers = new Headers({
     Accept: request.headers.get("accept") || "application/json",
-    Authorization: `Bearer ${gatewayToken}`,
+    "X-Api-Key": apiKey,
   });
+  if (sessionToken) headers.set("Authorization", `Bearer ${sessionToken}`);
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("Content-Type", contentType);
 
