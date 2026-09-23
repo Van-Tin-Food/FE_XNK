@@ -1,6 +1,7 @@
 export interface SupplierRecord {
   id_ncc: string;
   ten_ncc: string;
+  email?: string | null;
   quoc_gia?: string | null;
   dia_chi?: string | null;
   so_dien_thoai?: string | null;
@@ -9,11 +10,13 @@ export interface SupplierRecord {
 export interface CarrierRecord {
   id_hang_tau: string;
   ten_hang_tau: string;
+  email?: string | null;
 }
 
 export interface WarehouseRecord {
   id_kho: string;
   ten_kho: string;
+  email?: string | null;
   so_dien_thoai?: string | null;
   dia_chi?: string | null;
 }
