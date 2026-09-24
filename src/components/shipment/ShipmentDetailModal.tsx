@@ -1542,6 +1542,17 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     }
   };
 
+  const handleExternalCarrierTracking = () => {
+    if (!carrierTrackingUrl) return;
+    const trackingWindow = window.open(
+      carrierTrackingUrl,
+      "carrier_tracking_popup",
+      "popup=yes,width=1200,height=800,left=80,top=60,resizable=yes,scrollbars=yes",
+    );
+    if (!trackingWindow) notify("Trình duyệt đang chặn popup tracking. Vui lòng cho phép popup cho trang này.", "warning");
+    else trackingWindow.focus();
+  };
+
   const handleEvergreenTracking = async () => {
     if (!isEvergreenTracking || !evergreenContainerNo || evergreenTrackingInProgress.current) return;
 
@@ -2478,10 +2489,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       )}
                     </button>
                   ) : (
-                    <a
-                      href={carrierTrackingUrl || "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={handleExternalCarrierTracking}
                       className={`${carrierTrackingLink.requiresManualCode ? "mt-2" : "mt-4"} flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-500 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 dark:border-brand-500/30 sm:px-4`}
                     >
                       <span className="min-w-0 break-words text-left leading-5">{t("scheduleLookup")} {carrierTrackingLink.name}</span>
@@ -2490,7 +2500,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         <polyline points="15 3 21 3 21 9" />
                         <line x1="10" y1="14" x2="21" y2="3" />
                       </svg>
-                    </a>
+                    </button>
                   )}
                   {carrierTrackingLink.usesBackendApi && trackingFeedback && (
                     <p

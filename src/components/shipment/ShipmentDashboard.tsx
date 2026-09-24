@@ -11,6 +11,7 @@ import CreateShipmentModal from "./CreateShipmentModal";
 import { useAuth } from "@/context/AuthContext";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useLanguage } from "@/context/LanguageContext";
+import { getDefaultEtaRange } from "@/utils/shipmentDateFilter";
 
 function matchesFilterValue(source?: string, selected?: string): boolean {
   if (!selected) return true;
@@ -26,15 +27,13 @@ export default function ShipmentDashboard() {
   const [updatedBy, setUpdatedBy] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [supplierOptions, setSupplierOptions] = useState<string[]>([]);
-  const [carrierOptions, setCarrierOptions] = useState<string[]>([]);
-
   const [activeMetricFilter, setActiveMetricFilter] = useState<ShipmentStatus | "all">("all");
+  const defaultEtaRange = useMemo(() => getDefaultEtaRange(), []);
   const [filter, setFilter] = useState<ShipmentFilter>({
     status: "all",
     search: "",
-    dateFrom: "",
-    dateTo: "",
+    dateFrom: defaultEtaRange.dateFrom,
+    dateTo: defaultEtaRange.dateTo,
     dateField: "eta",
     supplier: undefined,
     port: undefined,
@@ -57,8 +56,6 @@ export default function ShipmentDashboard() {
         : current);
       setLastUpdated(result.lastUpdated);
       setUpdatedBy(result.updatedBy || "");
-      setSupplierOptions(result.supplierOptions);
-      setCarrierOptions(result.carrierOptions);
     } catch (error) {
       // Keep existing rows visible when the API is temporarily unavailable.
       setApiError(error instanceof Error ? error.message : "Không thể tải dữ liệu shipment");
@@ -139,6 +136,37 @@ export default function ShipmentDashboard() {
       return statusOk && searchOk && supplierOk && portOk && vesselOk && dateOk;
     });
   }, [shipments, filter]);
+
+  // Build supplier/carrier choices from the rows eligible for the table,
+  // after ETA and the other independent filters, never from catalog tables.
+  const filterOptionShipments = useMemo(() => shipments.filter((shipment) => {
+    const selectedStatus = filter.status as ShipmentFilterStatus | "all" | undefined;
+    const statusOk = !selectedStatus || selectedStatus === "all"
+      || (selectedStatus === "cancelled" ? shipment.status === "cancelled" : shipment.status === selectedStatus);
+    const query = (filter.search || "").toLowerCase().trim();
+    const searchOk = !query || [shipment.orderCode, shipment.shipName]
+      .some((value) => value?.toLowerCase().includes(query));
+    const portOk = matchesFilterValue(shipment.port, filter.port);
+    let dateOk = true;
+    if (filter.dateFrom || filter.dateTo) {
+      if (!shipment.eta) {
+        dateOk = false;
+      } else {
+        const eta = new Date(shipment.eta);
+        dateOk = (!filter.dateFrom || new Date(filter.dateFrom) <= eta)
+          && (!filter.dateTo || new Date(filter.dateTo) >= eta);
+      }
+    }
+    return statusOk && searchOk && portOk && dateOk;
+  }), [filter, shipments]);
+
+  const supplierOptions = useMemo(() => [...new Set(
+    filterOptionShipments.map((shipment) => shipment.supplier.trim()).filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments]);
+
+  const carrierOptions = useMemo(() => [...new Set(
+    filterOptionShipments.map((shipment) => String(shipment.vessel || "").trim()).filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments]);
 
   const metrics = useMemo(() => computeMetrics(shipments), [shipments]);
 

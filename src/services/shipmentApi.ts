@@ -187,7 +187,7 @@ export async function fetchDriveDocumentMap(): Promise<Map<string, DriveDocument
   return map;
 }
 
-export async function fetchShipments(): Promise<{ shipments: Shipment[]; lastUpdated: string; updatedBy: string; supplierOptions: string[]; carrierOptions: string[] }> {
+export async function fetchShipments(): Promise<{ shipments: Shipment[]; lastUpdated: string; updatedBy: string }> {
   const [database, totalMap] = await Promise.all([
     fetchPostgresShipmentListSnapshot(),
     fetchDriveDocumentMap(),
@@ -206,8 +206,6 @@ export async function fetchShipments(): Promise<{ shipments: Shipment[]; lastUpd
     shipments,
     lastUpdated,
     updatedBy: "PostgreSQL",
-    supplierOptions: [...new Set(database.suppliers.map((supplier) => supplier.ten_ncc).filter(Boolean))],
-    carrierOptions: [...new Set(database.carriers.map((carrier) => carrier.ten_hang_tau).filter(Boolean))],
   };
 }
 

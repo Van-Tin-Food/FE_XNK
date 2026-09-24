@@ -5,10 +5,12 @@ import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { getActivityLogs, type ActivityLog } from "@/services/activityLogApi";
 import { activityLogSummary } from "@/utils/activityLogSummary";
+import { paginateItems } from "@/utils/pagination";
+import PaginationControls from "@/components/common/PaginationControls";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 15;
 const ACTION_LABEL_KEYS: Record<string, string> = {
   CREATE_SHIPMENT: "logCreateShipment",
   UPLOAD_DOCUMENT: "logUploadDocument",
@@ -42,16 +44,6 @@ function actor(log: ActivityLog): string {
   return log.userName || log.username || (log.userId ? `User #${log.userId}` : "—");
 }
 
-function pageNumbers(current: number, total: number): Array<number | "…"> {
-  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
-  const pages: Array<number | "…"> = [1];
-  if (current > 3) pages.push("…");
-  for (let page = Math.max(2, current - 1); page <= Math.min(total - 1, current + 1); page += 1) pages.push(page);
-  if (current < total - 2) pages.push("…");
-  pages.push(total);
-  return pages;
-}
-
 export default function ActivityLogsPage() {
   const { user } = useAuth();
   const { language, t } = useLanguage();
@@ -62,6 +54,7 @@ export default function ActivityLogsPage() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const loadLogs = useCallback(async () => {
     if (!canViewLogs) return;
@@ -84,9 +77,7 @@ export default function ActivityLogsPage() {
       .join(" ").toLocaleLowerCase("vi").includes(keyword));
   }, [logs, query, t, language]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const displayedLogs = filteredLogs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const { totalPages, safePage: currentPage, items: displayedLogs, from, to } = paginateItems(filteredLogs, page, pageSize);
 
   if (!canViewLogs) return <div className="flex min-h-[50vh] items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>;
 
@@ -137,18 +128,7 @@ export default function ActivityLogsPage() {
             })}
           </div>
         )}
-        {!loading && !error && filteredLogs.length > PAGE_SIZE && (
-          <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <p className="text-xs text-gray-500">{t("showingRecords", { from: (currentPage - 1) * PAGE_SIZE + 1, to: Math.min(currentPage * PAGE_SIZE, filteredLogs.length), total: filteredLogs.length })}</p>
-            <nav aria-label={t("operationHistory")} className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
-              {pageNumbers(currentPage, totalPages).map((number, index) => number === "…" ? (
-                <span key={`ellipsis-${index}`} className="flex h-9 w-9 shrink-0 items-center justify-center text-sm text-gray-400">…</span>
-              ) : (
-                <button key={number} type="button" onClick={() => setPage(number)} aria-label={t("goToPage", { page: number })} aria-current={number === currentPage ? "page" : undefined} className={`h-9 min-w-9 shrink-0 rounded-lg border px-2 text-sm font-semibold ${number === currentPage ? "border-brand-500 bg-brand-500 text-white" : "border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"}`}>{number}</button>
-              ))}
-            </nav>
-          </div>
-        )}
+        {!loading && !error && filteredLogs.length > 0 && <PaginationControls page={currentPage} totalPages={totalPages} pageSize={pageSize} totalItems={filteredLogs.length} from={from} to={to} summaryKey="showingRecords" onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} />}
       </div>
     </section>
   );

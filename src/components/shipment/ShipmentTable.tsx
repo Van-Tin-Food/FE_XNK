@@ -2,13 +2,15 @@
 import React, { useState, useMemo } from "react";
 import type { Shipment } from "@/types/shipment";
 import { useLanguage } from "@/context/LanguageContext";
+import { paginateItems } from "@/utils/pagination";
+import PaginationControls from "@/components/common/PaginationControls";
 
 interface ShipmentTableProps {
   shipments: Shipment[];
   onRowClick: (shipment: Shipment) => void;
 }
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 15;
 
 const STATUS_CONFIG: Record<string, { labelKey: string; color: string; bg: string; dot: string }> = {
   cancelled: { labelKey: "cancelledStatus", color: "text-error-600 dark:text-error-400", bg: "bg-error-50 dark:bg-error-500/10", dot: "bg-error-500" },
@@ -229,6 +231,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
   const [sortKey, setSortKey] = useState<SortKey>("eta");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -251,10 +254,10 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         return sortDir === "asc" ? cmp : -cmp;
       }
       if (sortKey === "eta") {
-        const etaA = getArrivalState(a, language).sortValue;
-        const etaB = getArrivalState(b, language).sortValue;
+        const etaA = parseDateStart(a.eta);
+        const etaB = parseDateStart(b.eta);
 
-        // Sort theo ngày còn lại, ngày giao sớm/trễ; đơn thiếu ETA luôn nằm cuối.
+        // Mặc định ETA tăng dần để đơn sắp cập cảng nằm ở đầu; đơn thiếu ETA luôn nằm cuối.
         if (etaA === null && etaB === null) return a.orderCode.localeCompare(b.orderCode, "vi");
         if (etaA === null) return 1;
         if (etaB === null) return -1;
@@ -270,33 +273,12 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
       const cmp = String(va).localeCompare(String(vb), "vi");
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [language, shipments, sortKey, sortDir]);
+  }, [shipments, sortKey, sortDir]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-
-  const paged = useMemo(() => {
-    const start = (safePage - 1) * PAGE_SIZE;
-    return sorted.slice(start, start + PAGE_SIZE);
-  }, [sorted, safePage]);
+  const { items: paged, totalPages, safePage, from, to } = paginateItems(sorted, page, pageSize);
 
   const headerCls =
     "py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition-colors";
-
-  // Pagination page numbers
-  function getPageNumbers() {
-    const pages: (number | "...")[] = [];
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-    } else {
-      pages.push(1);
-      if (safePage > 3) pages.push("...");
-      for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) pages.push(i);
-      if (safePage < totalPages - 2) pages.push("...");
-      pages.push(totalPages);
-    }
-    return pages;
-  }
 
   return (
     <div className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
@@ -409,7 +391,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                 const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
                 const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.buying;
                 const statusLabel = t(sc.labelKey);
-                const rowNum = (safePage - 1) * PAGE_SIZE + rowIdx + 1;
+                const rowNum = (safePage - 1) * pageSize + rowIdx + 1;
                 return (
                   <tr
                     key={shipment.id}
@@ -512,55 +494,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <p className="text-xs text-gray-400">
-            {t("showingShipments", { from: (safePage - 1) * PAGE_SIZE + 1, to: Math.min(safePage * PAGE_SIZE, sorted.length), total: sorted.length })}
-          </p>
-          <div className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
-            {/* Prev */}
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={safePage === 1}
-              className="flex items-center justify-center w-8 h-8 rounded-lg border border-gray-200 bg-white text-gray-500 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 disabled:opacity-40 disabled:cursor-not-allowed dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10 transition-all"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 18 9 12 15 6"/>
-              </svg>
-            </button>
-
-            {/* Page numbers */}
-            {getPageNumbers().map((pg, i) =>
-              pg === "..." ? (
-                <span key={`dots-${i}`} className="w-8 h-8 flex items-center justify-center text-xs text-gray-400">…</span>
-              ) : (
-                <button
-                  key={pg}
-                  onClick={() => setPage(Number(pg))}
-                  className={`w-8 h-8 rounded-lg text-xs font-medium transition-all border ${
-                    pg === safePage
-                      ? "border-brand-400 bg-brand-500 text-white shadow-sm"
-                      : "border-gray-200 bg-white text-gray-600 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10"
-                  }`}
-                >
-                  {pg}
-                </button>
-              )
-            )}
-
-            {/* Next */}
-            <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={safePage === totalPages}
-              className="flex items-center justify-center w-8 h-8 rounded-lg border border-gray-200 bg-white text-gray-500 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 disabled:opacity-40 disabled:cursor-not-allowed dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10 transition-all"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
+      {(totalPages > 1 || sorted.length > 0) && <PaginationControls page={safePage} totalPages={totalPages} pageSize={pageSize} totalItems={sorted.length} from={from} to={to} onPageChange={setPage} onPageSizeChange={(nextSize) => { setPageSize(nextSize); setPage(1); }} />}
     </div>
   );
 }

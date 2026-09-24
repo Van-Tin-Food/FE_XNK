@@ -90,9 +90,9 @@ export default function ShipmentFilters({
     filter.vessel;
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-white/[0.03]">
       {/* Row 1: Search + Status */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap">
+      <div className="order-2 flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap">
         {/* Search: mã đơn + tên hàng */}
         <div className="flex-1 min-w-[200px]">
           <label className={labelCls}>{t("search")}</label>
@@ -161,7 +161,7 @@ export default function ShipmentFilters({
       </div>
 
       {/* Row 2: Date range */}
-      <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap">
+      <div className="order-1 flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap">
         {/* Lọc theo */}
         <div className="w-full md:w-28">
           <label className={labelCls}>{t("filterBy")}</label>

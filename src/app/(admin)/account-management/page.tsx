@@ -16,8 +16,10 @@ import {
 } from "@/services/authApi";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { paginateItems } from "@/utils/pagination";
+import PaginationControls from "@/components/common/PaginationControls";
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 15;
 const ROLE_OPTIONS = ["xnk", "mua hàng"];
 const SESSION_OPTIONS = ["all", "edit", "view"];
 type TabKey = "users" | "register" | "password";
@@ -44,6 +46,7 @@ export default function AccountManagementPage() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [editing, setEditing] = useState<ManagedUser | null>(null);
   const [editRole, setEditRole] = useState("xnk");
   const [editSession, setEditSession] = useState("view");
@@ -81,9 +84,7 @@ export default function AccountManagementPage() {
     );
   }, [query, users]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const displayedUsers = filteredUsers.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const { totalPages, safePage, items: displayedUsers, from, to } = paginateItems(filteredUsers, page, pageSize);
 
   const openEdit = async (selected: ManagedUser) => {
     setError("");
@@ -158,8 +159,12 @@ export default function AccountManagementPage() {
           query={query}
           page={safePage}
           totalPages={totalPages}
+          pageSize={pageSize}
+          from={from}
+          to={to}
           onQueryChange={(value) => { setQuery(value); setPage(1); }}
           onPageChange={setPage}
+          onPageSizeChange={(value) => { setPageSize(value); setPage(1); }}
           onReload={() => void loadUsers()}
           onEdit={(selected) => void openEdit(selected)}
         />
@@ -187,9 +192,9 @@ export default function AccountManagementPage() {
   );
 }
 
-function UserList({ users, total, loading, error, query, page, totalPages, onQueryChange, onPageChange, onReload, onEdit }: {
-  users: ManagedUser[]; total: number; loading: boolean; error: string; query: string; page: number; totalPages: number;
-  onQueryChange: (value: string) => void; onPageChange: (page: number) => void; onReload: () => void; onEdit: (user: ManagedUser) => void;
+function UserList({ users, total, loading, error, query, page, totalPages, pageSize, from, to, onQueryChange, onPageChange, onPageSizeChange, onReload, onEdit }: {
+  users: ManagedUser[]; total: number; loading: boolean; error: string; query: string; page: number; totalPages: number; pageSize: number; from: number; to: number;
+  onQueryChange: (value: string) => void; onPageChange: (page: number) => void; onPageSizeChange: (pageSize: number) => void; onReload: () => void; onEdit: (user: ManagedUser) => void;
 }) {
   const { t } = useLanguage();
   return (
@@ -214,7 +219,7 @@ function UserList({ users, total, loading, error, query, page, totalPages, onQue
           </table>
         </div>
       )}
-      {!loading && !error && totalPages > 1 && <Pagination current={page} total={totalPages} onChange={onPageChange} />}
+      {!loading && !error && users.length > 0 && <PaginationControls page={page} totalPages={totalPages} pageSize={pageSize} totalItems={total} from={from} to={to} onPageChange={onPageChange} onPageSizeChange={onPageSizeChange} />}
     </div>
   );
 }
@@ -279,4 +284,3 @@ function SubmitButton({ loading, text }: { loading: boolean; text: string }) { c
 function Badge({ children }: { children: React.ReactNode }) { return <span className="inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-400">{children}</span>; }
 function Spinner() { return <div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />; }
 function Feedback({ message }: { message: string; type: "error" }) { return <div className="m-4 rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">{message}</div>; }
-function Pagination({ current, total, onChange }: { current: number; total: number; onChange: (page: number) => void }) { return <div className="flex flex-wrap justify-center gap-1 border-t border-gray-100 px-4 py-3 dark:border-gray-800">{Array.from({ length: total }, (_, index) => index + 1).map((number) => <button key={number} type="button" onClick={() => onChange(number)} aria-current={number === current ? "page" : undefined} className={`h-9 min-w-9 rounded-lg border px-2 text-sm font-semibold ${number === current ? "border-brand-500 bg-brand-500 text-white" : "border-gray-200 text-gray-600 hover:bg-brand-50 dark:border-gray-700 dark:text-gray-300"}`}>{number}</button>)}</div>; }

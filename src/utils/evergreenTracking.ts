@@ -22,7 +22,7 @@ interface TrackingTab {
 interface EvergreenTrackingDependencies {
   requestLaunch: (containerNo: string) => Promise<EvergreenTrackingLaunchResponse>;
   showError: (message: string) => void;
-  openTab?: (url: string, target: string) => TrackingTab | null;
+  openTab?: (url: string, target: string, features?: string) => TrackingTab | null;
   documentRef?: Document;
   now?: () => number;
   onStarted?: () => void;
@@ -49,8 +49,8 @@ export async function submitEvergreenTracking(
 ): Promise<boolean> {
   const targetName = `evergreen_tracking_${(dependencies.now || Date.now)()}`;
   const openTab = dependencies.openTab
-    || ((url: string, target: string) => window.open(url, target));
-  const trackingTab = openTab("about:blank", targetName);
+    || ((url: string, target: string, features?: string) => window.open(url, target, features));
+  const trackingTab = openTab("about:blank", targetName, "popup=yes,width=1200,height=800,left=80,top=60,resizable=yes,scrollbars=yes");
 
   if (!trackingTab) {
     dependencies.showError("Trình duyệt đang chặn tab tracking. Vui lòng cho phép popup.");

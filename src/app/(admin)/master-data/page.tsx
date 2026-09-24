@@ -8,6 +8,8 @@ import { useLanguage } from "@/context/LanguageContext";
 import { recordActivity } from "@/services/activityLogApi";
 import { createDatabaseRow, getDatabaseRow, listDatabaseRows, updateDatabaseRow } from "@/services/postgresShipmentApi";
 import React, { useEffect, useMemo, useState } from "react";
+import { paginateItems } from "@/utils/pagination";
+import PaginationControls from "@/components/common/PaginationControls";
 
 type EntityKey = "suppliers" | "carriers" | "warehouses";
 type DataRow = Record<string, unknown>;
@@ -28,7 +30,7 @@ interface EntityConfig {
   fields: FieldConfig[];
 }
 
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 15;
 const ENTITY_CONFIG: Record<EntityKey, EntityConfig> = {
   suppliers: {
     titleKey: "suppliers",
@@ -86,6 +88,7 @@ export default function MasterDataPage() {
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [form, setForm] = useState<Record<string, string>>(() => emptyForm(ENTITY_CONFIG.suppliers));
   const [editingId, setEditingId] = useState<string | null>(null);
   const config = ENTITY_CONFIG[active];
@@ -118,9 +121,7 @@ export default function MasterDataPage() {
     if (!keyword) return rows;
     return rows.filter((row) => config.fields.some((field) => String(row[field.key] ?? "").toLocaleLowerCase("vi").includes(keyword)));
   }, [config.fields, query, rows]);
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const displayedRows = filteredRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const { totalPages, safePage, items: displayedRows, from, to } = paginateItems(filteredRows, page, pageSize);
 
   const beginCreate = () => {
     setEditingId(null);
@@ -197,7 +198,7 @@ export default function MasterDataPage() {
           {loading ? <div className="flex min-h-60 items-center justify-center"><span className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div> : (
             <div className="overflow-x-auto"><table className="w-full min-w-[680px]"><thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-900/50"><tr>{config.fields.map((field) => <th key={field.key} className="px-4 py-3">{t(field.labelKey)}</th>)}<th className="px-4 py-3 text-right">{t("actions")}</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{displayedRows.map((row, rowIndex) => <tr key={`${active}-${String(row[config.idField] ?? "row")}-${rowIndex}`} className="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">{config.fields.map((field) => <td key={field.key} className="max-w-56 truncate px-4 py-3 text-sm text-gray-700 dark:text-gray-300" title={String(row[field.key] ?? "")}>{String(row[field.key] ?? "—")}</td>)}<td className="px-4 py-3 text-right"><button type="button" onClick={() => void beginEdit(row)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50">{t("edit")}</button></td></tr>)}</tbody></table>{displayedRows.length === 0 && <p className="py-10 text-center text-sm text-gray-400">{t("noData")}</p>}</div>
           )}
-          {totalPages > 1 && <div className="flex flex-wrap justify-center gap-1 border-t border-gray-100 p-3 dark:border-gray-800">{Array.from({ length: totalPages }, (_, index) => index + 1).map((number) => <button key={number} type="button" onClick={() => setPage(number)} className={`h-9 min-w-9 rounded-lg border px-2 text-sm font-semibold ${number === safePage ? "border-brand-500 bg-brand-500 text-white" : "border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300"}`}>{number}</button>)}</div>}
+          {displayedRows.length > 0 && <PaginationControls page={safePage} totalPages={totalPages} pageSize={pageSize} totalItems={filteredRows.length} from={from} to={to} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} />}
         </div>
         <form onSubmit={save} className="h-fit rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
           <div className="mb-5 flex items-start justify-between gap-3"><div><h2 className="font-semibold text-gray-800 dark:text-white">{editingId ? t("editCatalog", { catalog: t(config.singularKey) }) : t("addCatalog", { catalog: t(config.singularKey) })}</h2><p className="mt-1 text-xs text-gray-400">{editingId ? editingId : t("enterInformationBelow")}</p></div>{editingId && <button type="button" onClick={beginCreate} className="text-xs font-semibold text-gray-500">{t("cancelEdit")}</button>}</div>
