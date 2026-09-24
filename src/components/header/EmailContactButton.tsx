@@ -12,12 +12,14 @@ import React, { useMemo, useState } from "react";
 /**
  * Nút email nổi góc phải dưới màn hình: mở popup soạn email (tiêu đề, nội dung),
  * chọn người nhận bằng checkbox tick từng nhà cung cấp hoặc tick tất cả,
- * gửi qua EmailJS (mỗi người nhận một email riêng).
+ * gửi qua Gmail SMTP (mỗi người nhận một email riêng).
  */
 export default function EmailContactButton() {
   const { t } = useLanguage();
   const { user } = useAuth();
   const { notify } = useSystemNotification();
+  const canSendEmail = user?.role.trim().toLowerCase() === "admin"
+    && user.session?.trim().toLowerCase() === "all";
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
@@ -115,6 +117,8 @@ export default function EmailContactButton() {
       setSending(false);
     }
   };
+
+  if (!canSendEmail) return null;
 
   return (
     <>
