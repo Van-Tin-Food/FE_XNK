@@ -5,6 +5,7 @@ import { useSidebar } from "@/context/SidebarContext";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar from "@/layout/AppSidebar";
 import Backdrop from "@/layout/Backdrop";
+import EmailContactButton from "@/components/header/EmailContactButton";
 import { useRouter } from "next/navigation";
 import React, { useEffect } from "react";
 
@@ -52,6 +53,8 @@ export default function AdminLayout({
         {/* Page Content */}
         <div className="mx-auto min-w-0 max-w-(--breakpoint-2xl) p-4 md:p-6">{children}</div>
       </div>
+      {/* Nút gửi email nổi góc phải dưới */}
+      <EmailContactButton />
     </div>
   );
 }
