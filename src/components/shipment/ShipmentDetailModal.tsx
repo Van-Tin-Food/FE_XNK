@@ -120,10 +120,9 @@ const RETURN_FIELD_GROUPS: Array<{
   {
     labelKey: "transportLocationsGroup",
     fields: [
+      { key: "idKho", labelKey: "warehouseCode" },
       { key: "noiDi", labelKey: "departureLocation" },
       { key: "noiTraContainer", labelKey: "containerReturnLocation" },
-      { key: "idKho", labelKey: "warehouseCode" },
-      { key: "tenKho", labelKey: "warehouseName" },
       { key: "ghiChu", labelKey: "note" },
     ],
   },
@@ -2850,13 +2849,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.02]">
                     <div className="mb-4 flex items-center gap-2">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-50 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">01</span>
-                      <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[0].labelKey)}</h4>
+                      <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[2].labelKey)}</h4>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {RETURN_FIELD_GROUPS[0].fields.map(({ key, labelKey }) => (
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {RETURN_FIELD_GROUPS[2].fields.map(({ key, labelKey }) => (
                         <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                           <span>{t(labelKey)}</span>
-                          <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "soHd" || key === "soCont"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                          <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                         </label>
                       ))}
                     </div>
@@ -2891,7 +2890,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                             ))}
                           </select>
                         ) : (
-                          <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "tenKho"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                          <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                         )}
                       </label>
                     ))}
@@ -2901,13 +2900,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.02]">
                   <div className="mb-4 flex items-center gap-2">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-50 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">03</span>
-                    <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[2].labelKey)}</h4>
+                    <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[0].labelKey)}</h4>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    {RETURN_FIELD_GROUPS[2].fields.map(({ key, labelKey }) => (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {RETURN_FIELD_GROUPS[0].fields.map(({ key, labelKey }) => (
                       <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                         <span>{t(labelKey)}</span>
-                        <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                        <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "soHd" || key === "soCont"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                       </label>
                     ))}
                   </div>

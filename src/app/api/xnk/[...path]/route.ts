@@ -136,16 +136,16 @@ async function forward(request: NextRequest, { params }: RouteContext) {
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("Content-Type", contentType);
 
-  // Tuỳ chọn: BE không kiểm tra, chỉ gửi khi có (vd. WAF rule).
-  const apiKey = process.env.BE_XNK_API_KEY?.trim();
-  if (apiKey) headers.set("X-Api-Key", apiKey);
-  // Tuỳ chọn: service token nếu domain BE nằm sau Cloudflare Access.
-  const cfId = process.env.CF_ACCESS_CLIENT_ID?.trim();
-  const cfSecret = process.env.CF_ACCESS_CLIENT_SECRET?.trim();
-  if (cfId && cfSecret) {
-    headers.set("CF-Access-Client-Id", cfId);
-    headers.set("CF-Access-Client-Secret", cfSecret);
-  }
+  // // Tuỳ chọn: BE không kiểm tra, chỉ gửi khi có (vd. WAF rule).
+  // const apiKey = process.env.BE_XNK_API_KEY?.trim();
+  // if (apiKey) headers.set("X-Api-Key", apiKey);
+  // // Tuỳ chọn: service token nếu domain BE nằm sau Cloudflare Access.
+  // const cfId = process.env.CF_ACCESS_CLIENT_ID?.trim();
+  // const cfSecret = process.env.CF_ACCESS_CLIENT_SECRET?.trim();
+  // if (cfId && cfSecret) {
+  //   headers.set("CF-Access-Client-Id", cfId);
+  //   headers.set("CF-Access-Client-Secret", cfSecret);
+  // }
 
   let body: ArrayBuffer | undefined;
   if (request.method !== "GET" && request.method !== "HEAD") {
