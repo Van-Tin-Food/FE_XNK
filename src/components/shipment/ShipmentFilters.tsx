@@ -2,13 +2,13 @@
 import React from "react";
 import type { ShipmentFilter, ShipmentFilterStatus } from "@/types/shipment";
 import { useLanguage } from "@/context/LanguageContext";
-import { DESTINATION_PORT_OPTIONS } from "@/config/shipmentCatalogOptions";
 
 interface ShipmentFiltersProps {
   filter: ShipmentFilter;
   onChange: (filter: ShipmentFilter) => void;
   supplierOptions: string[];
   carrierOptions: string[];
+  portOptions: string[];
 }
 
 const inputCls =
@@ -31,6 +31,7 @@ export default function ShipmentFilters({
   onChange,
   supplierOptions,
   carrierOptions,
+  portOptions,
 }: ShipmentFiltersProps) {
   const { t } = useLanguage();
   const statusOptions: { value: ShipmentFilterStatus | "all"; label: string }[] = [
@@ -142,7 +143,7 @@ export default function ShipmentFilters({
           <label className={labelCls}>{t("port")}</label>
           <select id="filter-port" value={filter.port || ""} onChange={handlePort} className={inputCls}>
             <option value="">{t("all")}</option>
-            {DESTINATION_PORT_OPTIONS.map(p => (
+            {portOptions.map(p => (
               <option key={p} value={p}>{p}</option>
             ))}
           </select>

@@ -13,6 +13,7 @@ import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { submitEvergreenTracking } from "@/utils/evergreenTracking";
+import { getMissingArchiveDetailFields, getMissingArchiveTransportFields } from "@/utils/shipmentArchiveValidation";
 import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
 import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCatalogOptions";
 import { toDocumentPreviewUrl } from "@/utils/documentPreview";
@@ -120,8 +121,8 @@ const RETURN_FIELD_GROUPS: Array<{
   {
     labelKey: "transportLocationsGroup",
     fields: [
-      { key: "idKho", labelKey: "warehouseCode" },
       { key: "noiDi", labelKey: "departureLocation" },
+      { key: "idKho", labelKey: "warehouseCode" },
       { key: "noiTraContainer", labelKey: "containerReturnLocation" },
       { key: "ghiChu", labelKey: "note" },
     ],
@@ -1804,6 +1805,23 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   const handleArchive = async () => {
     if (!canArchiveDocuments || !isDocumentsComplete || archived?.archived || isArchiveLoading) return;
+    // Bước 2: kiểm tra dữ liệu đầu vào của tab Chi tiết và tab Vận chuyển container
+    // trước khi cho gọi hàm Apps Script di chuyển hồ sơ.
+    const missingDetailFields = getMissingArchiveDetailFields(shipment.summaryFields);
+    const transportItems = returnItems.length > 0
+      ? returnItems
+      : returnForm ? [returnForm] : [];
+    const missingTransportFields = getMissingArchiveTransportFields(transportItems);
+    if (missingDetailFields.length > 0 || missingTransportFields.length > 0) {
+      const detailMessage = missingDetailFields.length > 0
+        ? `Chi tiết: ${missingDetailFields.join(", ")}`
+        : "";
+      const transportMessage = missingTransportFields.length > 0
+        ? `Vận chuyển container: ${missingTransportFields.join(" | ")}`
+        : "";
+      notify([detailMessage, transportMessage].filter(Boolean).join(" — "), "warning");
+      return;
+    }
     setIsArchiveLoading(true);
     try {
       await moveCompletedOrder(shipment.orderCode);
@@ -2865,6 +2883,21 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
                   <div className="flex items-center gap-3 border-b border-gray-100 bg-warning-50/80 px-4 py-3.5 dark:border-gray-800 dark:bg-warning-500/10 sm:px-5">
                     <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-warning-500 text-xs font-bold text-white shadow-sm">02</span>
+                    <h4 className="text-sm font-bold text-gray-900 dark:text-white">{t(RETURN_FIELD_GROUPS[0].labelKey)}</h4>
+                  </div>
+                  <div className="grid gap-3 p-4 sm:p-5 sm:grid-cols-2">
+                    {RETURN_FIELD_GROUPS[0].fields.map(({ key, labelKey }) => (
+                      <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                        <span>{t(labelKey)}</span>
+                        <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "soHd" || key === "soCont"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                      </label>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
+                  <div className="flex items-center gap-3 border-b border-gray-100 bg-purple-50/80 px-4 py-3.5 dark:border-gray-800 dark:bg-purple-500/10 sm:px-5">
+                    <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-purple-500 text-xs font-bold text-white shadow-sm">03</span>
                     <h4 className="text-sm font-bold text-gray-900 dark:text-white">{t(RETURN_FIELD_GROUPS[1].labelKey)}</h4>
                   </div>
                   <div className="grid gap-3 p-4 sm:p-5 md:grid-cols-4">
@@ -2886,27 +2919,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               <option value={returnForm.idKho}>{returnForm.idKho}</option>
                             )}
                             {warehouseOptions.map((warehouse) => (
-                              <option key={warehouse.id_kho} value={warehouse.id_kho}>{warehouse.id_kho}</option>
+                              <option key={warehouse.id_kho} value={warehouse.id_kho}>{warehouse.id_kho} — {warehouse.ten_kho}</option>
                             ))}
                           </select>
                         ) : (
                           <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                         )}
-                      </label>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
-                  <div className="flex items-center gap-3 border-b border-gray-100 bg-purple-50/80 px-4 py-3.5 dark:border-gray-800 dark:bg-purple-500/10 sm:px-5">
-                    <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-purple-500 text-xs font-bold text-white shadow-sm">03</span>
-                    <h4 className="text-sm font-bold text-gray-900 dark:text-white">{t(RETURN_FIELD_GROUPS[0].labelKey)}</h4>
-                  </div>
-                  <div className="grid gap-3 p-4 sm:p-5 sm:grid-cols-2">
-                    {RETURN_FIELD_GROUPS[0].fields.map(({ key, labelKey }) => (
-                      <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                        <span>{t(labelKey)}</span>
-                        <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "soHd" || key === "soCont"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                       </label>
                     ))}
                   </div>

@@ -18,6 +18,44 @@ function matchesFilterValue(source?: string, selected?: string): boolean {
   return String(source || "").trim().toLocaleLowerCase("vi") === selected.trim().toLocaleLowerCase("vi");
 }
 
+// HÀM NGUỒN DUY NHẤT cho lọc ETA: dùng chung cho cả table lẫn options của dropdown,
+// nên hai bên không bao giờ lệch nhau. So sánh theo ngày (bỏ giờ phút giây).
+function matchesEtaRange(shipment: Shipment, dateFrom?: string, dateTo?: string): boolean {
+  if (!dateFrom && !dateTo) return true;
+  if (!shipment.eta) return false;
+  const eta = new Date(shipment.eta);
+  if (Number.isNaN(eta.getTime())) return false;
+  const etaDay = new Date(eta.getFullYear(), eta.getMonth(), eta.getDate()).getTime();
+  if (dateFrom) {
+    const from = new Date(`${dateFrom}T00:00:00`);
+    if (Number.isNaN(from.getTime()) || from.getTime() > etaDay) return false;
+  }
+  if (dateTo) {
+    const to = new Date(`${dateTo}T00:00:00`);
+    if (Number.isNaN(to.getTime()) || to.getTime() < etaDay) return false;
+  }
+  return true;
+}
+
+function matchesStatusFilter(shipment: Shipment, filter: ShipmentFilter): boolean {
+  const selectedStatus = filter.status as ShipmentFilterStatus | "all" | undefined;
+  return !selectedStatus || selectedStatus === "all"
+    || (selectedStatus === "cancelled" ? shipment.status === "cancelled" : shipment.status === selectedStatus);
+}
+
+// Phạm vi chung của dashboard (chưa lọc trạng thái): ETA + tìm kiếm.
+// Dùng cho cả thẻ số liệu lẫn table, nên thẻ và table luôn cùng phạm vi.
+function matchesSearchAndEta(shipment: Shipment, filter: ShipmentFilter): boolean {
+  const query = (filter.search || "").toLowerCase().trim();
+  const searchOk = !query || [shipment.orderCode, shipment.shipName]
+    .some((value) => value?.toLowerCase().includes(query));
+  return searchOk && matchesEtaRange(shipment, filter.dateFrom, filter.dateTo);
+}
+
+function matchesBaseFilter(shipment: Shipment, filter: ShipmentFilter): boolean {
+  return matchesStatusFilter(shipment, filter) && matchesSearchAndEta(shipment, filter);
+}
+
 export default function ShipmentDashboard() {
   const { user } = useAuth();
   const { t } = useLanguage();
@@ -96,79 +134,46 @@ export default function ShipmentDashboard() {
   };
 
   // Apply filters
-  const filteredShipments = useMemo(() => {
-    return shipments.filter(s => {
-      // Status
-      const statusOk = (() => {
-        const selectedStatus = filter.status as ShipmentFilterStatus | "all" | undefined;
-        if (!selectedStatus || selectedStatus === "all") return true;
-        if (selectedStatus === "cancelled") return s.status === "cancelled";
-        return s.status === selectedStatus;
-      })();
+  const filteredShipments = useMemo(() => shipments.filter((s) => matchesBaseFilter(s, filter)
+    && matchesFilterValue(s.supplier, filter.supplier)
+    && matchesFilterValue(s.port, filter.port)
+    && matchesFilterValue(s.vessel, filter.vessel)
+  ), [shipments, filter]);
 
-      // Search: mã đơn + tên hàng
-      const q = (filter.search || "").toLowerCase().trim();
-      const searchOk = !q || [s.orderCode, s.shipName]
-        .some(v => v?.toLowerCase().includes(q));
-
-      // Supplier
-      const supplierOk = matchesFilterValue(s.supplier, filter.supplier);
-
-      // Port
-      const portOk = matchesFilterValue(s.port, filter.port);
-
-      // Vessel
-      const vesselOk = matchesFilterValue(s.vessel, filter.vessel);
-
-      // Date range
-      let dateOk = true;
-      if (filter.dateFrom || filter.dateTo) {
-        const val = s.eta;
-        if (!val) {
-          dateOk = false;
-        } else {
-          const d = new Date(val);
-          if (filter.dateFrom && new Date(filter.dateFrom) > d) dateOk = false;
-          if (filter.dateTo && new Date(filter.dateTo) < d) dateOk = false;
-        }
-      }
-
-      return statusOk && searchOk && supplierOk && portOk && vesselOk && dateOk;
-    });
-  }, [shipments, filter]);
-
-  // Build supplier/carrier choices from the rows eligible for the table,
-  // after ETA and the other independent filters, never from catalog tables.
-  const filterOptionShipments = useMemo(() => shipments.filter((shipment) => {
-    const selectedStatus = filter.status as ShipmentFilterStatus | "all" | undefined;
-    const statusOk = !selectedStatus || selectedStatus === "all"
-      || (selectedStatus === "cancelled" ? shipment.status === "cancelled" : shipment.status === selectedStatus);
-    const query = (filter.search || "").toLowerCase().trim();
-    const searchOk = !query || [shipment.orderCode, shipment.shipName]
-      .some((value) => value?.toLowerCase().includes(query));
-    const portOk = matchesFilterValue(shipment.port, filter.port);
-    let dateOk = true;
-    if (filter.dateFrom || filter.dateTo) {
-      if (!shipment.eta) {
-        dateOk = false;
-      } else {
-        const eta = new Date(shipment.eta);
-        dateOk = (!filter.dateFrom || new Date(filter.dateFrom) <= eta)
-          && (!filter.dateTo || new Date(filter.dateTo) >= eta);
-      }
-    }
-    return statusOk && searchOk && portOk && dateOk;
-  }), [filter, shipments]);
+  // Build filter dropdown choices from the rows eligible for the table:
+  // ETA lọc trước → các dòng trong table mới là nguồn sinh options của
+  // Nhà cung cấp / Hãng tàu / Cảng, không lấy từ toàn bộ DB.
+  // Mỗi dropdown loại trừ chính nó để còn chọn được giá trị khác.
+  const filterOptionShipments = useMemo(
+    () => shipments.filter((shipment) => matchesBaseFilter(shipment, filter)),
+    [filter, shipments],
+  );
 
   const supplierOptions = useMemo(() => [...new Set(
-    filterOptionShipments.map((shipment) => shipment.supplier.trim()).filter(Boolean),
-  )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments]);
+    filterOptionShipments
+      .filter((shipment) => !filter.supplier || matchesFilterValue(shipment.supplier, filter.supplier))
+      .map((shipment) => shipment.supplier.trim()).filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments, filter.supplier]);
 
   const carrierOptions = useMemo(() => [...new Set(
-    filterOptionShipments.map((shipment) => String(shipment.vessel || "").trim()).filter(Boolean),
-  )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments]);
+    filterOptionShipments
+      .filter((shipment) => !filter.vessel || matchesFilterValue(shipment.vessel, filter.vessel))
+      .map((shipment) => String(shipment.vessel || "").trim()).filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments, filter.vessel]);
 
-  const metrics = useMemo(() => computeMetrics(shipments), [shipments]);
+  const portOptions = useMemo(() => [...new Set(
+    filterOptionShipments
+      .filter((shipment) => !filter.port || matchesFilterValue(shipment.port, filter.port))
+      .map((shipment) => String(shipment.port || "").trim()).filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments, filter.port]);
+
+  // Thẻ số liệu đếm theo phạm vi table sau lọc ETA + tìm kiếm (chưa lọc trạng thái
+  // để mỗi thẻ vẫn đếm đúng trạng thái của nó, bấm vào mới lọc table).
+  const metricScopeShipments = useMemo(
+    () => shipments.filter((shipment) => matchesSearchAndEta(shipment, filter)),
+    [filter, shipments],
+  );
+  const metrics = useMemo(() => computeMetrics(metricScopeShipments), [metricScopeShipments]);
 
   const handleRowClick = (shipment: Shipment) => {
     setSelectedShipment(shipment);
@@ -246,6 +251,7 @@ export default function ShipmentDashboard() {
         onChange={handleFilterChange}
         supplierOptions={supplierOptions}
         carrierOptions={carrierOptions}
+        portOptions={portOptions}
       />
 
       {/* Table */}
