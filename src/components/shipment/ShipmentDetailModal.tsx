@@ -2846,12 +2846,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     />
                   </section>
 
-                  <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.02]">
-                    <div className="mb-4 flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-50 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">01</span>
-                      <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[2].labelKey)}</h4>
+                  <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
+                    <div className="flex items-center gap-3 border-b border-gray-100 bg-brand-50/80 px-4 py-3.5 dark:border-gray-800 dark:bg-brand-500/10 sm:px-5">
+                      <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-brand-500 text-xs font-bold text-white shadow-sm">01</span>
+                      <h4 className="text-sm font-bold text-gray-900 dark:text-white">{t(RETURN_FIELD_GROUPS[2].labelKey)}</h4>
                     </div>
-                    <div className="grid gap-3 md:grid-cols-3">
+                    <div className="grid gap-3 p-4 sm:p-5 md:grid-cols-3">
                       {RETURN_FIELD_GROUPS[2].fields.map(({ key, labelKey }) => (
                         <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                           <span>{t(labelKey)}</span>
@@ -2862,15 +2862,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   </section>
                 </div>
 
-                <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.02]">
-                  <div className="mb-4 flex items-center gap-2">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-50 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">02</span>
-                    <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[1].labelKey)}</h4>
+                <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
+                  <div className="flex items-center gap-3 border-b border-gray-100 bg-warning-50/80 px-4 py-3.5 dark:border-gray-800 dark:bg-warning-500/10 sm:px-5">
+                    <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-warning-500 text-xs font-bold text-white shadow-sm">02</span>
+                    <h4 className="text-sm font-bold text-gray-900 dark:text-white">{t(RETURN_FIELD_GROUPS[1].labelKey)}</h4>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-3 p-4 sm:p-5 md:grid-cols-4">
                     {RETURN_FIELD_GROUPS[1].fields.map(({ key, labelKey }) => (
-                      <label key={key} className="relative flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                        <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-brand-400" />{t(labelKey)}</span>
+                      <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                        <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-warning-400" />{t(labelKey)}</span>
                         {key === "idKho" ? (
                           <select
                             value={returnForm?.idKho || ""}
@@ -2886,7 +2886,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               <option value={returnForm.idKho}>{returnForm.idKho}</option>
                             )}
                             {warehouseOptions.map((warehouse) => (
-                              <option key={warehouse.id_kho} value={warehouse.id_kho}>{warehouse.id_kho} — {warehouse.ten_kho}</option>
+                              <option key={warehouse.id_kho} value={warehouse.id_kho}>{warehouse.id_kho}</option>
                             ))}
                           </select>
                         ) : (
@@ -2897,12 +2897,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.02]">
-                  <div className="mb-4 flex items-center gap-2">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-50 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">03</span>
-                    <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[0].labelKey)}</h4>
+                <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
+                  <div className="flex items-center gap-3 border-b border-gray-100 bg-purple-50/80 px-4 py-3.5 dark:border-gray-800 dark:bg-purple-500/10 sm:px-5">
+                    <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-purple-500 text-xs font-bold text-white shadow-sm">03</span>
+                    <h4 className="text-sm font-bold text-gray-900 dark:text-white">{t(RETURN_FIELD_GROUPS[0].labelKey)}</h4>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 p-4 sm:p-5 sm:grid-cols-2">
                     {RETURN_FIELD_GROUPS[0].fields.map(({ key, labelKey }) => (
                       <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                         <span>{t(labelKey)}</span>
