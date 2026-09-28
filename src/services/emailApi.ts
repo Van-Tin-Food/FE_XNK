@@ -10,7 +10,6 @@ export interface SendEmailPayload {
   subject?: string;
   message: string;
   recipients: EmailRecipient[];
-  senderName: string;
 }
 
 export interface SendEmailFailure {

@@ -97,7 +97,6 @@ export default function EmailContactButton() {
       const result = await sendContactEmail({
         message: message.trim(),
         recipients,
-        senderName: user?.name || user?.username || "",
       });
       const sentCount = result.sentCount ?? recipients.length;
       const failedCount = result.failedCount ?? 0;
