@@ -67,7 +67,6 @@ export default function EmailContactButton() {
   };
 
   const handleClose = () => {
-    if (sending) return;
     setIsModalOpen(false);
   };
 
@@ -98,6 +97,7 @@ export default function EmailContactButton() {
     setSending(true);
     setError("");
     setDrafts([]);
+    setIsModalOpen(false);
     try {
       const result = await sendContactEmail({
         subject: subject.trim(),
@@ -110,17 +110,13 @@ export default function EmailContactButton() {
       if (result.drafts?.length) {
         setDrafts(result.drafts);
         notify(`Đã tạo ${result.drafts.length} email nháp do gửi chưa thành công`, "warning");
-        setError(result.message);
       } else if (failedCount > 0) {
         notify(t("emailPartialSuccess", { sent: sentCount, failed: failedCount }), "warning");
-        setError(result.message || t("emailPartialSuccess", { sent: sentCount, failed: failedCount }));
       } else {
-        setIsModalOpen(false);
         notify(t("emailSentSuccessCount", { count: sentCount }), "success");
       }
     } catch (sendError) {
       const text = sendError instanceof Error ? sendError.message : t("emailSendError");
-      setError(text);
       notify(text, "error");
     } finally {
       setSending(false);
@@ -135,18 +131,24 @@ export default function EmailContactButton() {
       <button
         type="button"
         onClick={handleOpen}
+        disabled={sending}
         title={t("emailContactTitle")}
         aria-label={t("emailContactTitle")}
-        className="fixed bottom-6 right-6 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-brand-500 text-white shadow-theme-lg transition-all hover:scale-105 hover:bg-brand-600 active:scale-95"
+        aria-busy={sending}
+        className="fixed bottom-6 right-6 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-brand-500 text-white shadow-theme-lg transition-all hover:scale-105 hover:bg-brand-600 active:scale-95 disabled:cursor-wait disabled:opacity-80"
       >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <path
-            fillRule="evenodd"
-            clipRule="evenodd"
-            d="M3.5 5.5C2.67157 5.5 2 6.17157 2 7V17C2 17.8284 2.67157 18.5 3.5 18.5H20.5C21.3284 18.5 22 17.8284 22 17V7C22 6.17157 21.3284 5.5 20.5 5.5H3.5ZM4.35352 7.5H19.6465L12 12.7433L4.35352 7.5ZM20 9.58936V16.5H4V9.58936L11.4801 14.7237C11.7982 14.9416 12.2182 14.9416 12.5363 14.7237L20 9.58936Z"
-            fill="currentColor"
-          />
-        </svg>
+        {sending ? (
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+        ) : (
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path
+              fillRule="evenodd"
+              clipRule="evenodd"
+              d="M3.5 5.5C2.67157 5.5 2 6.17157 2 7V17C2 17.8284 2.67157 18.5 3.5 18.5H20.5C21.3284 18.5 22 17.8284 22 17V7C22 6.17157 21.3284 5.5 20.5 5.5H3.5ZM4.35352 7.5H19.6465L12 12.7433L4.35352 7.5ZM20 9.58936V16.5H4V9.58936L11.4803 14.7237C11.7986 14.9418 12.2182 14.9418 12.5365 14.7237L20 9.58936Z"
+              fill="currentColor"
+            />
+          </svg>
+        )}
       </button>
 
       <Modal
