@@ -1,4 +1,5 @@
 import { getStoredUser } from "@/services/authApi";
+import { backendApiUrl } from "@/services/backendApiUrl";
 
 export interface EmailRecipient {
   email: string;
@@ -17,18 +18,28 @@ export interface SendEmailFailure {
   error: string;
 }
 
+export interface EmailDraft {
+  email: string;
+  name: string;
+  subject: string;
+  message: string;
+  error: string;
+  status: "draft";
+}
+
 export interface SendEmailResult {
   success: boolean;
   message: string;
   sentCount?: number;
   failedCount?: number;
   failures?: SendEmailFailure[];
+  drafts?: EmailDraft[];
 }
 
-/** Gửi email qua API route /api/email/send (server-side EmailJS, key nằm trong env). */
+/** Gửi email qua BE SMTP thông qua API route của Next. */
 export async function sendContactEmail(payload: SendEmailPayload): Promise<SendEmailResult> {
   const token = getStoredUser()?.token?.trim();
-  const response = await fetch("/api/email/send", {
+  const response = await fetch(backendApiUrl("/api/email/send"), {
     method: "POST",
     cache: "no-store",
     headers: {
@@ -39,7 +50,7 @@ export async function sendContactEmail(payload: SendEmailPayload): Promise<SendE
   });
 
   const result = (await response.json().catch(() => null)) as (SendEmailResult & { message?: string }) | null;
-  if (!response.ok || !result || result.success === false) {
+  if (!response.ok && !result?.drafts?.length || !result) {
     throw new Error(result?.message || "Không thể gửi email. Vui lòng thử lại sau.");
   }
   return result;
