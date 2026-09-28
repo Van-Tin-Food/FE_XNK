@@ -7,7 +7,7 @@ export interface EmailRecipient {
 }
 
 export interface SendEmailPayload {
-  subject: string;
+  subject?: string;
   message: string;
   recipients: EmailRecipient[];
   senderName: string;
@@ -33,7 +33,6 @@ export interface SendEmailResult {
   sentCount?: number;
   failedCount?: number;
   failures?: SendEmailFailure[];
-  drafts?: EmailDraft[];
 }
 
 /** Gửi email qua BE SMTP thông qua API route của Next. */
@@ -50,7 +49,7 @@ export async function sendContactEmail(payload: SendEmailPayload): Promise<SendE
   });
 
   const result = (await response.json().catch(() => null)) as (SendEmailResult & { message?: string }) | null;
-  if (!response.ok && !result?.drafts?.length || !result) {
+  if (!response.ok || !result) {
     throw new Error(result?.message || "Không thể gửi email. Vui lòng thử lại sau.");
   }
   return result;

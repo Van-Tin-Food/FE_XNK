@@ -1,7 +1,7 @@
 "use client";
 
 import { Modal } from "@/components/ui/modal";
-import { sendContactEmail, type EmailDraft } from "@/services/emailApi";
+import { sendContactEmail } from "@/services/emailApi";
 import { listDatabaseRows, databaseEndpoints } from "@/services/postgresShipmentApi";
 import type { SupplierRecord } from "@/types/postgresShipment";
 import { useAuth } from "@/context/AuthContext";
@@ -9,7 +9,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import React, { useMemo, useState } from "react";
 
-const INQUIRY_SUBJECT = "Vạn Tín Food - Pork inquiry for HCMC, Vietnam";
+const INQUIRY_SUBJECT_TEMPLATE = "VTF/ {Tên nhà cung cấp} - Inquiry on pork items for CFR Vietnam";
 
 /**
  * Nút email nổi góc phải dưới màn hình: mở popup soạn email (tiêu đề, nội dung),
@@ -27,11 +27,9 @@ export default function EmailContactButton() {
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [subject, setSubject] = useState(INQUIRY_SUBJECT);
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [drafts, setDrafts] = useState<EmailDraft[]>([]);
 
   const suppliersWithAddress = useMemo(
     () => suppliers.filter((item) => String(item.email || "").trim()),
@@ -58,11 +56,9 @@ export default function EmailContactButton() {
 
   const handleOpen = () => {
     setIsModalOpen(true);
-    setSubject(INQUIRY_SUBJECT);
     setMessage("");
     setSelectedIds([]);
     setError("");
-    setDrafts([]);
     loadSuppliers();
   };
 
@@ -84,7 +80,7 @@ export default function EmailContactButton() {
   };
 
   const selectedSuppliers = suppliers.filter((item) => selectedIds.includes(item.id_ncc));
-  const canSubmit = Boolean(subject.trim() && message.trim() && selectedSuppliers.length > 0) && !sending;
+  const canSubmit = Boolean(message.trim() && selectedSuppliers.length > 0) && !sending;
 
   const handleSubmit = async () => {
     const recipients = selectedSuppliers
@@ -96,21 +92,16 @@ export default function EmailContactButton() {
     }
     setSending(true);
     setError("");
-    setDrafts([]);
     setIsModalOpen(false);
     try {
       const result = await sendContactEmail({
-        subject: subject.trim(),
         message: message.trim(),
         recipients,
         senderName: user?.name || user?.username || "",
       });
       const sentCount = result.sentCount ?? recipients.length;
       const failedCount = result.failedCount ?? 0;
-      if (result.drafts?.length) {
-        setDrafts(result.drafts);
-        notify(`Đã tạo ${result.drafts.length} email nháp do gửi chưa thành công`, "warning");
-      } else if (failedCount > 0) {
+      if (failedCount > 0) {
         notify(t("emailPartialSuccess", { sent: sentCount, failed: failedCount }), "warning");
       } else {
         notify(t("emailSentSuccessCount", { count: sentCount }), "success");
@@ -166,19 +157,6 @@ export default function EmailContactButton() {
           {error && (
             <div className="mb-4 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
               {error}
-            </div>
-          )}
-
-          {drafts.length > 0 && (
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-              <p className="font-medium">Email nháp chưa gửi được:</p>
-              <ul className="mt-1 list-disc space-y-1 pl-5">
-                {drafts.map((draft) => (
-                  <li key={`${draft.email}-${draft.error}`}>
-                    {draft.name ? `${draft.name} (${draft.email})` : draft.email}: {draft.error}
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
 
@@ -255,12 +233,9 @@ export default function EmailContactButton() {
           <label className="mb-1.5 mt-5 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {t("emailSubjectLabel")}
           </label>
-          <input
-            value={subject}
-            onChange={(event) => { setSubject(event.target.value); setError(""); }}
-            disabled={sending}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30"
-          />
+          <div className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 dark:border-gray-700 dark:bg-white/[0.03] dark:text-gray-300">
+            {INQUIRY_SUBJECT_TEMPLATE}
+          </div>
 
           <label className="mb-1.5 mt-4 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {t("emailMessageLabel")} <span className="text-error-500">*</span>

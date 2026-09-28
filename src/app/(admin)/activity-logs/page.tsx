@@ -3,7 +3,7 @@
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
-import { getActivityLogs, type ActivityLog } from "@/services/activityLogApi";
+import { getActivityLogs, getEmailActivityLogs, type ActivityLog } from "@/services/activityLogApi";
 import { activityLogSummary } from "@/utils/activityLogSummary";
 import { paginateItems } from "@/utils/pagination";
 import PaginationControls from "@/components/common/PaginationControls";
@@ -25,6 +25,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   REGISTER_USER: "logRegisterUser",
   UPDATE_USER_PERMISSION: "logUpdatePermission",
   UPDATE_USER_PASSWORD: "logResetPassword",
+  SEND_EMAIL: "logSendEmail",
 };
 
 function actionLabel(action: string, t: (key: string) => string): string {
@@ -50,6 +51,8 @@ export default function ActivityLogsPage() {
   const router = useRouter();
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
   const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [activeTab, setActiveTab] = useState<"activity" | "email">("activity");
+  const [emailStatus, setEmailStatus] = useState<"all" | "sent" | "not sent">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -60,7 +63,10 @@ export default function ActivityLogsPage() {
     if (!canViewLogs) return;
     setLoading(true);
     setError("");
-    try { setLogs(await getActivityLogs()); }
+    try {
+      const [activityLogs, emailLogs] = await Promise.all([getActivityLogs(), getEmailActivityLogs()]);
+      setLogs([...activityLogs, ...emailLogs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)));
+    }
     catch (loadError) { setError(loadError instanceof Error ? loadError.message : t("activityLogLoadError")); }
     finally { setLoading(false); }
   }, [canViewLogs, t]);
@@ -72,12 +78,27 @@ export default function ActivityLogsPage() {
 
   const filteredLogs = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("vi");
-    if (!keyword) return logs;
-    return logs.filter((log) => [actor(log), log.role, log.session, log.action, actionLabel(log.action, t), activityLogSummary(log.action, log.detail, log.location, language), log.location, log.detail]
-      .join(" ").toLocaleLowerCase("vi").includes(keyword));
+    return logs.filter((log) => log.location !== "Email" && (!keyword || [actor(log), log.role, log.session, log.action, actionLabel(log.action, t), activityLogSummary(log.action, log.detail, log.location, language), log.location, log.detail]
+      .join(" ").toLocaleLowerCase("vi").includes(keyword)));
   }, [logs, query, t, language]);
 
-  const { totalPages, safePage: currentPage, items: displayedLogs, from, to } = paginateItems(filteredLogs, page, pageSize);
+  const filteredEmailLogs = useMemo(() => {
+    const keyword = query.trim().toLocaleLowerCase("vi");
+    return logs.filter((log) => {
+      const notSent = log.detail.toLocaleLowerCase("vi").includes("not sent");
+      const matchesStatus = emailStatus === "all" || (emailStatus === "not sent" ? notSent : !notSent);
+      return log.location === "Email" && matchesStatus && (!keyword || [actor(log), log.detail, log.location].join(" ").toLocaleLowerCase("vi").includes(keyword));
+    });
+  }, [logs, query, emailStatus]);
+
+  const visibleLogs = activeTab === "activity" ? filteredLogs : filteredEmailLogs;
+  const { totalPages, safePage: currentPage, items: displayedLogs, from, to } = paginateItems(visibleLogs, page, pageSize);
+
+  const switchTab = (nextTab: "activity" | "email") => {
+    setActiveTab(nextTab);
+    setQuery("");
+    setPage(1);
+  };
 
   if (!canViewLogs) return <div className="flex min-h-[50vh] items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>;
 
@@ -90,20 +111,27 @@ export default function ActivityLogsPage() {
         </div>
         <button type="button" onClick={() => void loadLogs()} disabled={loading} className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">{loading ? t("loading") : t("refreshData")}</button>
       </div>
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
+        <button type="button" onClick={() => switchTab("activity")} className={`border-b-2 px-4 py-3 text-sm font-semibold ${activeTab === "activity" ? "border-brand-500 text-brand-600" : "border-transparent text-gray-500"}`}>{t("activityLogs")}</button>
+        <button type="button" onClick={() => switchTab("email")} className={`border-b-2 px-4 py-3 text-sm font-semibold ${activeTab === "email" ? "border-brand-500 text-brand-600" : "border-transparent text-gray-500"}`}>{t("emailLogs")}</button>
+      </div>
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-semibold text-gray-800 dark:text-white/90">{t("operationHistory")}</h2>
-            <p className="mt-0.5 text-xs text-gray-500">{t("recordCount", { count: filteredLogs.length })}</p>
+            <h2 className="font-semibold text-gray-800 dark:text-white/90">{activeTab === "activity" ? t("operationHistory") : t("emailHistory")}</h2>
+            <p className="mt-0.5 text-xs text-gray-500">{t("recordCount", { count: visibleLogs.length })}</p>
           </div>
-          <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("searchActivityLogs")} aria-label={t("searchActivityLogs")} className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:max-w-sm" />
+          <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={activeTab === "activity" ? t("searchActivityLogs") : t("searchEmailLogs")} aria-label={activeTab === "activity" ? t("searchActivityLogs") : t("searchEmailLogs")} className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:max-w-sm" />
+          </div>
+          {activeTab === "email" && <div className="flex flex-wrap gap-2">{(["all", "sent", "not sent"] as const).map((status) => <button key={status} type="button" onClick={() => { setEmailStatus(status); setPage(1); }} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${emailStatus === status ? "border-brand-500 bg-brand-50 text-brand-700" : "border-gray-200 text-gray-500 dark:border-gray-700"}`}>{status === "all" ? t("allStatuses") : status === "sent" ? t("emailSentStatus") : t("emailNotSentStatus")}</button>)}</div>}
         </div>
         {error ? (
           <div className="m-4 rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">{error}</div>
         ) : loading ? (
           <div className="flex min-h-52 items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>
         ) : displayedLogs.length === 0 ? (
-          <div className="flex min-h-52 items-center justify-center px-4 text-center text-sm text-gray-500">{t("noActivityLogs")}</div>
+          <div className="flex min-h-52 items-center justify-center px-4 text-center text-sm text-gray-500">{activeTab === "email" ? t("noEmailLogs") : t("noActivityLogs")}</div>
         ) : (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {displayedLogs.map((log, index) => {

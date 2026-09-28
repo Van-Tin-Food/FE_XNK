@@ -24,6 +24,21 @@ export interface ActivityLog {
   createdAt: string;
 }
 
+export type EmailDeliveryStatus = "sent" | "not sent";
+
+export interface EmailActivityLog {
+  id: number | string;
+  userId?: number;
+  userName?: string;
+  username?: string;
+  sentAt: string;
+  subject: string;
+  supplierName: string;
+  supplierEmail: string;
+  status: EmailDeliveryStatus;
+  error?: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -89,6 +104,81 @@ export async function getActivityLogs(): Promise<ActivityLog[]> {
     const timeB = Date.parse(b.createdAt);
     return (Number.isFinite(timeB) ? timeB : 0) - (Number.isFinite(timeA) ? timeA : 0);
   });
+}
+
+export async function getEmailActivityLogs(): Promise<ActivityLog[]> {
+  const apiPath = "/api/email/logs?limit=500&offset=0";
+  const token = getStoredUser()?.token?.trim();
+  let response: Response;
+  try {
+    response = await fetch(backendApiUrl(apiPath), {
+      method: "GET",
+      headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw createNetworkApiError("Nhật ký email", "GET", apiPath, error);
+    throw error;
+  }
+  const { data: result, nonJsonPreview } = await parseApiResponse(response);
+  if (!response.ok) throw createHttpApiError("Nhật ký email", "GET", apiPath, response, result, nonJsonPreview);
+  if (result === null) throw createInvalidResponseError("Nhật ký email", "GET", apiPath, nonJsonPreview);
+
+  return findLogRows(result).map((row, index) => {
+    if (!isRecord(row)) return null;
+    const supplier = String(row.supplier_name ?? "").trim() || "Nhà cung cấp";
+    const email = String(row.supplier_email ?? "").trim();
+    const subject = String(row.subject ?? "").trim();
+    const status = String(row.status ?? "").trim().toLowerCase();
+    const error = String(row.error ?? "").trim();
+    const statusText = status === "sent" ? "Đã gửi" : `not sent${error ? `: ${error}` : ""}`;
+    return normalizeLog({
+      ...row,
+      id: `email-${String(row.id ?? index)}`,
+      action: "SEND_EMAIL",
+      location: "Email",
+      detail: `${supplier}${email ? ` <${email}>` : ""} — ${subject} — ${statusText}`,
+      created_at: row.sent_at,
+    }, index);
+  }).filter((log): log is ActivityLog => log !== null);
+}
+
+export async function getEmailDeliveryLogs(): Promise<EmailActivityLog[]> {
+  const apiPath = "/api/email/logs?limit=500&offset=0";
+  const token = getStoredUser()?.token?.trim();
+  let response: Response;
+  try {
+    response = await fetch(backendApiUrl(apiPath), {
+      method: "GET",
+      headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw createNetworkApiError("Email logs", "GET", apiPath, error);
+    throw error;
+  }
+
+  const { data: result, nonJsonPreview } = await parseApiResponse(response);
+  if (!response.ok) throw createHttpApiError("Email logs", "GET", apiPath, response, result, nonJsonPreview);
+  if (result === null) throw createInvalidResponseError("Email logs", "GET", apiPath, nonJsonPreview);
+
+  return findLogRows(result).map((row, index): EmailActivityLog | null => {
+    if (!isRecord(row)) return null;
+    const rawStatus = String(row.status ?? "not sent").trim().toLowerCase();
+    const userId = Number(row.user_id);
+    return {
+      id: (row.id as number | string | undefined) ?? `email-${index}`,
+      userId: Number.isInteger(userId) && userId > 0 ? userId : undefined,
+      userName: String(row.name ?? "").trim() || undefined,
+      username: String(row.username ?? "").trim() || undefined,
+      sentAt: String(row.sent_at ?? "").trim(),
+      subject: String(row.subject ?? "").trim(),
+      supplierName: String(row.supplier_name ?? "").trim(),
+      supplierEmail: String(row.supplier_email ?? "").trim(),
+      status: rawStatus === "sent" ? "sent" : "not sent",
+      error: String(row.error ?? "").trim() || undefined,
+    };
+  }).filter((log): log is EmailActivityLog => log !== null);
 }
 
 export async function createActivityLog(user: AuthUser | null, payload: ActivityLogPayload): Promise<void> {
