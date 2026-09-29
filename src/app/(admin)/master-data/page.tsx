@@ -10,6 +10,7 @@ import { createDatabaseRow, getDatabaseRow, listDatabaseRows, updateDatabaseRow 
 import React, { useEffect, useMemo, useState } from "react";
 import { paginateItems } from "@/utils/pagination";
 import PaginationControls from "@/components/common/PaginationControls";
+import { useSearchParams } from "next/navigation";
 
 type EntityKey = "suppliers" | "carriers" | "warehouses";
 type DataRow = Record<string, unknown>;
@@ -81,9 +82,13 @@ export default function MasterDataPage() {
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
   const { t } = useLanguage();
+  const searchParams = useSearchParams();
   const canView = canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData");
   const canManage = canPerformShipmentAction(user, "manageMasterData");
-  const [active, setActive] = useState<EntityKey>("suppliers");
+  const [active, setActive] = useState<EntityKey>(() => {
+    const requested = searchParams.get("catalog") as EntityKey | null;
+    return requested && requested in ENTITY_CONFIG ? requested : "suppliers";
+  });
   const [rows, setRows] = useState<DataRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -93,6 +98,11 @@ export default function MasterDataPage() {
   const [form, setForm] = useState<Record<string, string>>(() => emptyForm(ENTITY_CONFIG.suppliers));
   const [editingId, setEditingId] = useState<string | null>(null);
   const config = ENTITY_CONFIG[active];
+
+  useEffect(() => {
+    const requested = searchParams.get("catalog") as EntityKey | null;
+    if (requested && requested in ENTITY_CONFIG && requested !== active) setActive(requested);
+  }, [active, searchParams]);
 
   const loadRows = async () => {
     setLoading(true);

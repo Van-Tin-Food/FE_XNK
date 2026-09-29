@@ -8,6 +8,7 @@ import { activityLogSummary } from "@/utils/activityLogSummary";
 import { paginateItems } from "@/utils/pagination";
 import PaginationControls from "@/components/common/PaginationControls";
 import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const DEFAULT_PAGE_SIZE = 15;
@@ -58,10 +59,16 @@ export default function ActivityLogsPage() {
   const { user } = useAuth();
   const { language, t } = useLanguage();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [emailLogs, setEmailLogs] = useState<EmailActivityLog[]>([]);
-  const [activeTab, setActiveTab] = useState<"activity" | "email">("activity");
+  const [activeTab, setActiveTab] = useState<"activity" | "email">(() => searchParams.get("tab") === "email" ? "email" : "activity");
+  const [activityAction, setActivityAction] = useState("all");
+  const [activityRole, setActivityRole] = useState("all");
+  const [activitySession, setActivitySession] = useState("all");
+  const [activityDateFrom, setActivityDateFrom] = useState("");
+  const [activityDateTo, setActivityDateTo] = useState("");
   const [emailStatus, setEmailStatus] = useState<"all" | "sent" | "not sent">("all");
   const [supplierFilter, setSupplierFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -92,9 +99,18 @@ export default function ActivityLogsPage() {
 
   const filteredLogs = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("vi");
-    return logs.filter((log) => !keyword || [actor(log), log.role, log.session, log.action, actionLabel(log.action, t), activityLogSummary(log.action, log.detail, log.location, language), log.location, log.detail]
-      .join(" ").toLocaleLowerCase("vi").includes(keyword));
-  }, [logs, query, t, language]);
+    return logs.filter((log) => {
+      const createdDate = localDate(log.createdAt);
+      const matchesAction = activityAction === "all" || log.action.trim().toUpperCase() === activityAction;
+      const matchesRole = activityRole === "all" || log.role === activityRole;
+      const matchesSession = activitySession === "all" || log.session === activitySession;
+      const matchesFrom = !activityDateFrom || createdDate >= activityDateFrom;
+      const matchesTo = !activityDateTo || createdDate <= activityDateTo;
+      const matchesQuery = !keyword || [actor(log), log.role, log.session, log.action, actionLabel(log.action, t), activityLogSummary(log.action, log.detail, log.location, language), log.location, log.detail]
+        .join(" ").toLocaleLowerCase("vi").includes(keyword);
+      return matchesAction && matchesRole && matchesSession && matchesFrom && matchesTo && matchesQuery;
+    });
+  }, [activityAction, activityDateFrom, activityDateTo, activityRole, activitySession, logs, query, t, language]);
 
   const filteredEmailLogs = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("vi");
@@ -110,6 +126,9 @@ export default function ActivityLogsPage() {
   }, [emailLogs, query, emailStatus, supplierFilter, dateFrom, dateTo]);
 
   const suppliers = useMemo(() => Array.from(new Set(emailLogs.map((log) => log.supplierName).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [emailLogs]);
+  const activityActions = useMemo(() => Array.from(new Set(logs.map((log) => log.action.trim().toUpperCase()).filter(Boolean))).sort(), [logs]);
+  const activityRoles = useMemo(() => Array.from(new Set(logs.map((log) => log.role).filter(Boolean))).sort(), [logs]);
+  const activitySessions = useMemo(() => Array.from(new Set(logs.map((log) => log.session).filter(Boolean))).sort(), [logs]);
   const activityPage = paginateItems(filteredLogs, page, pageSize);
   const emailDisplayLogs = filteredEmailLogs.map((log, index): ActivityLog => ({
     id: `email-${String(log.id)}-${index}`,
@@ -144,6 +163,21 @@ export default function ActivityLogsPage() {
     setDateTo("");
     setPage(1);
   };
+
+  const clearActivityFilters = () => {
+    setQuery("");
+    setActivityAction("all");
+    setActivityRole("all");
+    setActivitySession("all");
+    setActivityDateFrom("");
+    setActivityDateTo("");
+    setPage(1);
+  };
+
+  useEffect(() => {
+    const nextTab = searchParams.get("tab") === "email" ? "email" : "activity";
+    setActiveTab((current) => current === nextTab ? current : nextTab);
+  }, [searchParams]);
 
   if (!canViewLogs) return <div className="flex min-h-[50vh] items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>;
 
@@ -180,6 +214,23 @@ export default function ActivityLogsPage() {
               <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} aria-label={t("emailDateTo")} title={t("emailDateTo")} className="h-10 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
               <button type="button" onClick={clearEmailFilters} className="h-10 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("clearFilters")}</button>
             </div>
+          </div>}
+          {activeTab === "activity" && <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto]">
+            <select value={activityAction} onChange={(event) => { setActivityAction(event.target.value); setPage(1); }} aria-label={t("activityActionFilter")} className="h-10 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <option value="all">{t("allActions")}</option>
+              {activityActions.map((action) => <option key={action} value={action}>{actionLabel(action, t)}</option>)}
+            </select>
+            <select value={activityRole} onChange={(event) => { setActivityRole(event.target.value); setPage(1); }} aria-label={t("activityRoleFilter")} className="h-10 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <option value="all">{t("allRoles")}</option>
+              {activityRoles.map((role) => <option key={role} value={role}>{role}</option>)}
+            </select>
+            <select value={activitySession} onChange={(event) => { setActivitySession(event.target.value); setPage(1); }} aria-label={t("activitySessionFilter")} className="h-10 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <option value="all">{t("allSessions")}</option>
+              {activitySessions.map((session) => <option key={session} value={session}>{session}</option>)}
+            </select>
+            <input type="date" value={activityDateFrom} onChange={(event) => { setActivityDateFrom(event.target.value); setPage(1); }} aria-label={t("dateFrom")} title={t("dateFrom")} className="h-10 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+            <input type="date" value={activityDateTo} onChange={(event) => { setActivityDateTo(event.target.value); setPage(1); }} aria-label={t("dateTo")} title={t("dateTo")} className="h-10 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+            <button type="button" onClick={clearActivityFilters} className="h-10 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("clearFilters")}</button>
           </div>}
         </div>
         {error ? (

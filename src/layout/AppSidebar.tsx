@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import React, { useState } from "react";
 import { canPerformShipmentAction } from "../config/shipmentActionPermissions";
 import { useAuth } from "../context/AuthContext";
@@ -9,12 +9,17 @@ import { useSidebar } from "../context/SidebarContext";
 import { GridIcon, HorizontaLDots } from "../icons/index";
 import { useLanguage } from "../context/LanguageContext";
 
+const MARKET_RESEARCH_HREF = "#";
+
 const AppSidebar: React.FC = () => {
   const { user, logout } = useAuth();
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const showText = isExpanded || isHovered || isMobileOpen;
   const [supportOpen, setSupportOpen] = useState(pathname === "/email");
+  const [catalogOpen, setCatalogOpen] = useState(pathname === "/master-data");
+  const [logsOpen, setLogsOpen] = useState(pathname === "/activity-logs");
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
   const canViewEmail = canPerformShipmentAction(user, "viewEmailLogs") || canPerformShipmentAction(user, "sendEmail");
   const canManageUsers = canPerformShipmentAction(user, "viewUsers") || canPerformShipmentAction(user, "manageUsers");
@@ -93,26 +98,28 @@ const AppSidebar: React.FC = () => {
               {showText && <span className="menu-item-text">{t("userGuide")}</span>}
             </Link>
           </li> */}
-          {canViewLogs && (
+           {canManageMasterData && (
             <li>
-              <Link
-                href="/activity-logs"
-                className={`menu-item group ${
-                  pathname === "/activity-logs" ? "menu-item-active" : "menu-item-inactive"
-                } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
-              >
-                <span className={pathname === "/activity-logs" ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+              <button type="button" onClick={() => setCatalogOpen((current) => !current)} className={`menu-item group w-full ${catalogOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={catalogOpen}>
+                <span className={catalogOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="8" y1="13" x2="16" y2="13" />
-                    <line x1="8" y1="17" x2="16" y2="17" />
+                    <ellipse cx="12" cy="5" rx="8" ry="3" />
+                    <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5" />
+                    <path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
                   </svg>
                 </span>
-                {showText && <span className="menu-item-text">{t("activityLogs")}</span>}
-              </Link>
+                {showText && <span className="menu-item-text">{t("masterDataManagement")}</span>}
+                {showText && <span className="ml-auto text-xs">{catalogOpen ? "−" : "+"}</span>}
+              </button>
+              {catalogOpen && showText && <ul className="mt-1 space-y-1 pl-11">
+                <li><Link href="/master-data?catalog=suppliers" className={`menu-dropdown-item ${pathname === "/master-data" && searchParams.get("catalog") !== "carriers" && searchParams.get("catalog") !== "warehouses" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("suppliers")}</Link></li>
+                <li><Link href="/master-data?catalog=carriers" className={`menu-dropdown-item ${searchParams.get("catalog") === "carriers" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("carriers")}</Link></li>
+                <li><Link href="/master-data?catalog=warehouses" className={`menu-dropdown-item ${searchParams.get("catalog") === "warehouses" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("warehouses")}</Link></li>
+              </ul>}
             </li>
           )}
+
+
           {canManageUsers && (
             <li>
               <Link
@@ -132,33 +139,44 @@ const AppSidebar: React.FC = () => {
               </Link>
             </li>
           )}
-          {canManageMasterData && (
+          {canViewLogs && (
             <li>
-              <Link
-                href="/master-data"
-                className={`menu-item group ${pathname === "/master-data" ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
-              >
-                <span className={pathname === "/master-data" ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+              <button type="button" onClick={() => setLogsOpen((current) => !current)} className={`menu-item group w-full ${logsOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={logsOpen}>
+                <span className={logsOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <ellipse cx="12" cy="5" rx="8" ry="3" />
-                    <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5" />
-                    <path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="8" y1="13" x2="16" y2="13" />
+                    <line x1="8" y1="17" x2="16" y2="17" />
                   </svg>
                 </span>
-                {showText && <span className="menu-item-text">{t("masterDataManagement")}</span>}
-              </Link>
+                {showText && <span className="menu-item-text">{t("logsMenu")}</span>}
+                {showText && <span className="ml-auto text-xs">{logsOpen ? "−" : "+"}</span>}
+              </button>
+              {logsOpen && showText && <ul className="mt-1 space-y-1 pl-11">
+                <li><Link href="/activity-logs?tab=activity" className={`menu-dropdown-item ${pathname === "/activity-logs" && searchParams.get("tab") !== "email" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("operationHistory")}</Link></li>
+                <li><Link href="/activity-logs?tab=email" className={`menu-dropdown-item ${pathname === "/activity-logs" && searchParams.get("tab") === "email" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("emailLogs")}</Link></li>
+              </ul>}
             </li>
           )}
+
           {canViewEmail && (
             <li>
               <button type="button" onClick={() => setSupportOpen((current) => !current)} className={`menu-item group w-full ${supportOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={supportOpen}>
                 <span className={supportOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v3" /><path d="M5.5 7.5 7.6 9.6" /><path d="M18.5 7.5 16.4 9.6" /><path d="M4 14h16" /><path d="M6 14a6 6 0 0 1 12 0" /><path d="M8 14v4a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-4" /><path d="M4 14v2a2 2 0 0 0 2 2" /><path d="M20 14v2a2 2 0 0 1-2 2" /></svg>
                 </span>
-                {showText && <span className="menu-item-text">Công cụ hỗ trợ</span>}
+                {showText && <span className="menu-item-text">{t("supportTools")}</span>}
                 {showText && <span className="ml-auto text-xs">{supportOpen ? "−" : "+"}</span>}
               </button>
-              {supportOpen && showText && <ul className="mt-1 space-y-1 pl-11"><li><Link href="/email" className={`block rounded-lg px-3 py-2 text-sm ${pathname === "/email" ? "bg-brand-50 font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300" : "text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]"}`}>Gửi email</Link></li></ul>}
+              {supportOpen && showText && <ul className="mt-1 space-y-1 pl-11"><li><Link href="/email" className={`block rounded-lg px-3 py-2 text-sm ${pathname === "/email" ? "bg-brand-50 font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300" : "text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]"}`}>{t("emailSendButton")}</Link></li></ul>}
+            </li>
+          )}
+          {canViewEmail && supportOpen && showText && (
+            <li className="-mt-3 pl-11">
+              <Link href={MARKET_RESEARCH_HREF} className="block rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]">
+                {t("marketResearch")}
+              </Link>
             </li>
           )}
         </ul>
