@@ -44,7 +44,7 @@ const ROLE_ACTIONS: Record<RbacRole, Set<ShipmentActionPermissionKey> | "all"> =
   it: new Set(["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs"]),
   logistic: new Set([
     "createShipment", "uploadDocument", "passDocument", "archiveDocuments",
-    "editReturnItem", "editShipmentDetails", "cancelShipment", "sendEmail", "viewEmailLogs",
+    "editReturnItem", "editShipmentDetails", "cancelShipment", "viewEmailLogs",
   ]),
   van_chuyen: new Set(["uploadDocument", "editReturnItem"]),
 };

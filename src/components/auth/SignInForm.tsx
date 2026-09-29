@@ -7,7 +7,7 @@ import { login } from "@/services/authApi";
 import { ChevronLeftIcon, EyeCloseIcon, EyeIcon } from "@/icons";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 
 export default function SignInForm() {
@@ -17,12 +17,15 @@ export default function SignInForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const submittingRef = useRef(false);
   const { user: currentUser, setUser } = useAuth();
   const canManageUsers = canPerformShipmentAction(currentUser, "registerUser")
     && canPerformShipmentAction(currentUser, "updateUserPassword");
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submittingRef.current || loading) return;
+    submittingRef.current = true;
     setError("");
     setLoading(true);
 
@@ -33,6 +36,7 @@ export default function SignInForm() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };

@@ -21,7 +21,7 @@ const AppSidebar: React.FC = () => {
   const [catalogOpen, setCatalogOpen] = useState(pathname === "/master-data");
   const [logsOpen, setLogsOpen] = useState(pathname === "/activity-logs");
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
-  const canViewEmail = canPerformShipmentAction(user, "viewEmailLogs") || canPerformShipmentAction(user, "sendEmail");
+  const canSendEmail = canPerformShipmentAction(user, "sendEmail");
   const canManageUsers = canPerformShipmentAction(user, "viewUsers") || canPerformShipmentAction(user, "manageUsers");
   const canManageMasterData = canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData");
   const { t } = useLanguage();
@@ -160,7 +160,7 @@ const AppSidebar: React.FC = () => {
             </li>
           )}
 
-          {canViewEmail && (
+          {canSendEmail && (
             <li>
               <button type="button" onClick={() => setSupportOpen((current) => !current)} className={`menu-item group w-full ${supportOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={supportOpen}>
                 <span className={supportOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
@@ -172,7 +172,7 @@ const AppSidebar: React.FC = () => {
               {supportOpen && showText && <ul className="mt-1 space-y-1 pl-11"><li><Link href="/email" className={`block rounded-lg px-3 py-2 text-sm ${pathname === "/email" ? "bg-brand-50 font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300" : "text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]"}`}>{t("emailSendButton")}</Link></li></ul>}
             </li>
           )}
-          {canViewEmail && supportOpen && showText && (
+          {canSendEmail && supportOpen && showText && (
             <li className="-mt-3 pl-11">
               <Link href={MARKET_RESEARCH_HREF} className="block rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]">
                 {t("marketResearch")}
