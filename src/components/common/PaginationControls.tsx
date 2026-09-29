@@ -11,6 +11,7 @@ interface PaginationControlsProps {
   from: number;
   to: number;
   summaryKey?: string;
+  idPrefix?: string;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
 }
@@ -23,6 +24,7 @@ export default function PaginationControls({
   from,
   to,
   summaryKey = "showingShipments",
+  idPrefix = "pagination",
   onPageChange,
   onPageSizeChange,
 }: PaginationControlsProps) {
@@ -47,9 +49,9 @@ export default function PaginationControls({
     <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
       <p className="text-xs text-gray-400">{t(summaryKey, { from, to, total: totalItems })}</p>
       <div className="flex max-w-full flex-wrap items-center justify-end gap-2 overflow-x-auto pb-1 sm:pb-0">
-        <label htmlFor="pagination-page-size" className="text-xs text-gray-500 dark:text-gray-400">{t("shipmentsPerPage")}</label>
+        <label htmlFor={`${idPrefix}-page-size`} className="text-xs text-gray-500 dark:text-gray-400">{t("shipmentsPerPage")}</label>
         <input
-          id="pagination-page-size"
+          id={`${idPrefix}-page-size`}
           type="number"
           min={1}
           max={200}

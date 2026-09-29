@@ -81,6 +81,7 @@ export default function MasterDataPage() {
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
   const { t } = useLanguage();
+  const canView = canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData");
   const canManage = canPerformShipmentAction(user, "manageMasterData");
   const [active, setActive] = useState<EntityKey>("suppliers");
   const [rows, setRows] = useState<DataRow[]>([]);
@@ -106,7 +107,7 @@ export default function MasterDataPage() {
   };
 
   useEffect(() => {
-    if (!canManage) return;
+    if (!canView) return;
     setForm(emptyForm(config));
     setEditingId(null);
     setQuery("");
@@ -114,7 +115,7 @@ export default function MasterDataPage() {
     void loadRows();
     // Chỉ tải lại khi đổi loại danh mục hoặc quyền hiện tại.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, canManage]);
+  }, [active, canView]);
 
   const filteredRows = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("vi");
@@ -129,6 +130,7 @@ export default function MasterDataPage() {
   };
 
   const beginEdit = async (row: DataRow) => {
+    if (!canManage) return;
     const id = String(row[config.idField] ?? "");
     if (!id) return;
     try {
@@ -174,7 +176,7 @@ export default function MasterDataPage() {
     }
   };
 
-  if (!canManage) {
+  if (!canView) {
     return <div className="flex min-h-[55vh] items-center justify-center text-sm font-medium text-error-600">{t("adminAllOnly")}</div>;
   }
 
@@ -196,11 +198,11 @@ export default function MasterDataPage() {
             <div className="flex gap-2"><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("searchPlaceholderShort")} className="h-10 min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /><button type="button" onClick={() => void loadRows()} className="rounded-xl border border-gray-200 px-3 text-sm font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300">{t("refreshData")}</button></div>
           </div>
           {loading ? <div className="flex min-h-60 items-center justify-center"><span className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div> : (
-            <div className="overflow-x-auto"><table className="w-full min-w-[680px]"><thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-900/50"><tr>{config.fields.map((field) => <th key={field.key} className="px-4 py-3">{t(field.labelKey)}</th>)}<th className="px-4 py-3 text-right">{t("actions")}</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{displayedRows.map((row, rowIndex) => <tr key={`${active}-${String(row[config.idField] ?? "row")}-${rowIndex}`} className="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">{config.fields.map((field) => <td key={field.key} className="max-w-56 truncate px-4 py-3 text-sm text-gray-700 dark:text-gray-300" title={String(row[field.key] ?? "")}>{String(row[field.key] ?? "—")}</td>)}<td className="px-4 py-3 text-right"><button type="button" onClick={() => void beginEdit(row)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50">{t("edit")}</button></td></tr>)}</tbody></table>{displayedRows.length === 0 && <p className="py-10 text-center text-sm text-gray-400">{t("noData")}</p>}</div>
+            <div className="overflow-x-auto"><table className="w-full min-w-[680px]"><thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-900/50"><tr>{config.fields.map((field) => <th key={field.key} className="px-4 py-3">{t(field.labelKey)}</th>)}{canManage && <th className="px-4 py-3 text-right">{t("actions")}</th>}</tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{displayedRows.map((row, rowIndex) => <tr key={`${active}-${String(row[config.idField] ?? "row")}-${rowIndex}`} className="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">{config.fields.map((field) => <td key={field.key} className="max-w-56 truncate px-4 py-3 text-sm text-gray-700 dark:text-gray-300" title={String(row[field.key] ?? "")}>{String(row[field.key] ?? "—")}</td>)}{canManage && <td className="px-4 py-3 text-right"><button type="button" onClick={() => void beginEdit(row)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50">{t("edit")}</button></td>}</tr>)}</tbody></table>{displayedRows.length === 0 && <p className="py-10 text-center text-sm text-gray-400">{t("noData")}</p>}</div>
           )}
           {displayedRows.length > 0 && <PaginationControls page={safePage} totalPages={totalPages} pageSize={pageSize} totalItems={filteredRows.length} from={from} to={to} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} />}
         </div>
-        <form onSubmit={save} className="sticky top-20 z-20 h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+        <form onSubmit={save} className={`sticky top-20 z-20 h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 ${!canManage ? "pointer-events-none opacity-60" : ""}`}>
           <div className="mb-5 flex items-start justify-between gap-3"><div><h2 className="font-semibold text-gray-800 dark:text-white">{editingId ? t("editCatalog", { catalog: t(config.singularKey) }) : t("addCatalog", { catalog: t(config.singularKey) })}</h2><p className="mt-1 text-xs text-gray-400">{editingId ? editingId : t("enterInformationBelow")}</p></div>{editingId && <button type="button" onClick={beginCreate} className="text-xs font-semibold text-gray-500">{t("cancelEdit")}</button>}</div>
           <div className="space-y-4">{config.fields.filter((field) => !field.autoGenerated || Boolean(editingId)).map((field) => <label key={field.key} className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t(field.labelKey)}{field.required && <span className="text-error-500"> *</span>}{field.autoGenerated && !editingId && <span className="ml-1 text-xs font-normal text-gray-400">(tự động)</span>}{field.multiline ? <textarea value={form[field.key] || ""} disabled={Boolean(editingId && field.key === config.idField)} onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))} rows={3} className="mt-1.5 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-brand-400 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /> : <input type={field.key === "email" ? "email" : "text"} value={form[field.key] || ""} disabled={Boolean(editingId && field.key === config.idField)} onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />}</label>)}</div>
           <button type="submit" disabled={saving} className="mt-5 w-full rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60">{saving ? t("saving") : editingId ? t("save") : t("addNew")}</button>

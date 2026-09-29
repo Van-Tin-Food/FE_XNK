@@ -2,14 +2,14 @@
 
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
+import { canPerformShipmentAction, RBAC_ROLES, RBAC_SESSIONS } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { recordActivity } from "@/services/activityLogApi";
 import { registerUser } from "@/services/authApi";
 import Link from "next/link";
 import React, { useState } from "react";
 
-const EMPTY_FORM = { username: "", name: "", password: "", confirmPassword: "", role: "", session: "" };
+const EMPTY_FORM = { username: "", name: "", password: "", confirmPassword: "", role: "van_chuyen", session: "view" };
 
 export default function SignUpForm() {
   const { user } = useAuth();
@@ -53,8 +53,8 @@ export default function SignUpForm() {
         <Field label="Tên đăng nhập"><Input type="text" value={form.username} onChange={(e) => updateField("username", e.target.value)} autoComplete="off" placeholder="Nhập tên đăng nhập" /></Field>
         <Field label="Tên hiển thị"><Input type="text" value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="Nhập tên người dùng" /></Field>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Role"><Input type="text" value={form.role} onChange={(e) => updateField("role", e.target.value)} placeholder="Ví dụ: xnk" /></Field>
-          <Field label="Session"><Input type="text" value={form.session} onChange={(e) => updateField("session", e.target.value)} placeholder="Ví dụ: edit" /></Field>
+          <Field label="Role"><select value={form.role} onChange={(e) => updateField("role", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{RBAC_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</select></Field>
+          <Field label="Session"><select value={form.session} onChange={(e) => updateField("session", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{RBAC_SESSIONS.map((session) => <option key={session} value={session}>{session}</option>)}</select></Field>
         </div>
         <Field label="Mật khẩu"><Input type="password" value={form.password} onChange={(e) => updateField("password", e.target.value)} autoComplete="new-password" placeholder="Nhập mật khẩu" /></Field>
         <Field label="Xác nhận mật khẩu"><Input type="password" value={form.confirmPassword} onChange={(e) => updateField("confirmPassword", e.target.value)} autoComplete="new-password" placeholder="Nhập lại mật khẩu" /></Field>
@@ -80,5 +80,5 @@ function AuthFormShell({ title, description, children }: { title: string; descri
 }
 
 function AccessDenied({ title, userExists }: { title: string; userExists: boolean }) {
-  return <div className="flex w-full flex-1 items-center justify-center"><div className="w-full max-w-md rounded-2xl border border-error-200 bg-error-50 p-6 text-center dark:border-error-500/30 dark:bg-error-500/10"><h1 className="text-lg font-semibold text-error-700 dark:text-error-300">{title}</h1><p className="mt-2 text-sm text-error-600 dark:text-error-400">Chỉ tài khoản có role Admin và session all mới được sử dụng chức năng này.</p><Link href={userExists ? "/" : "/signin"} className="mt-5 inline-flex rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600">Quay lại</Link></div></div>;
+  return <div className="flex w-full flex-1 items-center justify-center"><div className="w-full max-w-md rounded-2xl border border-error-200 bg-error-50 p-6 text-center dark:border-error-500/30 dark:bg-error-500/10"><h1 className="text-lg font-semibold text-error-700 dark:text-error-300">{title}</h1><p className="mt-2 text-sm text-error-600 dark:text-error-400">Tài khoản hiện tại chưa có quyền quản lý tài khoản.</p><Link href={userExists ? "/" : "/signin"} className="mt-5 inline-flex rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600">Quay lại</Link></div></div>;
 }

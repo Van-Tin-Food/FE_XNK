@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import React from "react";
+import React, { useState } from "react";
 import { canPerformShipmentAction } from "../config/shipmentActionPermissions";
 import { useAuth } from "../context/AuthContext";
 import { useSidebar } from "../context/SidebarContext";
@@ -14,9 +14,11 @@ const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
   const showText = isExpanded || isHovered || isMobileOpen;
+  const [supportOpen, setSupportOpen] = useState(pathname === "/email");
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
-  const canManageUsers = canPerformShipmentAction(user, "manageUsers");
-  const canManageMasterData = canPerformShipmentAction(user, "manageMasterData");
+  const canViewEmail = canPerformShipmentAction(user, "viewEmailLogs") || canPerformShipmentAction(user, "sendEmail");
+  const canManageUsers = canPerformShipmentAction(user, "viewUsers") || canPerformShipmentAction(user, "manageUsers");
+  const canManageMasterData = canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData");
   const { t } = useLanguage();
 
   return (
@@ -145,6 +147,18 @@ const AppSidebar: React.FC = () => {
                 </span>
                 {showText && <span className="menu-item-text">{t("masterDataManagement")}</span>}
               </Link>
+            </li>
+          )}
+          {canViewEmail && (
+            <li>
+              <button type="button" onClick={() => setSupportOpen((current) => !current)} className={`menu-item group w-full ${supportOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={supportOpen}>
+                <span className={supportOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v3" /><path d="M5.5 7.5 7.6 9.6" /><path d="M18.5 7.5 16.4 9.6" /><path d="M4 14h16" /><path d="M6 14a6 6 0 0 1 12 0" /><path d="M8 14v4a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-4" /><path d="M4 14v2a2 2 0 0 0 2 2" /><path d="M20 14v2a2 2 0 0 1-2 2" /></svg>
+                </span>
+                {showText && <span className="menu-item-text">Công cụ hỗ trợ</span>}
+                {showText && <span className="ml-auto text-xs">{supportOpen ? "−" : "+"}</span>}
+              </button>
+              {supportOpen && showText && <ul className="mt-1 space-y-1 pl-11"><li><Link href="/email" className={`block rounded-lg px-3 py-2 text-sm ${pathname === "/email" ? "bg-brand-50 font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300" : "text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]"}`}>Gửi email</Link></li></ul>}
             </li>
           )}
         </ul>

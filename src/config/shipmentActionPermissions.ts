@@ -1,5 +1,11 @@
 import type { AuthUser } from "@/types/auth";
 
+export const RBAC_ROLES = ["admin", "it", "logistic", "van_chuyen"] as const;
+export const RBAC_SESSIONS = ["all", "manage", "view"] as const;
+
+export type RbacRole = (typeof RBAC_ROLES)[number];
+export type RbacSession = (typeof RBAC_SESSIONS)[number];
+
 export type ShipmentActionPermissionKey =
   | "createShipment"
   | "uploadDocument"
@@ -9,59 +15,72 @@ export type ShipmentActionPermissionKey =
   | "editShipmentDetails"
   | "cancelShipment"
   | "viewActivityLogs"
+  | "viewUsers"
   | "manageUsers"
+  | "viewMasterData"
+  | "viewEmailLogs"
   | "manageMasterData"
   | "registerUser"
-  | "updateUserPassword";
+  | "updateUserPassword"
+  | "sendEmail";
 
-interface ActionPermission {
-  /** Điền đúng chuỗi role do API đăng nhập trả về, ví dụ: Admin. */
-  role: string;
-  /** Điền đúng session/sessionId/token do API đăng nhập trả về. */
-  session: string;
-}
-
-// CẤU HÌNH QUYỀN: mỗi action có thể có nhiều cặp role + session.
-// Người dùng được phép nếu khớp ít nhất một cặp; cặp còn trống sẽ bị bỏ qua.
-// Ví dụ: uploadDocument: [{ role: "admin", session: "all" }, { role: "xnk", session: "edit" }].
-export const SHIPMENT_ACTION_PERMISSIONS: Record<ShipmentActionPermissionKey, ActionPermission[]> = {
-  createShipment: [{ role: "admin", session: "all" },
-    { role: "xnk", session: "edit" },],
-  uploadDocument: [
-    { role: "admin", session: "all" },
-    { role: "xnk", session: "edit" },
-  ],
-  passDocument: [
-    { role: "admin", session: "all" },
-    { role: "xnk", session: "edit" },
-  ],
-  archiveDocuments: [{ role: "admin", session: "all" },
-    { role: "xnk", session: "edit" },],
-  editReturnItem: [{ role: "admin", session: "all" },
-    { role: "xnk", session: "edit" },],
-  editShipmentDetails: [{ role: "admin", session: "all" },
-    { role: "xnk", session: "edit" },],
-  cancelShipment: [{ role: "admin", session: "all" },
-    { role: "xnk", session: "edit" },],
-  viewActivityLogs: [{ role: "admin", session: "all" }],
-  manageUsers: [{ role: "admin", session: "all" }],
-  manageMasterData: [{ role: "admin", session: "all" }],
-  registerUser: [{ role: "admin", session: "all" }],
-  updateUserPassword: [{ role: "admin", session: "all" }],
+const ROLE_ALIASES: Record<string, RbacRole> = {
+  xnk: "logistic",
+  logisstic: "logistic",
+  "mua hang": "logistic",
+  "mua hàng": "logistic",
+  nhap_kho: "van_chuyen",
+  "nhập kho": "van_chuyen",
 };
 
-function normalizeRole(value?: string): string {
-  return String(value || "").trim().toLowerCase();
+const SESSION_ALIASES: Record<string, RbacSession> = {
+  edit: "manage",
+  department: "manage",
+  restricted: "view",
+};
+
+const ROLE_ACTIONS: Record<RbacRole, Set<ShipmentActionPermissionKey> | "all"> = {
+  admin: "all",
+  it: new Set(["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs"]),
+  logistic: new Set([
+    "createShipment", "uploadDocument", "passDocument", "archiveDocuments",
+    "editReturnItem", "editShipmentDetails", "cancelShipment", "sendEmail", "viewEmailLogs",
+  ]),
+  van_chuyen: new Set(["uploadDocument", "editReturnItem"]),
+};
+
+const MANAGE_ACTIONS = new Set<ShipmentActionPermissionKey>([
+  "createShipment", "uploadDocument", "passDocument", "archiveDocuments",
+  "editReturnItem", "editShipmentDetails", "cancelShipment", "manageUsers",
+  "manageMasterData", "registerUser", "updateUserPassword", "sendEmail",
+]);
+
+export function normalizeRole(value?: string): string {
+  const role = String(value || "").trim().toLocaleLowerCase("vi");
+  return ROLE_ALIASES[role] || role;
+}
+
+export function normalizeSession(value?: string): RbacSession {
+  const session = String(value || "").trim().toLocaleLowerCase("vi");
+  return SESSION_ALIASES[session]
+    || (RBAC_SESSIONS.includes(session as RbacSession) ? session as RbacSession : "view");
+}
+
+export function canViewSensitiveData(user: AuthUser | null): boolean {
+  return normalizeRole(user?.role) === "admin";
 }
 
 export function canPerformShipmentAction(user: AuthUser | null, action: ShipmentActionPermissionKey): boolean {
-  const permissions = SHIPMENT_ACTION_PERMISSIONS[action];
-  const currentSession = String(user?.session || user?.token || "").trim();
-  if (!user || !currentSession) return false;
-  return permissions.some((permission) => {
-    const expectedRole = permission.role.trim();
-    const expectedSession = permission.session.trim();
-    if (!expectedRole || !expectedSession) return false;
-    return normalizeRole(user.role) === normalizeRole(expectedRole) && currentSession === expectedSession;
-  });
+  const role = normalizeRole(user?.role) as RbacRole;
+  const session = normalizeSession(user?.session);
+  const actions = ROLE_ACTIONS[role];
+  if (!user || !actions) return false;
+  if (role === "admin") return true;
+  if (actions !== "all" && !actions.has(action)) return false;
+  return !MANAGE_ACTIONS.has(action) || session === "manage";
 }
+
+export const SHIPMENT_ACTION_PERMISSIONS = Object.fromEntries(
+  [...new Set(Object.values(ROLE_ACTIONS).flatMap((actions) => actions === "all" ? [] : [...actions]))]
+    .map((action) => [action, []]),
+) as Record<ShipmentActionPermissionKey, never[]>;

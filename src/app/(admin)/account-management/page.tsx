@@ -1,6 +1,6 @@
 "use client";
 
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
+import { canPerformShipmentAction, RBAC_ROLES, RBAC_SESSIONS, type RbacRole, type RbacSession } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
@@ -20,8 +20,8 @@ import { paginateItems } from "@/utils/pagination";
 import PaginationControls from "@/components/common/PaginationControls";
 
 const DEFAULT_PAGE_SIZE = 15;
-const ROLE_OPTIONS = ["xnk", "mua hàng"];
-const SESSION_OPTIONS = ["all", "edit", "view"];
+const ROLE_OPTIONS: RbacRole[] = [...RBAC_ROLES];
+const SESSION_OPTIONS: RbacSession[] = [...RBAC_SESSIONS];
 type TabKey = "users" | "register" | "password";
 
 const EMPTY_REGISTER = {
@@ -29,7 +29,7 @@ const EMPTY_REGISTER = {
   name: "",
   password: "",
   confirmPassword: "",
-  role: "xnk",
+  role: "van_chuyen",
   session: "view",
 };
 
@@ -39,7 +39,8 @@ export default function AccountManagementPage() {
   const { confirm } = useSystemConfirm();
   const { notify } = useSystemNotification();
   const { t } = useLanguage();
-  const canManage = canPerformShipmentAction(user, "manageUsers");
+  const canViewUsers = canPerformShipmentAction(user, "viewUsers") || canPerformShipmentAction(user, "manageUsers");
+  const canEditUsers = canPerformShipmentAction(user, "manageUsers");
   const [activeTab, setActiveTab] = useState<TabKey>("users");
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,12 +49,12 @@ export default function AccountManagementPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [editing, setEditing] = useState<ManagedUser | null>(null);
-  const [editRole, setEditRole] = useState("xnk");
+  const [editRole, setEditRole] = useState("van_chuyen");
   const [editSession, setEditSession] = useState("view");
   const [savingEdit, setSavingEdit] = useState(false);
 
   const loadUsers = useCallback(async () => {
-    if (!canManage) return;
+    if (!canViewUsers) return;
     setLoading(true);
     setError("");
     try {
@@ -63,15 +64,15 @@ export default function AccountManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [canManage, t]);
+  }, [canViewUsers, t]);
 
   useEffect(() => {
-    if (!canManage) {
+    if (!canViewUsers) {
       router.replace("/");
       return;
     }
     void loadUsers();
-  }, [canManage, loadUsers, router]);
+  }, [canViewUsers, loadUsers, router]);
 
   const filteredUsers = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("vi");
@@ -91,8 +92,10 @@ export default function AccountManagementPage() {
     try {
       const latest = await getUserById(selected.id);
       setEditing(latest);
-      setEditRole(ROLE_OPTIONS.includes(latest.role.toLocaleLowerCase("vi")) ? latest.role.toLocaleLowerCase("vi") : "xnk");
-      setEditSession(SESSION_OPTIONS.includes(latest.session.toLowerCase()) ? latest.session.toLowerCase() : "view");
+      const role = latest.role.toLocaleLowerCase("vi");
+      const session = latest.session.toLowerCase();
+      setEditRole((ROLE_OPTIONS as string[]).includes(role) ? role as RbacRole : "van_chuyen");
+      setEditSession((SESSION_OPTIONS as string[]).includes(session) ? session as RbacSession : "view");
     } catch (loadError) {
       notify(loadError instanceof Error ? loadError.message : t("userInfoLoadError"), "error");
     }
@@ -131,7 +134,7 @@ export default function AccountManagementPage() {
     }
   };
 
-  if (!canManage) {
+  if (!canViewUsers) {
     return <div className="flex min-h-[50vh] items-center justify-center"><Spinner /></div>;
   }
 
@@ -146,8 +149,8 @@ export default function AccountManagementPage() {
 
       <div className="flex gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-800 dark:bg-white/[0.03]">
         <TabButton active={activeTab === "users"} onClick={() => setActiveTab("users")}>{t("accountList")}</TabButton>
-        <TabButton active={activeTab === "register"} onClick={() => setActiveTab("register")}>{t("registerAccount")}</TabButton>
-        <TabButton active={activeTab === "password"} onClick={() => setActiveTab("password")}>{t("resetPassword")}</TabButton>
+        {canEditUsers && <TabButton active={activeTab === "register"} onClick={() => setActiveTab("register")}>{t("registerAccount")}</TabButton>}
+        {canEditUsers && <TabButton active={activeTab === "password"} onClick={() => setActiveTab("password")}>{t("resetPassword")}</TabButton>}
       </div>
 
       {activeTab === "users" && (
@@ -166,11 +169,11 @@ export default function AccountManagementPage() {
           onPageChange={setPage}
           onPageSizeChange={(value) => { setPageSize(value); setPage(1); }}
           onReload={() => void loadUsers()}
-          onEdit={(selected) => void openEdit(selected)}
+          onEdit={canEditUsers ? (selected) => void openEdit(selected) : undefined}
         />
       )}
-      {activeTab === "register" && <RegisterPanel currentUser={user} onCreated={() => void loadUsers()} />}
-      {activeTab === "password" && <PasswordPanel currentUser={user} />}
+      {activeTab === "register" && canEditUsers && <RegisterPanel currentUser={user} onCreated={() => void loadUsers()} />}
+      {activeTab === "password" && canEditUsers && <PasswordPanel currentUser={user} />}
 
       {editing && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-gray-950/55 px-4" onMouseDown={() => !savingEdit && setEditing(null)}>
@@ -194,7 +197,7 @@ export default function AccountManagementPage() {
 
 function UserList({ users, total, loading, error, query, page, totalPages, pageSize, from, to, onQueryChange, onPageChange, onPageSizeChange, onReload, onEdit }: {
   users: ManagedUser[]; total: number; loading: boolean; error: string; query: string; page: number; totalPages: number; pageSize: number; from: number; to: number;
-  onQueryChange: (value: string) => void; onPageChange: (page: number) => void; onPageSizeChange: (pageSize: number) => void; onReload: () => void; onEdit: (user: ManagedUser) => void;
+  onQueryChange: (value: string) => void; onPageChange: (page: number) => void; onPageSizeChange: (pageSize: number) => void; onReload: () => void; onEdit?: (user: ManagedUser) => void;
 }) {
   const { t } = useLanguage();
   return (
@@ -213,7 +216,7 @@ function UserList({ users, total, loading, error, query, page, totalPages, pageS
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {users.map((item) => {
                 const isAdmin = item.role.trim().toLowerCase() === "admin";
-                return <tr key={item.id} className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"><td className="px-5 py-4 text-sm text-gray-500">#{item.id}</td><td className="px-5 py-4 text-sm font-semibold text-gray-800 dark:text-white/90">{item.username || "—"}</td><td className="px-5 py-4 text-sm text-gray-600 dark:text-gray-300">{item.name || "—"}</td><td className="px-5 py-4"><Badge>{item.role || "—"}</Badge></td><td className="px-5 py-4"><Badge>{item.session || "—"}</Badge></td><td className="px-5 py-4 text-right"><button type="button" disabled={isAdmin} title={isAdmin ? t("adminPermissionLocked") : t("editRoleSession")} onClick={() => onEdit(item)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 dark:border-brand-500/30 dark:text-brand-400">{t("editPermissions")}</button></td></tr>;
+                return <tr key={item.id} className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"><td className="px-5 py-4 text-sm text-gray-500">#{item.id}</td><td className="px-5 py-4 text-sm font-semibold text-gray-800 dark:text-white/90">{item.username || "—"}</td><td className="px-5 py-4 text-sm text-gray-600 dark:text-gray-300">{item.name || "—"}</td><td className="px-5 py-4"><Badge>{item.role || "—"}</Badge></td><td className="px-5 py-4"><Badge>{item.session || "—"}</Badge></td><td className="px-5 py-4 text-right">{onEdit && <button type="button" disabled={isAdmin} title={isAdmin ? t("adminPermissionLocked") : t("editRoleSession")} onClick={() => onEdit(item)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 dark:border-brand-500/30 dark:text-brand-400">{t("editPermissions")}</button>}</td></tr>;
               })}
             </tbody>
           </table>

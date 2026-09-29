@@ -19,6 +19,7 @@ import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCa
 import { toDocumentPreviewUrl } from "@/utils/documentPreview";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { shouldValidateContainerPackages } from "@/utils/containerPackageValidation";
+import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import {
   formatInternationalNumber,
   formatMoneyAmount,
@@ -1078,6 +1079,7 @@ function getOcrDocumentType(documentCode: string): OcrDocumentType | null {
 
 export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefresh }: ShipmentDetailModalProps) {
   const { user, permissions } = useAuth();
+  const canUseTracking = canPerformShipmentAction(user, "editReturnItem");
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
   const { language, t } = useLanguage();
@@ -2174,7 +2176,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
       {/* Tabs */}
       <div className="flex flex-shrink-0 flex-wrap items-center gap-1 border-b border-gray-100 px-3 py-2 no-scrollbar dark:border-gray-800 sm:flex-nowrap sm:overflow-x-auto sm:px-6">
-        {TAB_LIST.filter((tab) => tab.key !== "folder" || archived?.archived).map(tab => (
+        {TAB_LIST.filter((tab) => (tab.key !== "folder" || archived?.archived) && (tab.key !== "journey" || canUseTracking)).map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
@@ -2402,7 +2404,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
 
         {/* ── JOURNEY ── */}
-        {activeTab === "journey" && (
+        {canUseTracking && activeTab === "journey" && (
           <div className="flex flex-col gap-6">
             <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02] sm:p-5">
               <div className="flex items-start justify-between gap-4">
