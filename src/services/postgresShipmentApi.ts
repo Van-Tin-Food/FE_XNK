@@ -93,7 +93,7 @@ export async function updateDatabaseRow<T extends object>(path: string, id: stri
 
 /** Chỉ tải những bảng cần để dựng danh sách và modal đơn hàng ban đầu. */
 export async function fetchPostgresShipmentListSnapshot(): Promise<PostgresShipmentSnapshot> {
-  const [suppliers, carriers, purchases, purchaseDetails, itemCodes, bills, containers, containerDetails] = await Promise.all([
+  const [suppliers, carriers, purchases, purchaseDetails, itemCodes, bills, containers, containerDetails, transports, warehouses] = await Promise.all([
     listDatabaseRows<SupplierRecord>("nha-cung-cap"),
     listDatabaseRows<CarrierRecord>("hang-tau"),
     listDatabaseRows<PurchaseRecord>("mua-hang"),
@@ -102,6 +102,8 @@ export async function fetchPostgresShipmentListSnapshot(): Promise<PostgresShipm
     listDatabaseRows<XnkRecord>("xnk"),
     listDatabaseRows<ContainerRecord>("container"),
     listDatabaseRows<ContainerDetailRecord>("chi-tiet-container"),
+    listDatabaseRows<ContainerTransportRecord>(databaseEndpoints.transports),
+    listDatabaseRows<WarehouseRecord>(databaseEndpoints.warehouses),
   ]);
   return {
     suppliers,
@@ -111,9 +113,9 @@ export async function fetchPostgresShipmentListSnapshot(): Promise<PostgresShipm
     itemCodes,
     bills,
     containers,
-    warehouses: [],
+    warehouses,
     containerDetails,
-    transports: [],
+    transports,
   };
 }
 

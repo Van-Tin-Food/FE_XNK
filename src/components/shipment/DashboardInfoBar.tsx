@@ -8,6 +8,8 @@ interface DashboardInfoBarProps {
   lastUpdated: string;
   updatedBy?: string;
   onRefresh: () => Promise<void>;
+  onExport?: () => Promise<void>;
+  isExporting?: boolean;
 }
 
 function formatRelativeTime(isoString: string, translate: (key: string, variables?: Record<string, string | number>) => string): string {
@@ -30,7 +32,7 @@ function formatDateTime(isoString: string, language: "vi" | "en"): string {
   });
 }
 
-export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh }: DashboardInfoBarProps) {
+export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh, onExport, isExporting = false }: DashboardInfoBarProps) {
   const { user } = useAuth();
   const { language, t } = useLanguage();
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -66,6 +68,20 @@ export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh }: 
 
       <div className="flex items-center gap-2">
         {showRefreshSuccess && <span className="text-xs font-medium text-success-600">✓ {t("refreshSucceeded")}</span>}
+        {onExport && (
+          <button
+            type="button"
+            onClick={() => void onExport()}
+            disabled={isExporting || isRefreshing}
+            title={t("exportExcel")}
+            className="inline-flex items-center gap-2 rounded-xl border border-success-200 bg-success-50 px-4 py-2 text-xs font-semibold text-success-700 transition-all hover:border-success-300 hover:bg-success-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-400 dark:hover:bg-success-500/20"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={isExporting ? "animate-spin" : ""} aria-hidden="true">
+              {isExporting ? <><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></> : <><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></>}
+            </svg>
+            {isExporting ? t("exportingExcel") : t("exportExcel")}
+          </button>
+        )}
         <button
           type="button"
           onClick={handleRefresh}

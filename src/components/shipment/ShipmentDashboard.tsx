@@ -1,7 +1,8 @@
 "use client";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import type { Shipment, ShipmentFilter, ShipmentStatus, ShipmentFilterStatus } from "@/types/shipment";
-import { fetchShipments, computeMetrics } from "@/services/shipmentApi";
+import { fetchShipments, computeMetrics, fetchReturnItems } from "@/services/shipmentApi";
+import { buildShipmentWorkbook, saveShipmentWorkbook } from "@/services/shipmentExcelExport";
 import ShipmentMetrics from "./ShipmentMetrics";
 import DashboardInfoBar from "./DashboardInfoBar";
 import ShipmentFilters from "./ShipmentFilters";
@@ -12,6 +13,7 @@ import { useAuth } from "@/context/AuthContext";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useLanguage } from "@/context/LanguageContext";
 import { getDefaultEtaRange } from "@/utils/shipmentDateFilter";
+import { useSystemNotification } from "@/context/SystemNotificationContext";
 
 function matchesFilterValue(source?: string, selected?: string): boolean {
   if (!selected) return true;
@@ -59,7 +61,9 @@ function matchesBaseFilter(shipment: Shipment, filter: ShipmentFilter): boolean 
 export default function ShipmentDashboard() {
   const { user } = useAuth();
   const { t } = useLanguage();
+  const { notify } = useSystemNotification();
   const canCreateShipment = canPerformShipmentAction(user, "createShipment");
+  const canExportShipments = canPerformShipmentAction(user, "exportShipments");
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
   const [updatedBy, setUpdatedBy] = useState<string>("");
@@ -81,6 +85,7 @@ export default function ShipmentDashboard() {
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -139,6 +144,28 @@ export default function ShipmentDashboard() {
     && matchesFilterValue(s.port, filter.port)
     && matchesFilterValue(s.vessel, filter.vessel)
   ), [shipments, filter]);
+
+  const handleExport = useCallback(async () => {
+    if (filteredShipments.length === 0) {
+      notify(t("exportExcelEmpty"), "warning");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const orderCodes = [...new Set(filteredShipments.map((shipment) => shipment.orderCode).filter(Boolean))];
+      const returnEntries = await Promise.all(orderCodes.map(async (orderCode) => [orderCode, await fetchReturnItems(orderCode)] as const));
+      const returnItemsByOrder = Object.fromEntries(returnEntries);
+      const workbook = buildShipmentWorkbook(filteredShipments, returnItemsByOrder);
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
+      await saveShipmentWorkbook(workbook, `xnk_export_${stamp}.xlsx`);
+      notify(t("exportExcelSucceeded"), "success");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      notify(error instanceof Error ? `${t("exportExcelError")}: ${error.message}` : t("exportExcelError"), "error");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [filteredShipments, notify, t]);
 
   // Build filter dropdown choices from the rows eligible for the table:
   // ETA lọc trước → các dòng trong table mới là nguồn sinh options của
@@ -243,6 +270,8 @@ export default function ShipmentDashboard() {
         lastUpdated={lastUpdated}
         updatedBy={updatedBy}
         onRefresh={handleRefresh}
+        onExport={canExportShipments ? handleExport : undefined}
+        isExporting={isExporting}
       />
 
       {/* Filters */}
