@@ -98,6 +98,7 @@ export default function MasterDataPage() {
   const [form, setForm] = useState<Record<string, string>>(() => emptyForm(ENTITY_CONFIG.suppliers));
   const [editingId, setEditingId] = useState<string | null>(null);
   const config = ENTITY_CONFIG[active];
+  const hasDedicatedCatalogRoute = ["suppliers", "carriers", "warehouses"].includes(searchParams.get("catalog") || "");
 
   useEffect(() => {
     const requested = searchParams.get("catalog") as EntityKey | null;
@@ -193,14 +194,16 @@ export default function MasterDataPage() {
   return (
     <section className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">{t("masterDataManagement")}</h1>
+        <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">{hasDedicatedCatalogRoute ? t(config.titleKey) : t("masterDataManagement")}</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("masterDataDescription")}</p>
       </div>
-      <div className="flex gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-800 dark:bg-white/[0.03]">
-        {(Object.keys(ENTITY_CONFIG) as EntityKey[]).map((key) => (
-          <button key={key} type="button" onClick={() => setActive(key)} className={`shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold ${active === key ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}>{t(ENTITY_CONFIG[key].titleKey)}</button>
-        ))}
-      </div>
+      {!hasDedicatedCatalogRoute && (
+        <div className="flex gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-800 dark:bg-white/[0.03]">
+          {(Object.keys(ENTITY_CONFIG) as EntityKey[]).map((key) => (
+            <button key={key} type="button" onClick={() => setActive(key)} className={`shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold ${active === key ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}>{t(ENTITY_CONFIG[key].titleKey)}</button>
+          ))}
+        </div>
+      )}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
           <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">

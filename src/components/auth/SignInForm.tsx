@@ -1,5 +1,4 @@
 "use client";
-import Checkbox from "@/components/form/input/Checkbox";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
@@ -12,7 +11,6 @@ import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 
 export default function SignInForm() {
   const [showPassword, setShowPassword] = useState(false);
-  const [isChecked, setIsChecked] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -63,6 +61,7 @@ export default function SignInForm() {
             </p>
           </div>
           <div>
+            {false && (<>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5">
               <button className="inline-flex items-center justify-center gap-3 py-3 text-sm font-normal text-gray-700 transition-colors bg-gray-100 rounded-lg px-7 hover:bg-gray-200 hover:text-gray-800 dark:bg-white/5 dark:text-white/90 dark:hover:bg-white/10">
                 <svg
@@ -115,6 +114,7 @@ export default function SignInForm() {
                 </span>
               </div>
             </div>
+            </>)}
             <form onSubmit={handleSubmit} autoComplete="off">
               <div className="space-y-6">
                 <div>
@@ -156,15 +156,6 @@ export default function SignInForm() {
                       )}
                     </span>
                   </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Checkbox checked={isChecked} onChange={setIsChecked} />
-                    <span className="block font-normal text-gray-700 text-theme-sm dark:text-gray-400">
-                      Keep me logged in
-                    </span>
-                  </div>
-                  {canManageUsers && <Link href="/reset-password" className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400">Quên mật khẩu?</Link>}
                 </div>
                 <div>
                   <Button className="w-full" size="sm" type="submit" disabled={loading}>
