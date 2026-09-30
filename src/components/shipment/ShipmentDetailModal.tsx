@@ -1679,6 +1679,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadFileData(fileData);
       const result = await analyzeDocument({ documentType, file });
       if (result.data.length === 0) throw new Error(`OCR ${documentType} không trả về dữ liệu`);
+      if (result.aiAvailable === false) notify(t("ocrAiUnavailable"), "warning");
       const normalizedRows = result.data.map((analyzedFields) => {
         const normalizedFields = normalizeOcrFields(analyzedFields, documentType);
         if (normalizedFields["Cảng đến"]) normalizedFields["Cảng đến"] = normalizedFields["Cảng đến"].toUpperCase();

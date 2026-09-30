@@ -180,6 +180,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       const result = await analyzeDocument({ documentType: "PI", file: selected });
       const mappedRows = result.data.map(mapOcrFields);
       if (mappedRows.length === 0) throw new Error(t("noOcrProducts"));
+      if (result.aiAvailable === false) notify(t("ocrAiUnavailable"), "warning");
       const mapped = mappedRows[0];
       const supplier = suppliers.find((item) => item.id_ncc === mapped.supplierId)
         || findBestCatalogMatch(mapped.supplier, suppliers, "ten_ncc");

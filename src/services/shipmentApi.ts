@@ -403,7 +403,7 @@ export function launchEvergreenTracking(containerNo: string): Promise<EvergreenT
 }
 
 export type OcrDataRow = Record<string, string>;
-export interface AnalyzeDocumentResponse { success: boolean; documentType: "PI" | "INV" | "PKL" | "BL"; fileName: string; data: OcrDataRow[]; _confidence?: number; ocrConfidence?: number; _reason?: string; models?: Record<string, string>; }
+export interface AnalyzeDocumentResponse { success: boolean; documentType: "PI" | "INV" | "PKL" | "BL"; fileName: string; data: OcrDataRow[]; _confidence?: number; ocrConfidence?: number; _reason?: string; models?: Record<string, string>; aiAvailable?: boolean; aiWarningCode?: string; }
 export async function analyzeDocument(payload: { documentType: "PI" | "INV" | "PKL" | "BL"; file: File }): Promise<AnalyzeDocumentResponse> {
   const formData = new FormData();
   formData.append("documentType", payload.documentType);
@@ -435,6 +435,8 @@ export async function analyzeDocument(payload: { documentType: "PI" | "INV" | "P
     ocrConfidence: typeof raw.ocrConfidence === "number" ? raw.ocrConfidence : undefined,
     _reason: typeof raw._reason === "string" ? raw._reason : undefined,
     models: raw.models && typeof raw.models === "object" ? raw.models as Record<string, string> : undefined,
+    aiAvailable: typeof raw.aiAvailable === "boolean" ? raw.aiAvailable : undefined,
+    aiWarningCode: typeof raw.aiWarningCode === "string" ? raw.aiWarningCode : undefined,
   };
 }
 
