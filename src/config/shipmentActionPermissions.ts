@@ -1,7 +1,7 @@
 import type { AuthUser } from "@/types/auth";
 
 export const RBAC_ROLES = ["admin", "it", "logistic", "van_chuyen"] as const;
-export const RBAC_SESSIONS = ["all", "manage", "view"] as const;
+export const RBAC_SESSIONS = ["manage", "view"] as const;
 
 export type RbacRole = (typeof RBAC_ROLES)[number];
 export type RbacSession = (typeof RBAC_SESSIONS)[number];
@@ -63,6 +63,7 @@ export function normalizeRole(value?: string): string {
 
 export function normalizeSession(value?: string): RbacSession {
   const session = String(value || "").trim().toLocaleLowerCase("vi");
+  if (session === "all") return "manage";
   return SESSION_ALIASES[session]
     || (RBAC_SESSIONS.includes(session as RbacSession) ? session as RbacSession : "view");
 }

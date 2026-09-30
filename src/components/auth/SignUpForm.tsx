@@ -23,7 +23,11 @@ export default function SignUpForm() {
     return <AccessDenied title="Không có quyền đăng ký tài khoản" userExists={Boolean(user)} />;
   }
 
-  const updateField = (field: keyof typeof form, value: string) => setForm((current) => ({ ...current, [field]: value }));
+  const updateField = (field: keyof typeof form, value: string) => setForm((current) => (
+    field === "role"
+      ? { ...current, role: value, session: value === "admin" ? "manage" : current.session }
+      : { ...current, [field]: value }
+  ));
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -54,7 +58,7 @@ export default function SignUpForm() {
         <Field label="Tên hiển thị"><Input type="text" value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="Nhập tên người dùng" /></Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Role"><select value={form.role} onChange={(e) => updateField("role", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{RBAC_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</select></Field>
-          <Field label="Session"><select value={form.session} onChange={(e) => updateField("session", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{RBAC_SESSIONS.map((session) => <option key={session} value={session}>{session}</option>)}</select></Field>
+          <Field label="Session"><select value={form.session} disabled={form.role === "admin"} onChange={(e) => updateField("session", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-60 focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{(form.role === "admin" ? ["manage"] : RBAC_SESSIONS).map((session) => <option key={session} value={session}>{session}</option>)}</select></Field>
         </div>
         <Field label="Mật khẩu"><Input type="password" value={form.password} onChange={(e) => updateField("password", e.target.value)} autoComplete="new-password" placeholder="Nhập mật khẩu" /></Field>
         <Field label="Xác nhận mật khẩu"><Input type="password" value={form.confirmPassword} onChange={(e) => updateField("confirmPassword", e.target.value)} autoComplete="new-password" placeholder="Nhập lại mật khẩu" /></Field>

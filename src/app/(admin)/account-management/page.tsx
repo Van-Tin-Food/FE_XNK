@@ -232,7 +232,11 @@ function RegisterPanel({ currentUser, onCreated }: { currentUser: ReturnType<typ
   const { t } = useLanguage();
   const [form, setForm] = useState(EMPTY_REGISTER);
   const [submitting, setSubmitting] = useState(false);
-  const update = (field: keyof typeof form, value: string) => setForm((current) => ({ ...current, [field]: value }));
+  const update = (field: keyof typeof form, value: string) => setForm((current) => (
+    field === "role"
+      ? { ...current, role: value, session: value === "admin" ? "manage" : current.session }
+      : { ...current, [field]: value }
+  ));
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const values = { ...form, username: form.username.trim(), name: form.name.trim() };
@@ -249,7 +253,7 @@ function RegisterPanel({ currentUser, onCreated }: { currentUser: ReturnType<typ
     } catch (submitError) { notify(submitError instanceof Error ? submitError.message : t("accountCreateError"), "error"); }
     finally { setSubmitting(false); }
   };
-  return <FormCard title={t("registerAccount")} description={t("registerAccountDescription")}><form onSubmit={submit} autoComplete="off" className="grid gap-4 sm:grid-cols-2"><TextField label={t("username")} value={form.username} onChange={(value) => update("username", value)} /><TextField label={t("displayName")} value={form.name} onChange={(value) => update("name", value)} /><SelectField label="Role" value={form.role} options={ROLE_OPTIONS} onChange={(value) => update("role", value)} /><SelectField label="Session" value={form.session} options={SESSION_OPTIONS} onChange={(value) => update("session", value)} /><TextField label={t("password")} type="password" value={form.password} onChange={(value) => update("password", value)} /><TextField label={t("confirmPassword")} type="password" value={form.confirmPassword} onChange={(value) => update("confirmPassword", value)} /><div className="sm:col-span-2 flex justify-end"><SubmitButton loading={submitting} text={t("createAccount")} /></div></form></FormCard>;
+  return <FormCard title={t("registerAccount")} description={t("registerAccountDescription")}><form onSubmit={submit} autoComplete="off" className="grid gap-4 sm:grid-cols-2"><TextField label={t("username")} value={form.username} onChange={(value) => update("username", value)} /><TextField label={t("displayName")} value={form.name} onChange={(value) => update("name", value)} /><SelectField label="Role" value={form.role} options={ROLE_OPTIONS} onChange={(value) => update("role", value)} /><SelectField label="Session" value={form.session} options={form.role === "admin" ? ["manage"] : SESSION_OPTIONS} onChange={(value) => update("session", value)} /><TextField label={t("password")} type="password" value={form.password} onChange={(value) => update("password", value)} /><TextField label={t("confirmPassword")} type="password" value={form.confirmPassword} onChange={(value) => update("confirmPassword", value)} /><div className="sm:col-span-2 flex justify-end"><SubmitButton loading={submitting} text={t("createAccount")} /></div></form></FormCard>;
 }
 
 function PasswordPanel({ currentUser }: { currentUser: ReturnType<typeof useAuth>["user"] }) {

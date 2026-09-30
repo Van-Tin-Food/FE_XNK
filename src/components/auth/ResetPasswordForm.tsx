@@ -20,7 +20,7 @@ export default function ResetPasswordForm() {
   const [success, setSuccess] = useState("");
 
   if (!canUpdatePassword) {
-    return <div className="flex w-full flex-1 items-center justify-center"><div className="w-full max-w-md rounded-2xl border border-error-200 bg-error-50 p-6 text-center dark:border-error-500/30 dark:bg-error-500/10"><h1 className="text-lg font-semibold text-error-700 dark:text-error-300">Không có quyền đổi mật khẩu</h1><p className="mt-2 text-sm text-error-600 dark:text-error-400">Chỉ tài khoản có role Admin và session all mới được sử dụng chức năng này.</p><Link href={user ? "/" : "/signin"} className="mt-5 inline-flex rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white">Quay lại</Link></div></div>;
+    return <div className="flex w-full flex-1 items-center justify-center"><div className="w-full max-w-md rounded-2xl border border-error-200 bg-error-50 p-6 text-center dark:border-error-500/30 dark:bg-error-500/10"><h1 className="text-lg font-semibold text-error-700 dark:text-error-300">Không có quyền đổi mật khẩu</h1><p className="mt-2 text-sm text-error-600 dark:text-error-400">Chỉ tài khoản có role Admin và session manage mới được sử dụng chức năng này.</p><Link href={user ? "/" : "/signin"} className="mt-5 inline-flex rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white">Quay lại</Link></div></div>;
   }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
