@@ -1,9 +1,11 @@
-import type { AuthUser, LoginResponse } from "@/types/auth";
+import type { AuthUser, LoginMfaInfo, LoginResponse } from "@/types/auth";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
 const AUTH_STORAGE_KEY = "dashboard_auth_user";
 export const AUTH_TOKEN_COOKIE_KEY = "xnk_auth_token";
+/** sessionStorage giữ pendingToken + state giữa 2 bước của luồng MFA Google. */
+export const GOOGLE_MFA_STORAGE_KEY = "xnk_google_mfa_pending";
 
 function storeTokenCookie(token: string): void {
   if (typeof document === "undefined") return;
@@ -44,8 +46,9 @@ function normalizeUser(payload: unknown, fallbackUsername: string): AuthUser {
     const name = String(payload.name ?? payload.fullName ?? payload.full_name ?? username).trim() || username;
     const role = String(payload.role ?? payload.userRole ?? payload.position ?? "User").trim() || "User";
     const session = String(payload.session ?? payload.sessionId ?? payload.session_id ?? "").trim() || undefined;
+    const email = String(payload.email ?? "").trim() || undefined;
     const token = String(payload.token ?? payload.accessToken ?? payload.access_token ?? "").trim() || undefined;
-    return { id: Number.isInteger(id) && id > 0 ? id : undefined, username, name, role, session, token };
+    return { id: Number.isInteger(id) && id > 0 ? id : undefined, username, name, role, session, email, token };
   }
 
   return {
@@ -82,7 +85,7 @@ function extractUser(json: LoginResponse, fallbackUsername: string): AuthUser {
   };
 }
 
-export async function login(username: string, password: string): Promise<AuthUser> {
+export async function login(username: string, password: string): Promise<AuthUser | LoginMfaInfo> {
   const apiPath = "/api/auth/login";
   try {
     const res = await fetch(backendApiUrl(apiPath), {
@@ -100,6 +103,18 @@ export async function login(username: string, password: string): Promise<AuthUse
       throw createHttpApiError("Đăng nhập", "POST", apiPath, res, data, nonJsonPreview);
     }
     if (data === null) throw createInvalidResponseError("Đăng nhập", "POST", apiPath, nonJsonPreview);
+
+    // Tài khoản có email + server đã bật Google OAuth: chưa cấp token phiên,
+    // trả về thông tin để FE chuyển hướng người dùng sang Google (bước 2).
+    if (json.mfaRequired && json.pendingToken && json.googleAuthUrl) {
+      const mfa: LoginMfaInfo = {
+        mfaRequired: true,
+        pendingToken: String(json.pendingToken),
+        googleAuthUrl: String(json.googleAuthUrl),
+        state: String(json.state || ""),
+      };
+      return mfa;
+    }
 
     const user = extractUser(json, username);
     if (!user.token) {
@@ -119,14 +134,13 @@ export interface AuthActionResponse {
   message?: string;
   error?: string;
   data?: unknown;
-}
- 
-export interface ManagedUser {
-  id: number;       
+}export interface ManagedUser {
+  id: number;      
   username: string;
   name: string;
   role: string;
   session: string;
+  email?: string;
 }
 
 function findUserRows(payload: unknown): unknown[] {
@@ -150,6 +164,7 @@ function normalizeManagedUser(payload: unknown): ManagedUser | null {
     name: String(payload.name ?? payload.fullName ?? payload.full_name ?? nestedUser.name ?? username).trim() || username,
     role: String(payload.role ?? payload.userRole ?? payload.user_role ?? nestedUser.role ?? "").trim(),
     session: String(payload.session ?? payload.sessionId ?? payload.session_id ?? nestedUser.session ?? "").trim(),
+    email: String(payload.email ?? nestedUser.email ?? "").trim() || undefined,
   };
 }
 
@@ -213,6 +228,8 @@ export interface RegisterUserPayload {
   password: string;
   role: string;
   session: string;
+  /** Email Google dùng cho bước xác thực 2 của đăng nhập. */
+  email?: string;
 }
 
 export function registerUser(payload: RegisterUserPayload): Promise<AuthActionResponse> {
@@ -241,12 +258,48 @@ export async function getUserById(id: number): Promise<ManagedUser> {
 
 export async function updateUser(
   id: number,
-  changes: Pick<ManagedUser, "role" | "session">,
+  changes: Pick<ManagedUser, "role" | "session"> & { email?: string },
 ): Promise<AuthActionResponse> {
   return await authRequest(`users/${id}`, {
     method: "PATCH",
     body: JSON.stringify(changes),
   }) as AuthActionResponse;
+}
+
+/**
+ * Bước 2 của luồng MFA Google: gửi authorization code + state + pendingToken
+ * lên backend. Backend đối chiếu email Google với tài khoản rồi cấp token phiên.
+ */
+export async function completeGoogleSignIn(params: {
+  code: string;
+  state: string;
+  pendingToken: string;
+}): Promise<AuthUser> {
+  const apiPath = "/api/auth/google/verify";
+  try {
+    const res = await fetch(backendApiUrl(apiPath), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    const { data, nonJsonPreview } = await parseApiResponse(res);
+    const json = (data || {}) as LoginResponse;
+    if (!res.ok) {
+      throw createHttpApiError("Xác thực Google", "POST", apiPath, res, data, nonJsonPreview);
+    }
+    if (data === null) throw createInvalidResponseError("Xác thực Google", "POST", apiPath, nonJsonPreview);
+
+    const user = extractUser(json, "google");
+    if (!user.token) {
+      throw new Error("Máy chủ chưa trả về token đăng nhập sau khi xác thực Google");
+    }
+    return storeUser(user);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw createNetworkApiError("Xác thực Google", "POST", apiPath, error);
+    }
+    throw error;
+  }
 }
 
 export function getStoredUser(): AuthUser | null {

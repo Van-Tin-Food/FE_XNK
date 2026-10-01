@@ -9,7 +9,7 @@ import { registerUser } from "@/services/authApi";
 import Link from "next/link";
 import React, { useState } from "react";
 
-const EMPTY_FORM = { username: "", name: "", password: "", confirmPassword: "", role: "van_chuyen", session: "view" };
+const EMPTY_FORM = { username: "", name: "", email: "", password: "", confirmPassword: "", role: "van_chuyen", session: "view" };
 
 export default function SignUpForm() {
   const { user } = useAuth();
@@ -34,14 +34,15 @@ export default function SignUpForm() {
     setError("");
     setSuccess("");
     const values = Object.fromEntries(Object.entries(form).map(([key, value]) => [key, value.trim()])) as typeof form;
-    if (Object.values(values).some((value) => !value)) return setError("Vui lòng nhập đầy đủ tất cả thông tin.");
+    if (!values.username || !values.name || !values.password || !values.confirmPassword) return setError("Vui lòng nhập đầy đủ username, tên, mật khẩu.");
+    if (values.email && !/^([^\s@]+@[^\s@]+\.[^\s@]+)$/.test(values.email)) return setError("Email không hợp lệ.");
     if (values.password !== values.confirmPassword) return setError("Mật khẩu xác nhận không khớp.");
     if (values.password.length < 6) return setError("Mật khẩu phải có ít nhất 6 ký tự.");
 
     setLoading(true);
     try {
-      const result = await registerUser({ username: values.username, name: values.name, password: values.password, role: values.role, session: values.session });
-      recordActivity(user, { action: "REGISTER_USER", location: "Auth/SignUp", detail: `Tạo tài khoản ${values.username}; role ${values.role}; session ${values.session}` });
+      const result = await registerUser({ username: values.username, name: values.name, email: values.email, password: values.password, role: values.role, session: values.session });
+      recordActivity(user, { action: "REGISTER_USER", location: "Auth/SignUp", detail: `Tạo tài khoản ${values.username}; role ${values.role}; session ${values.session}${values.email ? `; email ${values.email}` : ""}` });
       setSuccess(result.message || `Đã tạo tài khoản ${values.username}.`);
       setForm(EMPTY_FORM);
     } catch (submitError) {
@@ -56,6 +57,7 @@ export default function SignUpForm() {
       <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
         <Field label="Tên đăng nhập"><Input type="text" value={form.username} onChange={(e) => updateField("username", e.target.value)} autoComplete="off" placeholder="Nhập tên đăng nhập" /></Field>
         <Field label="Tên hiển thị"><Input type="text" value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="Nhập tên người dùng" /></Field>
+        <Field label="Email Google (xác thực 2 bước)"><Input type="email" value={form.email} onChange={(e) => updateField("email", e.target.value)} autoComplete="off" placeholder="ten@vantinfood.vn" /></Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Role"><select value={form.role} onChange={(e) => updateField("role", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{RBAC_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</select></Field>
           <Field label="Session"><select value={form.session} disabled={form.role === "admin"} onChange={(e) => updateField("session", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-60 focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{(form.role === "admin" ? ["manage"] : RBAC_SESSIONS).map((session) => <option key={session} value={session}>{session}</option>)}</select></Field>

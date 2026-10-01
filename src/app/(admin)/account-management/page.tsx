@@ -27,6 +27,7 @@ type TabKey = "users" | "register" | "password";
 const EMPTY_REGISTER = {
   username: "",
   name: "",
+  email: "",
   password: "",
   confirmPassword: "",
   role: "van_chuyen",
@@ -51,6 +52,7 @@ export default function AccountManagementPage() {
   const [editing, setEditing] = useState<ManagedUser | null>(null);
   const [editRole, setEditRole] = useState("van_chuyen");
   const [editSession, setEditSession] = useState("view");
+  const [editEmail, setEditEmail] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
 
   const loadUsers = useCallback(async () => {
@@ -96,6 +98,7 @@ export default function AccountManagementPage() {
       const session = latest.session.toLowerCase();
       setEditRole((ROLE_OPTIONS as string[]).includes(role) ? role as RbacRole : "van_chuyen");
       setEditSession((SESSION_OPTIONS as string[]).includes(session) ? session as RbacSession : "view");
+      setEditEmail(latest.email || "");
     } catch (loadError) {
       notify(loadError instanceof Error ? loadError.message : t("userInfoLoadError"), "error");
     }
@@ -103,6 +106,11 @@ export default function AccountManagementPage() {
 
   const savePermission = async () => {
     if (!editing) return;
+    const normalizedEmail = editEmail.trim().toLowerCase();
+    if (normalizedEmail && !/^([^\s@]+@[^\s@]+\.[^\s@]+)$/.test(normalizedEmail)) {
+      notify("Email không hợp lệ.", "warning");
+      return;
+    }
     const approved = await confirm({
       title: t("confirmPermissionUpdate"),
       message: t("permissionUpdateMessage", { username: editing.username, role: editRole, session: editSession }),
@@ -112,10 +120,15 @@ export default function AccountManagementPage() {
 
     setSavingEdit(true);
     try {
-      await updateUser(editing.id, { role: editRole, session: editSession });
+      await updateUser(editing.id, {
+        role: editRole,
+        session: editSession,
+        ...(normalizedEmail !== (editing.email || "").trim().toLowerCase() ? { email: normalizedEmail } : {}),
+      });
       const changes = [
         editing.role !== editRole ? `role: ${editing.role || "trống"} → ${editRole}` : "",
         editing.session !== editSession ? `session: ${editing.session || "trống"} → ${editSession}` : "",
+        (editing.email || "") !== normalizedEmail ? `email: ${editing.email || "trống"} → ${normalizedEmail || "trống"}` : "",
       ].filter(Boolean).join("; ");
       recordActivity(user, {
         action: "UPDATE_USER_PERMISSION",
@@ -123,7 +136,7 @@ export default function AccountManagementPage() {
         detail: `Tài khoản ${editing.username}; ${changes || "không thay đổi quyền"}`,
       });
       setUsers((current) => current.map((item) =>
-        item.id === editing.id ? { ...item, role: editRole, session: editSession } : item,
+        item.id === editing.id ? { ...item, role: editRole, session: editSession, email: normalizedEmail || undefined } : item,
       ));
       setEditing(null);
       notify(t("permissionUpdated", { username: editing.username }), "success");
@@ -183,6 +196,9 @@ export default function AccountManagementPage() {
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <SelectField label="Role" value={editRole} options={ROLE_OPTIONS} onChange={setEditRole} />
               <SelectField label="Session" value={editSession} options={SESSION_OPTIONS} onChange={setEditSession} />
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email Google (xác thực 2 bước)<input type="email" value={editEmail} onChange={(event) => setEditEmail(event.target.value)} placeholder="ten@vantinfood.vn" className="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></label>
+              </div>
             </div>
             <div className="mt-6 flex justify-end gap-2">
               <button type="button" disabled={savingEdit} onClick={() => setEditing(null)} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
@@ -241,19 +257,21 @@ function RegisterPanel({ currentUser, onCreated }: { currentUser: ReturnType<typ
     event.preventDefault();
     const values = { ...form, username: form.username.trim(), name: form.name.trim() };
     if (!values.username || !values.name || !values.password || !values.confirmPassword) return notify(t("requiredAccountFields"), "warning");
+    const normalizedEmail = values.email.trim().toLowerCase();
+    if (normalizedEmail && !/^([^\s@]+@[^\s@]+\.[^\s@]+)$/.test(normalizedEmail)) return notify("Email không hợp lệ.", "warning");
     if (values.password.length < 6) return notify(t("passwordMinLength"), "warning");
     if (values.password !== values.confirmPassword) return notify(t("passwordMismatch"), "warning");
     setSubmitting(true);
     try {
-      const result = await registerUser({ username: values.username, name: values.name, password: values.password, role: values.role, session: values.session });
-      recordActivity(currentUser, { action: "REGISTER_USER", location: "/account-management", detail: `Tạo tài khoản ${values.username}; role ${values.role}; session ${values.session}` });
+      const result = await registerUser({ username: values.username, name: values.name, email: normalizedEmail, password: values.password, role: values.role, session: values.session });
+      recordActivity(currentUser, { action: "REGISTER_USER", location: "/account-management", detail: `Tạo tài khoản ${values.username}; role ${values.role}; session ${values.session}${normalizedEmail ? `; email ${normalizedEmail}` : ""}` });
       notify(result.message || t("accountCreated", { username: values.username }), "success");
       setForm(EMPTY_REGISTER);
       onCreated();
     } catch (submitError) { notify(submitError instanceof Error ? submitError.message : t("accountCreateError"), "error"); }
     finally { setSubmitting(false); }
   };
-  return <FormCard title={t("registerAccount")} description={t("registerAccountDescription")}><form onSubmit={submit} autoComplete="off" className="grid gap-4 sm:grid-cols-2"><TextField label={t("username")} value={form.username} onChange={(value) => update("username", value)} /><TextField label={t("displayName")} value={form.name} onChange={(value) => update("name", value)} /><SelectField label="Role" value={form.role} options={ROLE_OPTIONS} onChange={(value) => update("role", value)} /><SelectField label="Session" value={form.session} options={form.role === "admin" ? ["manage"] : SESSION_OPTIONS} onChange={(value) => update("session", value)} /><TextField label={t("password")} type="password" value={form.password} onChange={(value) => update("password", value)} /><TextField label={t("confirmPassword")} type="password" value={form.confirmPassword} onChange={(value) => update("confirmPassword", value)} /><div className="sm:col-span-2 flex justify-end"><SubmitButton loading={submitting} text={t("createAccount")} /></div></form></FormCard>;
+  return <FormCard title={t("registerAccount")} description={t("registerAccountDescription")}><form onSubmit={submit} autoComplete="off" className="grid gap-4 sm:grid-cols-2"><TextField label={t("username")} value={form.username} onChange={(value) => update("username", value)} /><TextField label={t("displayName")} value={form.name} onChange={(value) => update("name", value)} /><div className="sm:col-span-2"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email Google (xác thực 2 bước)<input type="email" value={form.email} onChange={(event) => update("email", event.target.value)} placeholder="ten@vantinfood.vn" className="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></label></div><SelectField label="Role" value={form.role} options={ROLE_OPTIONS} onChange={(value) => update("role", value)} /><SelectField label="Session" value={form.session} options={form.role === "admin" ? ["manage"] : SESSION_OPTIONS} onChange={(value) => update("session", value)} /><TextField label={t("password")} type="password" value={form.password} onChange={(value) => update("password", value)} /><TextField label={t("confirmPassword")} type="password" value={form.confirmPassword} onChange={(value) => update("confirmPassword", value)} /><div className="sm:col-span-2 flex justify-end"><SubmitButton loading={submitting} text={t("createAccount")} /></div></form></FormCard>;
 }
 
 function PasswordPanel({ currentUser }: { currentUser: ReturnType<typeof useAuth>["user"] }) {

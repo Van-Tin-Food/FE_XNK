@@ -2,12 +2,18 @@
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
-import { login } from "@/services/authApi";
+import { login, GOOGLE_MFA_STORAGE_KEY } from "@/services/authApi";
+import type { LoginMfaInfo } from "@/types/auth";
 import { ChevronLeftIcon, EyeCloseIcon, EyeIcon } from "@/icons";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
 import React, { useRef, useState } from "react";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
+
+/** true nếu kết quả login là nhánh cần xác thực thêm bằng Google. */
+function isLoginMfaInfo(value: unknown): value is LoginMfaInfo {
+  return typeof value === "object" && value !== null && (value as LoginMfaInfo).mfaRequired === true;
+}
 
 export default function SignInForm() {
   const [showPassword, setShowPassword] = useState(false);
@@ -28,8 +34,22 @@ export default function SignInForm() {
     setLoading(true);
 
     try {
-      const user = await login(username, password);
-      setUser(user);
+      const result = await login(username, password);
+      // Tài khoản liên kết email Google: mật khẩu đúng mới là bước 1, chuyển
+      // người dùng sang Google để xác thực bước 2 trước khi vào trang chủ.
+      if (isLoginMfaInfo(result)) {
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(GOOGLE_MFA_STORAGE_KEY, JSON.stringify({
+            pendingToken: result.pendingToken,
+            state: result.state,
+            createdAt: Date.now(),
+          }));
+        }
+        setError("");
+        window.location.href = result.googleAuthUrl;
+        return;
+      }
+      setUser(result);
       window.location.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
