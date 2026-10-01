@@ -63,7 +63,9 @@ export default function ActivityLogsPage() {
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [emailLogs, setEmailLogs] = useState<EmailActivityLog[]>([]);
-  const [activeTab, setActiveTab] = useState<"activity" | "email">(() => searchParams.get("tab") === "email" ? "email" : "activity");
+  // Tab (Lịch sử thao tác / Nhật kí email) lấy trực tiếp từ URL (?tab=). Sidebar là nơi duy nhất
+  // chuyển mục — vào mục nào hiện đúng mục đó, không còn state riêng nên không thể lệch tab.
+  const activeTab: "activity" | "email" = searchParams.get("tab") === "email" ? "email" : "activity";
   const [activityAction, setActivityAction] = useState("all");
   const [activityRole, setActivityRole] = useState("all");
   const [activitySession, setActivitySession] = useState("all");
@@ -149,12 +151,6 @@ export default function ActivityLogsPage() {
   const from = activePage.from;
   const to = activePage.to;
 
-  const switchTab = (nextTab: "activity" | "email") => {
-    setActiveTab(nextTab);
-    setQuery("");
-    setPage(1);
-  };
-
   const clearEmailFilters = () => {
     setQuery("");
     setEmailStatus("all");
@@ -174,11 +170,6 @@ export default function ActivityLogsPage() {
     setPage(1);
   };
 
-  useEffect(() => {
-    const nextTab = searchParams.get("tab") === "email" ? "email" : "activity";
-    setActiveTab((current) => current === nextTab ? current : nextTab);
-  }, [searchParams]);
-
   if (!canViewLogs) return <div className="flex min-h-[50vh] items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>;
 
   return (
@@ -190,10 +181,7 @@ export default function ActivityLogsPage() {
         </div>
         <button type="button" onClick={() => void loadLogs()} disabled={loading} className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">{loading ? t("loading") : t("refreshData")}</button>
       </div>
-      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
-        <button type="button" onClick={() => switchTab("activity")} className={`border-b-2 px-4 py-3 text-sm font-semibold ${activeTab === "activity" ? "border-brand-500 text-brand-600" : "border-transparent text-gray-500"}`}>{t("activityLogs")}</button>
-        <button type="button" onClick={() => switchTab("email")} className={`border-b-2 px-4 py-3 text-sm font-semibold ${activeTab === "email" ? "border-brand-500 text-brand-600" : "border-transparent text-gray-500"}`}>{t("emailLogs")}</button>
-      </div>
+      {/* Bỏ tab bar: mục nào trên sidebar được click thì hiện đúng mục đó — không cần chuyển tab trên trang */}
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
         <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
