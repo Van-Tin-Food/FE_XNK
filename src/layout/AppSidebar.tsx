@@ -17,11 +17,12 @@ const AppSidebar: React.FC = () => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const showText = isExpanded || isHovered || isMobileOpen;
-  const [supportOpen, setSupportOpen] = useState(pathname === "/email");
+  const [supportOpen, setSupportOpen] = useState(pathname === "/email" || pathname === "/document-sync");
   const [catalogOpen, setCatalogOpen] = useState(pathname === "/master-data");
   const [logsOpen, setLogsOpen] = useState(pathname === "/activity-logs");
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
   const canSendEmail = canPerformShipmentAction(user, "sendEmail");
+  const canSyncDocuments = canPerformShipmentAction(user, "syncDocuments");
   const canManageUsers = canPerformShipmentAction(user, "viewUsers") || canPerformShipmentAction(user, "manageUsers");
   const canManageMasterData = canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData");
   const { t } = useLanguage();
@@ -160,7 +161,7 @@ const AppSidebar: React.FC = () => {
             </li>
           )}
 
-          {canSendEmail && (
+          {(canSendEmail || canSyncDocuments) && (
             <li>
               <button type="button" onClick={() => setSupportOpen((current) => !current)} className={`menu-item group w-full ${supportOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={supportOpen}>
                 <span className={supportOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
@@ -169,7 +170,10 @@ const AppSidebar: React.FC = () => {
                 {showText && <span className="menu-item-text">{t("supportTools")}</span>}
                 {showText && <span className="ml-auto text-xs">{supportOpen ? "−" : "+"}</span>}
               </button>
-              {supportOpen && showText && <ul className="mt-1 space-y-1 pl-11"><li><Link href="/email" className={`block rounded-lg px-3 py-2 text-sm ${pathname === "/email" ? "bg-brand-50 font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300" : "text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]"}`}>{t("emailSendButton")}</Link></li></ul>}
+              {supportOpen && showText && <ul className="mt-1 space-y-1 pl-11">
+                {canSendEmail && <li><Link href="/email" className={`block rounded-lg px-3 py-2 text-sm ${pathname === "/email" ? "bg-brand-50 font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300" : "text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]"}`}>{t("emailSendButton")}</Link></li>}
+                {canSyncDocuments && <li><Link href="/document-sync" className={`block rounded-lg px-3 py-2 text-sm ${pathname === "/document-sync" ? "bg-brand-50 font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300" : "text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]"}`}>{t("documentSync")}</Link></li>}
+              </ul>}
             </li>
           )}
           {canSendEmail && supportOpen && showText && (

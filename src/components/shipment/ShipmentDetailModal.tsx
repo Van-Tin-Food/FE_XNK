@@ -168,7 +168,22 @@ const STAGE_DOC_GROUPS: Record<Exclude<ShipmentFlowStage["key"], "delivered">, s
 const DOCUMENT_DISPLAY_ORDER = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
   "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONG",
+  "AN", "EDO", "CPN", "INSPECTION",
 ];
+
+const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION"]);
+const OPTIONAL_DOCUMENT_OPTIONS = [
+  { code: "AN", label: "AN - Giấy chứng nhận kiểm dịch an toàn thực phẩm" },
+  { code: "EDO", label: "EDO - Lệnh giao hàng điện tử" },
+  { code: "CPN", label: "CPN - Chứng từ CPN quốc tế" },
+  { code: "INSPECTION", label: "INSPECTION - Ảnh/video kiểm dịch" },
+] as const;
+const OPTIONAL_DOCUMENT_COLORS: Record<string, { badge: string; dot: string }> = {
+  AN: { badge: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300", dot: "bg-emerald-500" },
+  EDO: { badge: "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300", dot: "bg-sky-500" },
+  CPN: { badge: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300", dot: "bg-amber-500" },
+  INSPECTION: { badge: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300", dot: "bg-violet-500" },
+};
 
 type CarrierTrackingLink = {
   name: string;
@@ -1118,6 +1133,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isOcrAnalyzing, setIsOcrAnalyzing] = useState(false);
   const [isOcrSaving, setIsOcrSaving] = useState(false);
   const [ocrUploadError, setOcrUploadError] = useState("");
+  const [allowMultipleUpload, setAllowMultipleUpload] = useState(false);
   const [passingDocumentId, setPassingDocumentId] = useState<string | null>(null);
   const [locallyPassedDocumentIds, setLocallyPassedDocumentIds] = useState<string[]>([]);
   const [selectedMissingDocIds, setSelectedMissingDocIds] = useState<string[]>([]);
@@ -1389,7 +1405,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     ].filter((file, index, allFiles) => file.url && allFiles.findIndex((other) => other.url === file.url) === index);
     return { document, files };
   });
-  const missingDocs = documentsSorted.filter(d => d.status === "missing" || d.status === "pending");
+  const requiredDocumentsSorted = documentsSorted.filter((document) => !OPTIONAL_DOCUMENT_CODES.has(document.id.toUpperCase()));
+  const optionalDocuments = documentsSorted.filter((document) => OPTIONAL_DOCUMENT_CODES.has(document.id.toUpperCase()));
+  const missingDocs = requiredDocumentsSorted.filter(d => d.status === "missing" || d.status === "pending");
   const selectedMissingDocs = missingDocs.filter((doc) => selectedMissingDocIds.includes(doc.id));
   const isDocumentsComplete = shipment.docStatus === 1 || (
     shipment.totalDocs > 0 && shipment.receivedDocs >= shipment.totalDocs && missingDocs.length === 0
@@ -1523,9 +1541,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       const message = result.message?.trim();
 
       if (!response.ok || result.success !== true) {
-        throw new Error(
-          message || `Không thể mở tracking ${carrierTrackingLink.name}.`,
-        );
+        console.error("[Backend API tracking]", {
+          status: response.status,
+          carrier: carrierTrackingLink.name,
+          message,
+        });
+        throw new Error(`Không thể mở tracking ${carrierTrackingLink.name}. Vui lòng thử lại sau.`);
       }
 
       setTrackingFeedback({
@@ -1535,9 +1556,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     } catch (error) {
       setTrackingFeedback({
         type: "error",
-        message: error instanceof Error
-          ? error.message
-          : `Không thể mở tracking ${carrierTrackingLink.name}.`,
+        message: error instanceof Error ? error.message : `Không thể mở tracking ${carrierTrackingLink.name}.`,
       });
     } finally {
       setIsOpeningTracking(false);
@@ -1573,9 +1592,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     }
   };
 
-  const handlePickUpload = (docId: string) => {
+  const handlePickUpload = (docId: string, multiple = false) => {
     if (!canUploadDocuments || archived?.archived) return;
     setSelectedMissingDocIds([docId]);
+    setAllowMultipleUpload(multiple);
     window.setTimeout(() => document.getElementById("shipment-document-upload")?.click(), 0);
   };
 
@@ -1620,6 +1640,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const docId = selectedMissingDocIds[0];
     if (!file || !docId || !canUploadDocuments || archived?.archived || isOcrAnalyzing || isOcrSaving) return;
     event.target.value = "";
+    setAllowMultipleUpload(false);
     const documentType = getOcrDocumentType(docId);
     setOcrUploadError("");
     setOcrUploadRows([]);
@@ -2193,7 +2214,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         ))}
       </div>
 
-      <input id="shipment-document-upload" type="file" className="hidden" accept={DOCUMENT_FILE_ACCEPT} onChange={handleUploadSelected} />
+      <input id="shipment-document-upload" type="file" className="hidden" accept={DOCUMENT_FILE_ACCEPT} multiple={allowMultipleUpload} onChange={handleUploadSelected} />
 
       {/* Tab Content */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 custom-scrollbar sm:px-6 sm:py-5">
@@ -2690,7 +2711,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
             {/* Document list */}
             <div className="flex flex-col gap-2">
-              {documentsSorted.map(doc => {
+              {requiredDocumentsSorted.map(doc => {
                 const docStatus = DOC_STATUS_MAP[doc.status];
                 const isPassed = doc.note?.toUpperCase().includes("PASS") === true;
                 const documentFiles = documentFileGroups.find((group) => group.document.id === doc.id)?.files || [];
@@ -2800,6 +2821,94 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <p className="py-8 text-center text-sm text-gray-400">{t("noDocuments")}</p>
               )}
             </div>
+
+            <section className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-white/[0.02]">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-gray-800 dark:text-white">Chứng từ đính kèm</h3>
+                  <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">Không bắt buộc</span>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{isArchived ? "Hồ sơ đã lưu trữ, không thể bổ sung file" : "Bấm vào ô để chọn một hoặc nhiều file"}</p>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {optionalDocuments.map((document) => {
+                  const files = documentFileGroups.find((group) => group.document.id === document.id)?.files || [];
+                  const option = OPTIONAL_DOCUMENT_OPTIONS.find((item) => item.code === document.id);
+                  const color = OPTIONAL_DOCUMENT_COLORS[document.id] || OPTIONAL_DOCUMENT_COLORS.AN;
+                  const hasFile = document.status === "ok" && files.length > 0;
+                  return (
+                    <div
+                      key={document.id}
+                      role="button"
+                      tabIndex={archived?.archived || !canUploadDocuments ? -1 : 0}
+                      onClick={() => {
+                        if (!archived?.archived && canUploadDocuments) handlePickUpload(document.id, true);
+                      }}
+                      onKeyDown={(event) => {
+                        if ((event.key === "Enter" || event.key === " ") && !archived?.archived && canUploadDocuments) {
+                          event.preventDefault();
+                          handlePickUpload(document.id, true);
+                        }
+                      }}
+                      className={`group flex min-w-0 flex-col items-start gap-3 rounded-lg border bg-white p-3 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${!archived?.archived && canUploadDocuments ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
+                    >
+                      <div className="flex w-full items-center justify-between gap-2">
+                        <span className={`flex h-8 min-w-12 items-center justify-center rounded-md px-2 text-[11px] font-bold ${color.badge}`}>
+                          {document.id}
+                        </span>
+                        {hasFile && <span className={`h-2 w-2 rounded-full ${color.dot}`} title="Đã có file" />}
+                      </div>
+                      <div className="min-w-0 w-full">
+                        <p className="truncate text-xs font-semibold text-gray-700 dark:text-gray-200">{option?.label.split(" - ").slice(1).join(" - ") || document.name}</p>
+                        <p className={`mt-1 text-[11px] ${hasFile ? "text-success-600 dark:text-success-400" : "text-gray-400"}`}>
+                          {hasFile ? `${files.length} file đã đính kèm` : "Bấm để chọn file"}
+                        </p>
+                      </div>
+                      {hasFile && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (files.length > 1) {
+                              setOpenDocumentFileListId((current) => current === document.id ? null : document.id);
+                              return;
+                            }
+                            setPreviewUrl(toDocumentPreviewUrl(files[0].url));
+                            setPreviewName(document.name);
+                            setIsPreviewCollapsed(false);
+                          }}
+                          className="w-full rounded-md border border-gray-200 px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                        >
+                          {files.length > 1 ? `Xem ${files.length} file` : "Xem file"}
+                        </button>
+                      )}
+                      {openDocumentFileListId === document.id && files.length > 1 && (
+                        <div className="w-full space-y-1 border-t border-gray-100 pt-2 dark:border-gray-800">
+                          {files.map((file, index) => (
+                            <button
+                              key={`${file.url}-${index}`}
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setPreviewUrl(toDocumentPreviewUrl(file.url));
+                                setPreviewName(`${document.name} — ${file.label}`);
+                                setIsPreviewCollapsed(false);
+                                setOpenDocumentFileListId(null);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
+                            >
+                              <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-300">{document.id} {index + 1}</span>
+                              <span className="min-w-0 truncate">{file.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
           </div>
         )}
 

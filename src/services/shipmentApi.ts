@@ -24,7 +24,9 @@ export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
 const DOCUMENT_CODES = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
   "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONG",
+  "AN", "EDO", "CPN", "INSPECTION",
 ] as const;
+const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION"]);
 
 const FLOW_DOCUMENT_GROUPS: Array<{ key: Shipment["flowStageKey"]; docs: string[] }> = [
   // Đơn đã xuất hiện trong bảng nghĩa là PI đã được tạo. Hành trình bắt đầu từ INV/PKL.
@@ -80,7 +82,8 @@ function parseDate(value: unknown): string | undefined {
 
 const DOCUMENT_FIELD_MAP = {
   PI: "pi", INV: "inv", PKL: "pkl", BL: "bl", CO: "co", HC: "hc",
-  DON_KD: "don_kd", BB_LM: "bb_lm", PHI_TK: "phi_tk", THUE_NK: "thue_nk",
+  DON_KD: "don_kd", AN: "an", EDO: "edo", CPN: "cpn", INSPECTION: "inspection",
+  BB_LM: "bb_lm", PHI_TK: "phi_tk", THUE_NK: "thue_nk",
   TK: "tk", "15B": "15b", QDTQ: "qdtq", MV: "mv", TRA_CONG: "tra_cong",
 } as const satisfies Record<(typeof DOCUMENT_CODES)[number], keyof DriveDocumentRecord>;
 
@@ -250,8 +253,9 @@ function mapPostgresShipment(
   const containers = bills.flatMap((bill) => bill.containers);
   const itemCodes = details.flatMap((detail) => detail.itemCodes);
   const documents = buildDocuments(total);
-  const receivedDocs = documents.filter((document) => document.status === "ok").length;
-  const totalDocs = documents.length;
+  const requiredDocuments = documents.filter((document) => !OPTIONAL_DOCUMENT_CODES.has(document.id));
+  const receivedDocs = requiredDocuments.filter((document) => document.status === "ok").length;
+  const totalDocs = requiredDocuments.length;
   const completeByDocuments = receivedDocs === totalDocs && totalDocs > 0;
   const flowStageKey = completeByDocuments
     ? "delivered"
@@ -308,7 +312,7 @@ function mapPostgresShipment(
     docStatus: completeByDocuments ? 1 : Number(total?.status ?? 0),
     totalDocs,
     receivedDocs,
-    missingDocs: documents.filter((document) => document.status !== "ok").map((document) => document.id).join(", "),
+    missingDocs: requiredDocuments.filter((document) => document.status !== "ok").map((document) => document.id).join(", "),
     timeUpdate: total?.date_time || undefined,
     documents,
     flowStageKey,
@@ -364,6 +368,91 @@ export function moveCompletedOrder(orderCode: string): Promise<DriveDataResponse
   return requestJson<DriveDataResponse>(`moveCompletedOrder?orderCode=${encodeURIComponent(orderCode)}`, { method: "POST" });
 }
 
+export interface DocumentSyncCandidate {
+  candidateId: string;
+  fileId: string;
+  fileName: string;
+  fileUrl: string;
+  documentCode: string;
+  folderName: string;
+  orderCode: string;
+  nameValid: boolean;
+  expectedFileName: string;
+}
+
+export interface DatabaseOnlyDocumentFile {
+  orderCode: string;
+  documentCode: string;
+  fileId: string;
+  fileName?: string | null;
+  fileUrl?: string | null;
+  reason: "not_found" | "trashed";
+}
+
+export interface DocumentSyncResult {
+  success: boolean;
+  snapshotId: string;
+  createdAt: string;
+  summary: {
+    scannedFiles: number;
+    removedFromDatabase: number;
+    pendingCandidates: number;
+    driveOnlyFiles: number;
+    databaseOnlyFiles: number;
+    unresolvedFiles: number;
+    trashedFiles: number;
+  };
+  candidates: DocumentSyncCandidate[];
+  databaseOnlyFiles: DatabaseOnlyDocumentFile[];
+  autoAddedFiles: Array<{ fileId: string; fileName: string; documentCode: string; orderCode: string }>;
+  unresolvedFiles: Array<{ fileId: string; fileName: string; documentCode: string; orderCode: string | null; folderName: string }>;
+  trashedFiles: Array<{ fileId: string; fileName?: string | null; documentCode: string; orderCode: string; fileUrl?: string | null }>;
+}
+
+export function scanDocumentSync(): Promise<DocumentSyncResult> {
+  return requestJson<DocumentSyncResult>("document-sync/scan", { method: "POST" });
+}
+
+export function acceptDocumentSync(candidateId: string, data: Record<string, string> = {}): Promise<unknown> {
+  return requestJson("document-sync/accept", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidateId, ...data }),
+  });
+}
+
+export function rejectDocumentSync(candidateId: string): Promise<{ success: boolean }> {
+  return requestJson<{ success: boolean }>("document-sync/reject", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidateId }),
+  });
+}
+
+export function restoreDocumentSync(fileId: string, documentCode: string): Promise<{ success: boolean; fileName?: string }> {
+  return requestJson<{ success: boolean; fileName?: string }>("document-sync/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileId, documentCode }),
+  });
+}
+
+export function renameDocumentSync(candidateId: string, fileName: string, documentCode: string): Promise<{
+  success: boolean;
+  candidateId: string;
+  fileId: string;
+  fileName: string;
+  fileUrl: string;
+  orderCode: string;
+  documentCode: string;
+}> {
+  return requestJson("document-sync/rename", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidateId, fileName, documentCode }),
+  });
+}
+
 export interface UploadDocumentPayload {
   action: "uploadDocument";
   orderCode: string;
@@ -376,11 +465,22 @@ export interface UploadDocumentPayload {
   requestId: string;
 }
 export async function uploadDocument(payload: UploadDocumentPayload): Promise<DriveDataResponse> {
-  const result = await requestJson<DriveDataResponse>("uploadDocument", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  let result: DriveDataResponse;
+  try {
+    result = await requestJson<DriveDataResponse>("uploadDocument", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code || "")
+      : "";
+    if (code === "GOOGLE_DRIVE_FOLDER_NOT_FOUND") {
+      throw new Error("Tài khoản Google chưa được cấp quyền truy cập thư mục chứng từ. Vui lòng kiểm tra lại quyền Google Drive hoặc liên hệ quản trị viên.");
+    }
+    throw error;
+  }
   if (!result.fileUrl) throw new Error("[Upload chứng từ] Backend không trả fileUrl sau khi lưu file Drive");
 
   // Upload đã thành công: yêu cầu dropdown tải lại bảng thong_bao PostgreSQL.

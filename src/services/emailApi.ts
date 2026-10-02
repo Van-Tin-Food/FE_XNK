@@ -48,8 +48,12 @@ export async function sendContactEmail(payload: SendEmailPayload): Promise<SendE
   });
 
   const result = (await response.json().catch(() => null)) as (SendEmailResult & { message?: string }) | null;
-  if (!response.ok || !result) {
-    throw new Error(result?.message || "Không thể gửi email. Vui lòng thử lại sau.");
+  if (!response.ok || !result || result.success === false) {
+    console.error("[Backend API email]", {
+      status: response.status,
+      message: result?.message,
+    });
+    throw new Error("Không thể gửi email. Vui lòng kiểm tra thông tin người nhận và thử lại.");
   }
   return result;
 }

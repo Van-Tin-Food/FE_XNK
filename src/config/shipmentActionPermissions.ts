@@ -23,6 +23,7 @@ export type ShipmentActionPermissionKey =
   | "registerUser"
   | "updateUserPassword"
   | "sendEmail"
+  | "syncDocuments"
   | "exportShipments";
 
 const ROLE_ALIASES: Record<string, RbacRole> = {
@@ -45,15 +46,16 @@ const ROLE_ACTIONS: Record<RbacRole, Set<ShipmentActionPermissionKey> | "all"> =
   it: new Set(["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs"]),
   logistic: new Set([
     "createShipment", "uploadDocument", "passDocument", "archiveDocuments",
-    "editReturnItem", "editShipmentDetails", "cancelShipment", "viewEmailLogs", "exportShipments",
+    "editReturnItem", "editShipmentDetails", "cancelShipment", "viewEmailLogs", "syncDocuments", "exportShipments",
   ]),
-  van_chuyen: new Set(["uploadDocument", "editReturnItem", "exportShipments"]),
+  van_chuyen: new Set(["uploadDocument", "editReturnItem", "syncDocuments", "exportShipments"]),
 };
 
 const MANAGE_ACTIONS = new Set<ShipmentActionPermissionKey>([
   "createShipment", "uploadDocument", "passDocument", "archiveDocuments",
   "editReturnItem", "editShipmentDetails", "cancelShipment", "manageUsers",
   "manageMasterData", "registerUser", "updateUserPassword", "sendEmail", "exportShipments",
+  "syncDocuments",
 ]);
 
 export function normalizeRole(value?: string): string {

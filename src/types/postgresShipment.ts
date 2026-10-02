@@ -108,6 +108,10 @@ export interface DriveDocumentRecord {
   co?: DriveDocumentValue;
   hc?: DriveDocumentValue;
   don_kd?: DriveDocumentValue;
+  an?: DriveDocumentValue;
+  edo?: DriveDocumentValue;
+  cpn?: DriveDocumentValue;
+  inspection?: DriveDocumentValue;
   bb_lm?: DriveDocumentValue;
   phi_tk?: DriveDocumentValue;
   thue_nk?: DriveDocumentValue;

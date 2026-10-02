@@ -1,6 +1,7 @@
 export const DOCUMENT_FILE_EXTENSIONS = [
   "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "rtf",
   "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif",
+  "mp4", "mov", "avi", "mkv", "webm",
 ] as const;
 
 export const DOCUMENT_FILE_ACCEPT = DOCUMENT_FILE_EXTENSIONS
@@ -28,6 +29,11 @@ const DOCUMENT_MIME_TYPES: Record<string, string> = {
   tiff: "image/tiff",
   heic: "image/heic",
   heif: "image/heif",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  avi: "video/x-msvideo",
+  mkv: "video/x-matroska",
+  webm: "video/webm",
 };
 
 function getFileExtension(fileName: string): string {
