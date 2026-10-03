@@ -1,6 +1,7 @@
 "use client";
 
 import { canPerformShipmentAction, RBAC_ROLES, RBAC_SESSIONS, type RbacRole, type RbacSession } from "@/config/shipmentActionPermissions";
+import SearchSuggestions from "@/components/common/SearchSuggestions";
 import { useAuth } from "@/context/AuthContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
@@ -221,7 +222,14 @@ function UserList({ users, total, loading, error, query, page, totalPages, pageS
       <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
         <div><h2 className="font-semibold text-gray-800 dark:text-white/90">{t("systemUsers")}</h2><p className="text-xs text-gray-400">{t("accountCount", { count: total })}</p></div>
         <div className="flex w-full gap-2 sm:w-auto">
-          <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder={t("searchAccounts")} className="h-10 min-w-0 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:w-72" />
+          <SearchSuggestions
+            value={query}
+            onChange={onQueryChange}
+            suggestions={users.flatMap((item) => [item.username, item.name, item.role, item.session])}
+            placeholder={t("searchAccounts")}
+            ariaLabel={t("searchAccounts")}
+            className="h-10 min-w-0 w-full flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:w-72"
+          />
           <button type="button" onClick={onReload} disabled={loading} className="rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-300">{t("refreshData")}</button>
         </div>
       </div>

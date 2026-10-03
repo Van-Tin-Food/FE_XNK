@@ -1,6 +1,7 @@
 "use client";
 
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
+import SearchSuggestions from "@/components/common/SearchSuggestions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { getActivityLogs, getEmailDeliveryLogs, type ActivityLog, type EmailActivityLog } from "@/services/activityLogApi";
@@ -189,7 +190,16 @@ export default function ActivityLogsPage() {
             <h2 className="font-semibold text-gray-800 dark:text-white/90">{activeTab === "activity" ? t("operationHistory") : t("emailHistory")}</h2>
             <p className="mt-0.5 text-xs text-gray-500">{t("recordCount", { count: visibleCount })}</p>
           </div>
-          <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={activeTab === "activity" ? t("searchActivityLogs") : t("searchEmailLogs")} aria-label={activeTab === "activity" ? t("searchActivityLogs") : t("searchEmailLogs")} className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:max-w-sm" />
+          <SearchSuggestions
+            value={query}
+            onChange={(value) => { setQuery(value); setPage(1); }}
+            suggestions={activeTab === "activity"
+              ? logs.flatMap((log) => [actor(log), log.role, log.session, log.action, actionLabel(log.action, t), log.location]).filter((value): value is string => Boolean(value))
+              : emailLogs.flatMap((log) => [log.supplierName, log.supplierEmail, log.subject, log.userName, log.username]).filter((value): value is string => Boolean(value))}
+            placeholder={activeTab === "activity" ? t("searchActivityLogs") : t("searchEmailLogs")}
+            ariaLabel={activeTab === "activity" ? t("searchActivityLogs") : t("searchEmailLogs")}
+            className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:max-w-sm"
+          />
           </div>
           {activeTab === "email" && <div className="flex flex-col gap-2">
             <div className="flex flex-wrap gap-2">{(["all", "sent", "not sent"] as const).map((status) => <button key={status} type="button" onClick={() => { setEmailStatus(status); setPage(1); }} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${emailStatus === status ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 text-gray-500 dark:border-gray-700"}`}>{status === "all" ? t("allStatuses") : status === "sent" ? t("emailSentStatus") : t("emailNotSentStatus")}</button>)}</div>

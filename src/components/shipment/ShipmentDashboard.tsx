@@ -194,6 +194,12 @@ export default function ShipmentDashboard() {
       .map((shipment) => String(shipment.port || "").trim()).filter(Boolean),
   )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments, filter.port]);
 
+  const searchSuggestions = useMemo(() => [...new Set(
+    shipments.flatMap((shipment) => [shipment.orderCode, shipment.shipName])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right, "vi")), [shipments]);
+
   // Thẻ số liệu đếm theo phạm vi table sau lọc ETA + tìm kiếm (chưa lọc trạng thái
   // để mỗi thẻ vẫn đếm đúng trạng thái của nó, bấm vào mới lọc table).
   const metricScopeShipments = useMemo(
@@ -281,6 +287,7 @@ export default function ShipmentDashboard() {
         supplierOptions={supplierOptions}
         carrierOptions={carrierOptions}
         portOptions={portOptions}
+        searchSuggestions={searchSuggestions}
       />
 
       {/* Table */}

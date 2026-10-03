@@ -1,6 +1,7 @@
 "use client";
 
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
+import SearchSuggestions from "@/components/common/SearchSuggestions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
@@ -117,6 +118,7 @@ export default function EmailPage() {
         <div className="min-w-0">
           <SupplierList
             suppliers={supplierPagination.items}
+            suggestionSuppliers={suppliers}
             query={supplierQuery}
             selectedIds={selectedIds}
             allSelected={allVisibleSelected}
@@ -154,8 +156,9 @@ export default function EmailPage() {
   );
 }
 
-function SupplierList({ suppliers, query, selectedIds, allSelected, loading, canSend, onQuery, onToggleAll, onToggle }: {
+function SupplierList({ suppliers, suggestionSuppliers, query, selectedIds, allSelected, loading, canSend, onQuery, onToggleAll, onToggle }: {
   suppliers: SupplierRecord[];
+  suggestionSuppliers: SupplierRecord[];
   query: string;
   selectedIds: string[];
   allSelected: boolean;
@@ -170,7 +173,7 @@ function SupplierList({ suppliers, query, selectedIds, allSelected, loading, can
     <div className="flex min-h-[520px] min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
       <div className="border-b border-gray-100 p-4 dark:border-gray-800">
         <h2 className="font-semibold text-gray-800 dark:text-white/90">{t("suppliers")}</h2>
-        <input value={query} onChange={(event) => onQuery(event.target.value)} placeholder={t("emailSearchSupplier")} className="mt-3 h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
+        <SearchSuggestions value={query} onChange={onQuery} suggestions={suggestionSuppliers.flatMap((supplier) => [supplier.ten_ncc, supplier.email]).filter((value): value is string => Boolean(value))} placeholder={t("emailSearchSupplier")} ariaLabel={t("emailSearchSupplier")} className="mt-3 h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
       </div>
       <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800">
         <label className="flex items-center gap-2 text-xs font-semibold text-gray-600 dark:text-gray-300">

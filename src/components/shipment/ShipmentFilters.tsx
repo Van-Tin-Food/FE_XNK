@@ -2,6 +2,8 @@
 import React from "react";
 import type { ShipmentFilter, ShipmentFilterStatus } from "@/types/shipment";
 import { useLanguage } from "@/context/LanguageContext";
+import SearchSuggestions from "@/components/common/SearchSuggestions";
+import { toDateInputValue } from "@/utils/shipmentDateFilter";
 
 interface ShipmentFiltersProps {
   filter: ShipmentFilter;
@@ -9,6 +11,7 @@ interface ShipmentFiltersProps {
   supplierOptions: string[];
   carrierOptions: string[];
   portOptions: string[];
+  searchSuggestions?: string[];
 }
 
 const inputCls =
@@ -32,6 +35,7 @@ export default function ShipmentFilters({
   supplierOptions,
   carrierOptions,
   portOptions,
+  searchSuggestions = [],
 }: ShipmentFiltersProps) {
   const { t } = useLanguage();
   const statusOptions: { value: ShipmentFilterStatus | "all"; label: string }[] = [
@@ -40,8 +44,8 @@ export default function ShipmentFilters({
     { value: "completed", label: t("completed") },
     { value: "cancelled", label: t("cancelled") },
   ];
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onChange({ ...filter, search: e.target.value });
+  const handleSearch = (value: string) => {
+    onChange({ ...filter, search: value });
   };
 
   const handleStatus = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -106,13 +110,13 @@ export default function ShipmentFilters({
               <circle cx="11" cy="11" r="8"/>
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input
-              type="text"
-              id="filter-search"
+            <SearchSuggestions
               value={filter.search || ""}
               onChange={handleSearch}
+              suggestions={searchSuggestions}
               placeholder={t("searchPlaceholder")}
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-4 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:placeholder-gray-500 dark:focus:border-brand-500 dark:focus:ring-brand-500/20"
+              ariaLabel={t("search")}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 text-sm text-gray-800 placeholder-gray-400 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:placeholder-gray-500 dark:focus:border-brand-500 dark:focus:ring-brand-500/20"
             />
           </div>
         </div>
@@ -233,21 +237,13 @@ export default function ShipmentFilters({
           <span className="text-xs text-gray-400">{t("quick")}</span>
           {(["today", "week", "month"] as const).map((p) => {
             const now = new Date();
-            const today = now.toISOString().split("T")[0];
-            let fromDate = today;
-            if (p === "week") {
-              const w = new Date(now);
-              w.setDate(w.getDate() - 7);
-              fromDate = w.toISOString().split("T")[0];
-            } else if (p === "month") {
-              const m = new Date(now);
-              m.setMonth(m.getMonth() - 1);
-              fromDate = m.toISOString().split("T")[0];
-            }
+            const fromDate = toDateInputValue(now);
+            const toDate = new Date(now);
+            toDate.setDate(toDate.getDate() + (p === "today" ? 0 : p === "week" ? 7 : 30));
             return (
               <button
                 key={p}
-                onClick={() => onChange({ ...filter, dateFrom: fromDate, dateTo: today, dateField: filter.dateField || "eta" })}
+                onClick={() => onChange({ ...filter, dateFrom: fromDate, dateTo: toDateInputValue(toDate), dateField: filter.dateField || "eta" })}
                 className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-brand-50 hover:border-brand-200 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400 transition-colors"
               >
                 {p === "today" ? t("today") : p === "week" ? t("sevenDays") : t("thirtyDays")}
