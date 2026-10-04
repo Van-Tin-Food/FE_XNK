@@ -36,6 +36,7 @@ const FLOW_DOCUMENT_GROUPS: Array<{ key: Shipment["flowStageKey"]; docs: string[
   { key: "declared", docs: ["BB_LM", "PHI_TK", "THUE_NK", "TK"] },
   { key: "fifteenb", docs: ["15B"] },
   { key: "customs", docs: ["QDTQ", "MV"] },
+  { key: "delivered", docs: ["TRA_CONG"] },
 ];
 
 const FLOW_STAGE_LABELS: Record<NonNullable<Shipment["flowStageKey"]>, string> = {
@@ -342,9 +343,10 @@ export async function markNotificationsRead(notificationIds: Array<string | numb
 export interface DocumentProgressResponse {
   success: boolean;
   orderCode: string;
-  currentStage: number;
-  currentStageKey: string;
-  currentStageLabel: string;
+  currentStage: number | null;
+  currentStageKey?: string;
+  currentStageLabel?: string;
+  archiveStatus?: number;
   missingDocuments: string[];
   exceededDocuments: string[];
   isExceeded: boolean;

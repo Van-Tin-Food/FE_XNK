@@ -24,7 +24,9 @@ function matchesFilterValue(source?: string, selected?: string): boolean {
 // nên hai bên không bao giờ lệch nhau. So sánh theo ngày (bỏ giờ phút giây).
 function matchesEtaRange(shipment: Shipment, dateFrom?: string, dateTo?: string): boolean {
   if (!dateFrom && !dateTo) return true;
-  if (!shipment.eta) return false;
+  // Đơn mới lên thường chưa có ETA. Vẫn giữ các đơn này trong danh sách khi
+  // người dùng lọc theo khoảng ETA để không làm mất chúng khỏi dashboard.
+  if (!shipment.eta) return true;
   const eta = new Date(shipment.eta);
   if (Number.isNaN(eta.getTime())) return false;
   const etaDay = new Date(eta.getFullYear(), eta.getMonth(), eta.getDate()).getTime();

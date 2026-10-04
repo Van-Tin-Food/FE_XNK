@@ -746,11 +746,25 @@ type PurchaseDetailWithItems = PostgresShipmentRelations["details"][number];
 type ShipmentContainer = ContainerRecord & { ma_bl: string };
 
 function flattenContainerDetails(database?: PostgresShipmentRelations): ContainerDetailRecord[] {
-  return database?.bills.flatMap((bill) => bill.containers.flatMap((container) => container.details)) || [];
+  const details = database?.bills.flatMap((bill) => bill.containers.flatMap((container) => container.details)) || [];
+  const seen = new Set<string>();
+  return details.filter((detail, index) => {
+    const key = detail.id_chi_tiet_container || `container-detail-${index}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function flattenShipmentContainers(database?: PostgresShipmentRelations): ShipmentContainer[] {
-  return database?.bills.flatMap((bill) => bill.containers.map((container) => ({ ...container, ma_bl: bill.ma_bl }))) || [];
+  const containers = database?.bills.flatMap((bill) => bill.containers.map((container) => ({ ...container, ma_bl: bill.ma_bl }))) || [];
+  const seen = new Set<string>();
+  return containers.filter((container, index) => {
+    const key = container.id_bl_container || `container-${index}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function formatQuantity(value: unknown): string {
@@ -994,8 +1008,6 @@ function ContainerCargoDetailsTable({
             {details.map((detail, index) => {
               const selectedContainer = containers.find((container) => container.id_bl_container === detail.id_bl_container);
               const selectedOption = itemOptions.find(({ item }) => item.id_item_code === detail.id_item_code);
-              const selectedPurchaseDetailId = selectedOption?.purchaseDetail.id_chi_tiet || "";
-              const itemCodesForProduct = itemOptions.filter(({ purchaseDetail }) => purchaseDetail.id_chi_tiet === selectedPurchaseDetailId);
               return (
                 <tr key={detail.id_chi_tiet_container || `container-detail-${index}`} className="align-top hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
                   <td className="px-4 py-3 text-xs font-semibold text-gray-400">{index + 1}</td>
@@ -1011,25 +1023,25 @@ function ContainerCargoDetailsTable({
                   <td className="px-4 py-3">
                     {editing ? (
                       <select
-                        value={selectedPurchaseDetailId}
+                        value={detail.id_item_code}
                         onChange={(event) => {
-                          const firstItem = itemOptions.find(({ purchaseDetail }) => purchaseDetail.id_chi_tiet === event.target.value)?.item;
-                          onChange(detail.id_chi_tiet_container, "id_item_code", firstItem?.id_item_code || "");
+                          onChange(detail.id_chi_tiet_container, "id_item_code", event.target.value);
                         }}
-                        className="h-9 min-w-52 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                        className="h-9 min-w-64 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                       >
-                        <option value="">{translate("selectProduct")}</option>
-                        {purchaseDetails.filter((item) => item.itemCodes.some((code) => !code.id_item_code.startsWith("new-item-"))).map((item) => <option key={item.id_chi_tiet} value={item.id_chi_tiet}>{item.ten_hang}</option>)}
+                        <option value="">{translate("selectProduct")} / {translate("selectItemCode")}</option>
+                        {itemOptions.map(({ item, purchaseDetail }) => (
+                          <option key={item.id_item_code} value={item.id_item_code}>
+                            {purchaseDetail.ten_hang} — {item.item_code}
+                          </option>
+                        ))}
                       </select>
                     ) : <span className="text-sm text-gray-700 dark:text-gray-300">{selectedOption?.purchaseDetail.ten_hang || "—"}</span>}
                   </td>
                   <td className="px-4 py-3">
-                    {editing ? (
-                      <select value={detail.id_item_code} onChange={(event) => onChange(detail.id_chi_tiet_container, "id_item_code", event.target.value)} className="h-9 min-w-36 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
-                        <option value="">{translate("selectItemCode")}</option>
-                        {itemCodesForProduct.map(({ item }) => <option key={item.id_item_code} value={item.id_item_code}>{item.item_code}</option>)}
-                      </select>
-                    ) : <span className="rounded-md bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{selectedOption?.item.item_code || detail.id_item_code || "—"}</span>}
+                    <span className="rounded-md bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+                      {selectedOption?.item.item_code || detail.id_item_code || "—"}
+                    </span>
                   </td>
                   <EditableTableCell value={detail.so_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "so_kien", value)} displayFormatter={formatPackageQuantity} />
                 </tr>
@@ -1101,6 +1113,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [activeTab, setActiveTab] = useState<ModalTab>("overview");
   const [archived, setArchived] = useState<ArchivedDocumentsResponse | null>(null);
   const [isArchiveLoading, setIsArchiveLoading] = useState(false);
+  const [isArchiveStateLoading, setIsArchiveStateLoading] = useState(false);
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
   const [returnItem, setReturnItem] = useState<ReturnItem | null>(null);
   const [isReturnLoading, setIsReturnLoading] = useState(false);
@@ -1129,7 +1142,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [ocrUploadRequestId, setOcrUploadRequestId] = useState("");
   const pendingUploadRequestIds = React.useRef(new Map<string, string>());
   const [ocrUploadRows, setOcrUploadRows] = useState<Array<Record<string, string>>>([]);
-  const [pklTargetDetailId, setPklTargetDetailId] = useState("");
+  const [pklTargetDetailIds, setPklTargetDetailIds] = useState<string[]>([]);
   const [isOcrAnalyzing, setIsOcrAnalyzing] = useState(false);
   const [isOcrSaving, setIsOcrSaving] = useState(false);
   const [ocrUploadError, setOcrUploadError] = useState("");
@@ -1147,7 +1160,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     type: "success" | "error";
     message: string;
   } | null>(null);
-  const [, setDocumentProgress] = useState<DocumentProgressResponse | null>(null);
+  const [documentProgress, setDocumentProgress] = useState<DocumentProgressResponse | null>(null);
   const [documentProgressError, setDocumentProgressError] = useState("");
   const [supplierOptions, setSupplierOptions] = useState<SupplierRecord[]>([]);
   const [carrierOptions, setCarrierOptions] = useState<CarrierRecord[]>([]);
@@ -1233,11 +1246,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setOcrUploadRequestId("");
     pendingUploadRequestIds.current.clear();
     setOcrUploadRows([]);
-    setPklTargetDetailId("");
+    setPklTargetDetailIds([]);
     setOcrUploadError("");
     setPassingDocumentId(null);
     setLocallyPassedDocumentIds([]);
     setArchived(null);
+    setIsArchiveStateLoading(true);
     setReturnItems([]);
     setReturnItem(null);
     setReturnForm(null);
@@ -1276,28 +1290,30 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         setReturnForm(null);
       })
       .finally(() => setIsReturnLoading(false));
-    void getArchivedDocuments(shipment.orderCode)
+    const archiveStateRequest = getArchivedDocuments(shipment.orderCode)
       .then((result) => setArchived(result.archived ? result : { success: true, archived: false }))
       // Đơn chưa có thư mục lưu trữ có thể được backend trả về dưới dạng lỗi/not found.
       // Đánh dấu là chưa lưu trữ để quyền admin/xnk vẫn hoạt động bình thường.
       .catch(() => setArchived({ success: true, archived: false }));
-    void checkDocumentProgress(shipment.orderCode)
+    const documentProgressRequest = checkDocumentProgress(shipment.orderCode)
       .then(setDocumentProgress)
       .catch((progressError) => {
         setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể kiểm tra tiến độ chứng từ");
       });
+    void Promise.all([archiveStateRequest, documentProgressRequest])
+      .finally(() => setIsArchiveStateLoading(false));
   }, [isOpen, shipment]);
 
   if (!shipment) return null;
 
   const isCancelled = shipment.status === "cancelled";
-  const isArchived = archived?.archived === true;
-  const canUploadDocuments = !isCancelled && !isArchived && permissions.uploadDocument;
-  const canPassDocuments = !isCancelled && !isArchived && permissions.passDocument;
+  const isArchived =  documentProgress?.archiveStatus === 1;
+  const canUploadDocuments = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.uploadDocument;
+  const canPassDocuments = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.passDocument;
   const canArchiveDocuments = !isCancelled && !isArchived && permissions.archiveDocuments;
-  const canEditReturnItem = !isCancelled && !isArchived && permissions.editReturnItem;
-  const canEditDetails = !isCancelled && !isArchived && permissions.editShipmentDetails;
-  const canCancelShipment = !isCancelled && !isArchived && permissions.cancelShipment;
+  const canEditReturnItem = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.editReturnItem;
+  const canEditDetails = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.editShipmentDetails;
+  const canCancelShipment = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.cancelShipment;
   const shipmentContainers = flattenShipmentContainers(shipment.database);
   const billContainerRows = shipment.database?.bills.flatMap((bill) => (
     bill.containers.length > 0
@@ -1412,6 +1428,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const isDocumentsComplete = shipment.docStatus === 1 || (
     shipment.totalDocs > 0 && shipment.receivedDocs >= shipment.totalDocs && missingDocs.length === 0
   );
+  const documentsReadyForArchive = !isArchiveStateLoading
+    && (documentProgress ? documentProgress.currentStage === null : isDocumentsComplete);
   const activeStageDocs = shipment.flowStageKey && shipment.flowStageKey !== "delivered"
     ? STAGE_DOC_GROUPS[shipment.flowStageKey]
     : [];
@@ -1449,7 +1467,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     ? carrierTrackingLink.buildUrl(trackingCode)
     : null;
   const currentOcrDocumentType = ocrUploadDocId ? getOcrDocumentType(ocrUploadDocId) : null;
-  const canAddOcrRows = currentOcrDocumentType === "PI" || currentOcrDocumentType === "INV" || currentOcrDocumentType === "BL";
+  const canAddOcrRows = currentOcrDocumentType === "PI"
+    || currentOcrDocumentType === "INV"
+    || currentOcrDocumentType === "PKL"
+    || currentOcrDocumentType === "BL";
   const ocrUploadFields = ocrUploadRows[0] || {};
   const missingOcrFields = getMissingOcrFields(ocrUploadFields, currentOcrDocumentType);
   ocrUploadRows.slice(1).forEach((row) => {
@@ -1466,8 +1487,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   if (currentOcrDocumentType === "BL" && !isDestinationPort(ocrUploadFields["Cảng đến"] || "")) {
     if (!missingOcrFields.includes("Cảng đến")) missingOcrFields.push("Cảng đến");
   }
-  if (currentOcrDocumentType === "PKL" && shipment.database?.details.length !== 1 && !pklTargetDetailId) {
-    missingOcrFields.push("Mặt hàng");
+  if (currentOcrDocumentType === "PKL" && shipment.database?.details.length !== 1
+    && ocrUploadRows.some((_, index) => !pklTargetDetailIds[index])) {
+    missingOcrFields.push("Mặt hàng ở từng dòng PKL");
   }
 
   const updateOcrRowField = (rowIndex: number, key: string, value: string) => {
@@ -1506,6 +1528,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   const addOcrRow = () => {
     if (!currentOcrDocumentType || !canAddOcrRows) return;
+    if (currentOcrDocumentType === "PKL") {
+      setPklTargetDetailIds((ids) => [
+        ...ids,
+        shipment.database?.details.length === 1 ? ids[0] || shipment.database.details[0].id_chi_tiet : "",
+      ]);
+    }
     setOcrUploadRows((current) => {
       const first = current[0] || {};
       const row = normalizeOcrFields({}, currentOcrDocumentType);
@@ -1522,6 +1550,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   const removeOcrRow = (rowIndex: number) => {
     setOcrUploadRows((current) => current.length > 1 ? current.filter((_, index) => index !== rowIndex) : current);
+    if (currentOcrDocumentType === "PKL") {
+      setPklTargetDetailIds((current) => current.filter((_, index) => index !== rowIndex));
+    }
   };
 
   const handleOpenCarrierTracking = async () => {
@@ -1593,14 +1624,14 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handlePickUpload = (docId: string, multiple = false) => {
-    if (!canUploadDocuments || archived?.archived) return;
+    if (!canUploadDocuments || isArchived) return;
     setSelectedMissingDocIds([docId]);
     setAllowMultipleUpload(multiple);
     window.setTimeout(() => document.getElementById("shipment-document-upload")?.click(), 0);
   };
 
   const handlePassDocument = async (docId: string) => {
-    if (getOcrDocumentType(docId) || !canPassDocuments || archived?.archived || passingDocumentId) return;
+    if (getOcrDocumentType(docId) || !canPassDocuments || isArchived || passingDocumentId) return;
     const confirmed = await confirm({
       title: t("passDocumentTitle"),
       message: t("passDocumentMessage", { document: docId, orderCode: shipment.orderCode }),
@@ -1638,15 +1669,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const files = Array.from(event.target.files || []);
     const file = files[0];
     const docId = selectedMissingDocIds[0];
-    if (!file || !docId || !canUploadDocuments || archived?.archived || isOcrAnalyzing || isOcrSaving) return;
+    if (!file || !docId || !canUploadDocuments || isArchived || isOcrAnalyzing || isOcrSaving) return;
     event.target.value = "";
     setAllowMultipleUpload(false);
     const documentType = getOcrDocumentType(docId);
     setOcrUploadError("");
     setOcrUploadRows([]);
-    setPklTargetDetailId(documentType === "PKL" && shipment.database?.details.length === 1
-      ? shipment.database.details[0].id_chi_tiet
-      : "");
+    setPklTargetDetailIds([]);
     try {
       if (files.some((selectedFile) => !isSupportedDocumentFile(selectedFile))) {
         setOcrUploadError("Định dạng file không được hỗ trợ.");
@@ -1724,6 +1753,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         return normalizedFields;
       });
       setOcrUploadRows(normalizedRows);
+      setPklTargetDetailIds(normalizedRows.map(() => documentType === "PKL" && shipment.database?.details.length === 1
+        ? shipment.database.details[0].id_chi_tiet
+        : ""));
     } catch (error) {
       setOcrUploadError(error instanceof Error ? error.message : "Không thể upload hoặc phân tích chứng từ");
       setOcrUploadFile(null);
@@ -1731,7 +1763,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadFileData("");
       setOcrUploadRequestId("");
       setOcrUploadRows([]);
-      setPklTargetDetailId("");
+      setPklTargetDetailIds([]);
     } finally {
       setIsOcrAnalyzing(false);
       setIsOcrSaving(false);
@@ -1743,8 +1775,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !ocrUploadRequestId || !canUploadDocuments || isOcrSaving) return;
     const documentType = getOcrDocumentType(ocrUploadDocId);
     const missingFields = ocrUploadRows.flatMap((row) => getMissingOcrFields(row, documentType));
-    if (documentType === "PKL" && shipment.database?.details.length !== 1 && !pklTargetDetailId) {
-      missingFields.push("Mặt hàng");
+    if (documentType === "PKL" && shipment.database?.details.length !== 1
+      && ocrUploadRows.some((_, index) => !pklTargetDetailIds[index])) {
+      missingFields.push("Mặt hàng ở từng dòng PKL");
     }
     if (missingFields.length > 0) {
       setOcrUploadError(t("requiredMissing", { fields: missingFields.map((field) => localizeSheetField(field, t)).join(", ") }));
@@ -1769,7 +1802,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         mimeType: getDocumentMimeType(ocrUploadFile),
         requestId: ocrUploadRequestId,
         ...(documentType === "BL" ? { referenceCode: ocrUploadRows[0]?.["BL NO."]?.trim() } : {}),
-        ...(documentType === "PKL" ? { idChiTiet: pklTargetDetailId } : {}),
+        ...(documentType === "PKL" ? { idChiTiet: pklTargetDetailIds[0] || "" } : {}),
       });
 
       const data = Object.fromEntries(
@@ -1788,7 +1821,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       } else if (documentType === "INV") {
         await savePostgresInvOcrRows(shipment.database, ocrUploadRows);
       } else if (documentType === "PKL") {
-        await savePostgresPklOcrRow(shipment.database, ocrUploadRows[0] || {}, pklTargetDetailId);
+        for (const [rowIndex, row] of ocrUploadRows.entries()) {
+          const targetDetailId = pklTargetDetailIds[rowIndex]
+            || (shipment.database.details.length === 1 ? shipment.database.details[0].id_chi_tiet : "");
+          await savePostgresPklOcrRow(shipment.database, row, targetDetailId);
+        }
       } else {
         await updatePostgresShipmentFields(shipment.database, data);
       }
@@ -1818,7 +1855,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadFileData("");
       setOcrUploadRequestId("");
       setOcrUploadRows([]);
-      setPklTargetDetailId("");
+      setPklTargetDetailIds([]);
       notify(`Đã bổ sung và cập nhật chứng từ ${ocrUploadDocId}`, "success");
     } catch (error) {
       setOcrUploadError(error instanceof Error ? error.message : "Không thể lưu chứng từ");
@@ -1828,7 +1865,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleArchive = async () => {
-    if (!canArchiveDocuments || !isDocumentsComplete || archived?.archived || isArchiveLoading) return;
+    if (!canArchiveDocuments || !documentsReadyForArchive || isArchived || isArchiveLoading) return;
     // Bước 2: kiểm tra dữ liệu đầu vào của tab Chi tiết và tab Vận chuyển container
     // trước khi cho gọi hàm Apps Script di chuyển hồ sơ.
     const missingDetailFields = getMissingArchiveDetailFields(shipment.summaryFields);
@@ -1856,6 +1893,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       });
       const result = await getArchivedDocuments(shipment.orderCode);
       setArchived(result);
+      setDocumentProgress((current) => current ? { ...current, archiveStatus: 1 } : current);
       setActiveTab("documents");
       notify(`Đã lưu trữ hồ sơ đơn ${shipment.orderCode}`, "success");
     } catch (error) {
@@ -2252,21 +2290,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <div className="mt-3 space-y-3">
                   {currentOcrDocumentType === "PKL" && (
                     <label className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                      <span>{t("pklTargetProduct")} <span className="text-error-500">*</span></span>
-                      <select
-                        value={pklTargetDetailId}
-                        onChange={(event) => setPklTargetDetailId(event.target.value)}
-                        disabled={shipment.database?.details.length === 1 || isOcrSaving}
-                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:disabled:bg-gray-800"
-                      >
-                        <option value="">{t("selectPklProduct")}</option>
-                        {(shipment.database?.details || []).map((detail, index) => (
-                          <option key={detail.id_chi_tiet} value={detail.id_chi_tiet}>
-                            {index + 1}. {detail.ten_hang}{detail.itemCodes[0]?.item_code ? ` — ${detail.itemCodes[0].item_code}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      {shipment.database?.details.length === 1 && <span className="text-[11px] text-success-600 dark:text-success-400">{t("autoSelectedOnlyProduct")}</span>}
+                      <span>{t("pklTargetProduct")}</span>
+                      {shipment.database?.details.length === 1
+                        ? <span className="text-[11px] text-success-600 dark:text-success-400">{t("autoSelectedOnlyProduct")}</span>
+                        : <span className="text-[11px] text-gray-500 dark:text-gray-400">Chọn mặt hàng ngay trên từng dòng PKL.</span>}
                     </label>
                   )}
                   {canAddOcrRows && <div className="flex justify-end">
@@ -2279,11 +2306,29 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           {currentOcrDocumentType === "BL"
                             ? `Container ${rowIndex + 1}`
                             : currentOcrDocumentType === "PKL"
-                              ? `${t("pklData")}${shipment.database?.details.find((detail) => detail.id_chi_tiet === pklTargetDetailId)?.ten_hang ? ` — ${shipment.database.details.find((detail) => detail.id_chi_tiet === pklTargetDetailId)?.ten_hang}` : ""}`
+                              ? `${t("pklData")}${shipment.database?.details.find((detail) => detail.id_chi_tiet === pklTargetDetailIds[rowIndex])?.ten_hang ? ` — ${shipment.database.details.find((detail) => detail.id_chi_tiet === pklTargetDetailIds[rowIndex])?.ten_hang}` : ""}`
                               : t("productIndex", { index: rowIndex + 1 })}
                         </p>
                         {canAddOcrRows && ocrUploadRows.length > 1 && <button type="button" onClick={() => removeOcrRow(rowIndex)} disabled={isOcrSaving} className="rounded-md px-2 py-1 text-xs font-semibold text-error-600 hover:bg-error-50 disabled:opacity-50 dark:text-error-400 dark:hover:bg-error-500/10">{t("removeRow")}</button>}
                       </div>
+                      {currentOcrDocumentType === "PKL" && (shipment.database?.details.length || 0) > 1 && (
+                        <label className="mb-3 flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                          <span>{t("pklTargetProduct")} <span className="text-error-500">*</span></span>
+                          <select
+                            value={pklTargetDetailIds[rowIndex] || ""}
+                            onChange={(event) => setPklTargetDetailIds((current) => current.map((id, index) => index === rowIndex ? event.target.value : id))}
+                            disabled={isOcrSaving}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:disabled:bg-gray-800"
+                          >
+                            <option value="">{t("selectPklProduct")}</option>
+                            {(shipment.database?.details || []).map((detail, index) => (
+                              <option key={detail.id_chi_tiet} value={detail.id_chi_tiet}>
+                                {index + 1}. {detail.ten_hang}{detail.itemCodes[0]?.item_code ? ` — ${detail.itemCodes[0].item_code}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                       <div className="grid gap-3 sm:grid-cols-2">
                     {Object.entries(row).filter(([key]) => !key.startsWith("_") && !key.toLowerCase().startsWith("id_")).map(([key, value]) => (
                       <label key={`${rowIndex}-${key}`} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
@@ -2338,7 +2383,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 )}
                 {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
                 <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadRequestId(""); setOcrUploadRows([]); setPklTargetDetailId(""); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
+                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadRequestId(""); setOcrUploadRows([]); setPklTargetDetailIds([]); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
                   <button type="button" onClick={handleConfirmOcrUpload} disabled={!canUploadDocuments || isOcrSaving || missingOcrFields.length > 0} title={missingOcrFields.length > 0 ? t("requiredMissing", { fields: missingOcrFields.map((field) => localizeSheetField(field, t)).join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? t("saving") : t("confirmSave")}</button>
                 </div>
               </>
@@ -2618,7 +2663,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         {/* ── DOCUMENTS ── */}
         {activeTab === "documents" && (
           <div className="flex flex-col gap-4">
-            {canArchiveDocuments && isDocumentsComplete && !archived?.archived && (
+            {canArchiveDocuments && documentsReadyForArchive && !isArchived && (
               <button type="button" onClick={handleArchive} disabled={isArchiveLoading} className="flex w-full items-center justify-center rounded-xl bg-success-500 px-4 py-3 text-sm font-semibold text-white hover:bg-success-600 disabled:cursor-not-allowed disabled:opacity-60">
                 {isArchiveLoading ? t("archiving") : t("archiveDocuments")}
               </button>
@@ -2653,7 +2698,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           key={doc.id}
                           type="button"
                           onClick={() => handlePickUpload(doc.id)}
-                          disabled={!canUploadDocuments || Boolean(archived?.archived) || isOcrAnalyzing || isOcrSaving}
+                          disabled={!canUploadDocuments || isArchived || isOcrAnalyzing || isOcrSaving}
                           aria-label={`Bổ sung ${doc.name}`}
                           className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors ${
                             localUploads[doc.id]
@@ -2775,12 +2820,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           </svg>
                         </button>
                       )}
-                      {!archived?.archived && canUploadDocuments && (
+                      {!isArchived && canUploadDocuments && (
                         <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
                           {isOcrAnalyzing && ocrUploadDocId === doc.id ? t("analyzingDocument") : doc.status === "ok" ? t("uploadAnother") : localUploads[doc.id] ? t("uploadAnother") : t("uploadDocument")}
                         </button>
                       )}
-                      {!archived?.archived && canPassDocuments && doc.status !== "ok" && !getOcrDocumentType(doc.id) && (
+                      {!isArchived && canPassDocuments && doc.status !== "ok" && !getOcrDocumentType(doc.id) && (
                         <button
                           type="button"
                           disabled={Boolean(passingDocumentId) || isOcrAnalyzing || isOcrSaving}
@@ -2841,17 +2886,17 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     <div
                       key={document.id}
                       role="button"
-                      tabIndex={archived?.archived || !canUploadDocuments ? -1 : 0}
+                      tabIndex={isArchived || !canUploadDocuments ? -1 : 0}
                       onClick={() => {
-                        if (!archived?.archived && canUploadDocuments) handlePickUpload(document.id, true);
+                        if (!isArchived && canUploadDocuments) handlePickUpload(document.id, true);
                       }}
                       onKeyDown={(event) => {
-                        if ((event.key === "Enter" || event.key === " ") && !archived?.archived && canUploadDocuments) {
+                        if ((event.key === "Enter" || event.key === " ") && !isArchived && canUploadDocuments) {
                           event.preventDefault();
                           handlePickUpload(document.id, true);
                         }
                       }}
-                      className={`group flex min-w-0 flex-col items-start gap-3 rounded-lg border bg-white p-3 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${!archived?.archived && canUploadDocuments ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
+                      className={`group flex min-w-0 flex-col items-start gap-3 rounded-lg border bg-white p-3 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${!isArchived && canUploadDocuments ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
                     >
                       <div className="flex w-full items-center justify-between gap-2">
                         <span className={`flex h-8 min-w-12 items-center justify-center rounded-md px-2 text-[11px] font-bold ${color.badge}`}>
@@ -3270,14 +3315,18 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       notify(t("itemCodeRequiredForCargo"), "error");
                       return;
                     }
-                    setContainerDetailForms((current) => [...current, {
-                      id_chi_tiet_container: `new-container-detail-${Date.now()}-${current.length}`,
-                      id_bl_container: shipmentContainers[0].id_bl_container,
-                      id_item_code: availableItems[0].id_item_code,
-                      so_kien: null,
-                      don_vi_kien: null,
-                      net_weight: null,
-                    }]);
+                    setContainerDetailForms((current) => {
+                      const usedItemCodes = new Set(current.map((detail) => detail.id_item_code).filter(Boolean));
+                      const defaultItem = availableItems.find((item) => !usedItemCodes.has(item.id_item_code)) || availableItems[0];
+                      return [...current, {
+                        id_chi_tiet_container: `new-container-detail-${Date.now()}-${current.length}`,
+                        id_bl_container: shipmentContainers[0].id_bl_container,
+                        id_item_code: defaultItem.id_item_code,
+                        so_kien: null,
+                        don_vi_kien: null,
+                        net_weight: null,
+                      }];
+                    });
                   }}
                 />
               )}

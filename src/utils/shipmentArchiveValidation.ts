@@ -26,9 +26,6 @@ export const ARCHIVE_REQUIRED_DETAIL_FIELDS: ReadonlyArray<{ field: string; labe
 // Tab "Vận chuyển container": so khớp với các ô nhập của mỗi container.
 export const ARCHIVE_REQUIRED_TRANSPORT_FIELDS: ReadonlyArray<{ key: keyof ReturnItem; label: string }> = [
   { key: "ngay", label: "Ngày vận chuyển container" },
-  { key: "nhaXe", label: "Nhà xe" },
-  { key: "tenTaiXe", label: "Tên tài xế" },
-  { key: "bienSoXe", label: "Số xe" },
   { key: "noiDi", label: "Nơi đi" },
   { key: "noiTraContainer", label: "Nơi trả container" },
   { key: "idKho", label: "Mã kho" },
@@ -66,6 +63,7 @@ export function getMissingArchiveDetailFields(summaryFields: Record<string, stri
  * ghép theo từng container dạng "MÃ-CONT: trường 1, trường 2".
  */
 export function getMissingArchiveTransportFields(transportItems: ReturnItem[]): string[] {
+  if (transportItems.length === 0) return ["Chưa có dòng vận chuyển container"];
   return transportItems.flatMap((item) => {
     const missing = ARCHIVE_REQUIRED_TRANSPORT_FIELDS
       .filter(({ key }) => !isFilled(item[key]))
