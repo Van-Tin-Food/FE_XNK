@@ -35,8 +35,19 @@ function actionLabel(action: string, t: (key: string) => string): string {
   return key ? t(key) : action || t("unknown");
 }
 
+function parseLogDate(value: string): Date {
+  const raw = String(value || "").trim();
+  // PostgreSQL timestamp without time zone is a wall-clock value. Keep it in local time.
+  const postgresMatch = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?$/);
+  if (postgresMatch) {
+    const milliseconds = (postgresMatch[3] || "").slice(0, 3).padEnd(3, "0");
+    return new Date(`${postgresMatch[1]}T${postgresMatch[2]}.${milliseconds}`);
+  }
+  return new Date(raw);
+}
+
 function dateTime(value: string, language: "vi" | "en"): string {
-  const date = new Date(value);
+  const date = parseLogDate(value);
   if (Number.isNaN(date.getTime())) return value || "—";
   return date.toLocaleString(language === "en" ? "en-GB" : "vi-VN", {
     hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric",
@@ -48,7 +59,7 @@ function actor(log: ActivityLog): string {
 }
 
 function localDate(value: string): string {
-  const date = new Date(value);
+  const date = parseLogDate(value);
   if (Number.isNaN(date.getTime())) return "";
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
