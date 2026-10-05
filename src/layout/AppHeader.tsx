@@ -7,11 +7,13 @@ import { useSidebar } from "@/context/SidebarContext";
 import Link from "next/link";
 import React, { useState ,useEffect,useRef} from "react";
 import { useLanguage } from "@/context/LanguageContext";
+import { normalizeRole } from "@/config/shipmentActionPermissions";
 
 const AppHeader: React.FC = () => {
   const [isApplicationMenuOpen, setApplicationMenuOpen] = useState(false);
   const { language, toggleLanguage, t } = useLanguage();
   const { user } = useAuth();
+  const isOperationalRole = ["logistic", "van_chuyen"].includes(normalizeRole(user?.role));
 
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
 
@@ -152,18 +154,20 @@ const AppHeader: React.FC = () => {
           } items-center justify-between w-full gap-4 px-5 py-4 lg:flex shadow-theme-md lg:justify-end lg:px-0 lg:shadow-none`}
         >
           <div className="flex items-center gap-2 2xsm:gap-3">
-            <Link
-              href="/user-guide"
-              title={t("userGuide")}
-              aria-label={t("userGuide")}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 transition-colors hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-brand-500/30 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-              </svg>
-              <span className="hidden sm:inline">{t("userGuide")}</span>
-            </Link>
+            {!isOperationalRole && (
+              <Link
+                href="/user-guide"
+                title={t("userGuide")}
+                aria-label={t("userGuide")}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 transition-colors hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-brand-500/30 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+                <span className="hidden sm:inline">{t("userGuide")}</span>
+              </Link>
+            )}
             <button
               type="button"
               onClick={toggleLanguage}

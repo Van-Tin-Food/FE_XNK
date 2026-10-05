@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import React, { useState } from "react";
-import { canPerformShipmentAction } from "../config/shipmentActionPermissions";
+import { canPerformShipmentAction, normalizeRole } from "../config/shipmentActionPermissions";
 import { useAuth } from "../context/AuthContext";
 import { useSidebar } from "../context/SidebarContext";
 import { GridIcon, HorizontaLDots } from "../icons/index";
@@ -20,11 +20,13 @@ const AppSidebar: React.FC = () => {
   const [supportOpen, setSupportOpen] = useState(pathname === "/email" || pathname === "/document-sync");
   const [catalogOpen, setCatalogOpen] = useState(pathname === "/master-data");
   const [logsOpen, setLogsOpen] = useState(pathname === "/activity-logs");
-  const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
-  const canSendEmail = canPerformShipmentAction(user, "sendEmail");
+  const role = normalizeRole(user?.role);
+  const isOperationalRole = role === "logistic" || role === "van_chuyen";
+  const canViewLogs = !isOperationalRole && canPerformShipmentAction(user, "viewActivityLogs");
+  const canSendEmail = !isOperationalRole && canPerformShipmentAction(user, "sendEmail");
   const canSyncDocuments = canPerformShipmentAction(user, "syncDocuments");
-  const canManageUsers = canPerformShipmentAction(user, "viewUsers") || canPerformShipmentAction(user, "manageUsers");
-  const canManageMasterData = canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData");
+  const canManageUsers = !isOperationalRole && (canPerformShipmentAction(user, "viewUsers") || canPerformShipmentAction(user, "manageUsers"));
+  const canManageMasterData = !isOperationalRole && (canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData"));
   const { t } = useLanguage();
 
   return (

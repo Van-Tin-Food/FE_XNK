@@ -30,7 +30,10 @@ export function getApiPayloadMessage(payload: unknown): string {
   return String(payload.message ?? payload.error ?? payload.detail ?? "").trim();
 }
 
-function getFriendlyMessage(scope: string, status: number, code: string): string {
+function getFriendlyMessage(scope: string, status: number, code: string, backendMessage = ""): string {
+  if (scope === "Xác thực Google" && (status === 400 || status === 401) && backendMessage) {
+    return backendMessage;
+  }
   if (scope === "Đăng nhập" && status === 401) {
     return "Tên đăng nhập hoặc mật khẩu không đúng.";
   }
@@ -114,7 +117,7 @@ export function createHttpApiError(
     code: code || undefined,
     message: detail,
   });
-  const error = new Error(getFriendlyMessage(scope, response.status, code)) as ApiError;
+  const error = new Error(getFriendlyMessage(scope, response.status, code, message)) as ApiError;
   error.technicalMessage = technicalMessage;
   if (isRecord(payload)) {
     if (typeof payload.code === "string") error.code = payload.code;

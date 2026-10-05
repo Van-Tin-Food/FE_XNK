@@ -41,7 +41,7 @@ const ROLE_ACCESS: Record<Exclude<RbacRole, "admin">, ActionAccess> = {
     manage: [],
   },
   logistic: {
-    view: ["viewEmailLogs"],
+    view: [],
     manage: [
       "createShipment", "uploadDocument", "passDocument", "archiveDocuments",
       "editReturnItem", "editShipmentDetails", "cancelShipment",
@@ -72,7 +72,7 @@ export function canPerformShipmentAction(user: AuthUser | null, action: Shipment
   const role = normalizeRole(user?.role) as RbacRole;
   const session = normalizeSession(user?.session);
   if (!user || !role || !RBAC_ROLES.includes(role)) return false;
-  if (role === "admin") return true;
+  if (role === "admin" || role === "it") return true;
 
   const access = ROLE_ACCESS[role];
   if (access.manage.includes(action)) return session === "manage";
