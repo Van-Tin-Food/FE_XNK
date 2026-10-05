@@ -19,7 +19,7 @@ import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCa
 import { toDocumentPreviewUrl } from "@/utils/documentPreview";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { shouldValidateContainerPackages } from "@/utils/containerPackageValidation";
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
+import { canPerformShipmentAction, canUploadDocumentType } from "@/config/shipmentActionPermissions";
 import {
   formatInternationalNumber,
   formatMoneyAmount,
@@ -1629,7 +1629,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handlePickUpload = (docId: string, multiple = false) => {
-    if (!canUploadDocuments || isArchived) return;
+    if (!canUploadDocuments || !canUploadDocumentType(user, docId) || isArchived) return;
     setSelectedMissingDocIds([docId]);
     setAllowMultipleUpload(multiple);
     window.setTimeout(() => document.getElementById("shipment-document-upload")?.click(), 0);
@@ -1674,7 +1674,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const files = Array.from(event.target.files || []);
     const file = files[0];
     const docId = selectedMissingDocIds[0];
-    if (!file || !docId || !canUploadDocuments || isArchived || isOcrAnalyzing || isOcrSaving) return;
+    if (!file || !docId || !canUploadDocuments || !canUploadDocumentType(user, docId) || isArchived || isOcrAnalyzing || isOcrSaving) return;
     event.target.value = "";
     setAllowMultipleUpload(false);
     const documentType = getOcrDocumentType(docId);
@@ -1777,7 +1777,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleConfirmOcrUpload = async () => {
-    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !ocrUploadRequestId || !canUploadDocuments || isOcrSaving) return;
+    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !ocrUploadRequestId || !canUploadDocuments || !canUploadDocumentType(user, ocrUploadDocId) || isOcrSaving) return;
     const documentType = getOcrDocumentType(ocrUploadDocId);
     const missingFields = ocrUploadRows.flatMap((row) => getMissingOcrFields(row, documentType));
     if (documentType === "PKL" && shipment.database?.details.length !== 1
@@ -2825,7 +2825,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           </svg>
                         </button>
                       )}
-                      {!isArchived && canUploadDocuments && (
+                      {!isArchived && canUploadDocuments && canUploadDocumentType(user, doc.id) && (
                         <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
                           {isOcrAnalyzing && ocrUploadDocId === doc.id ? t("analyzingDocument") : doc.status === "ok" ? t("uploadAnother") : localUploads[doc.id] ? t("uploadAnother") : t("uploadDocument")}
                         </button>
@@ -2887,21 +2887,22 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   const option = OPTIONAL_DOCUMENT_OPTIONS.find((item) => item.code === document.id);
                   const color = OPTIONAL_DOCUMENT_COLORS[document.id] || OPTIONAL_DOCUMENT_COLORS.AN;
                   const hasFile = document.status === "ok" && files.length > 0;
+                  const canUploadThisDocument = canUploadDocuments && canUploadDocumentType(user, document.id);
                   return (
                     <div
                       key={document.id}
                       role="button"
-                      tabIndex={isArchived || !canUploadDocuments ? -1 : 0}
+                      tabIndex={isArchived || !canUploadThisDocument ? -1 : 0}
                       onClick={() => {
-                        if (!isArchived && canUploadDocuments) handlePickUpload(document.id, true);
+                        if (!isArchived && canUploadThisDocument) handlePickUpload(document.id, true);
                       }}
                       onKeyDown={(event) => {
-                        if ((event.key === "Enter" || event.key === " ") && !isArchived && canUploadDocuments) {
+                        if ((event.key === "Enter" || event.key === " ") && !isArchived && canUploadThisDocument) {
                           event.preventDefault();
                           handlePickUpload(document.id, true);
                         }
                       }}
-                      className={`group flex min-w-0 flex-col items-start gap-3 rounded-lg border bg-white p-3 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${!isArchived && canUploadDocuments ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
+                      className={`group flex min-w-0 flex-col items-start gap-3 rounded-lg border bg-white p-3 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${!isArchived && canUploadThisDocument ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
                     >
                       <div className="flex w-full items-center justify-between gap-2">
                         <span className={`flex h-8 min-w-12 items-center justify-center rounded-md px-2 text-[11px] font-bold ${color.badge}`}>

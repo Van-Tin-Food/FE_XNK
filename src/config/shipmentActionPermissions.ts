@@ -37,20 +37,20 @@ type ActionAccess = {
 // - admin: luôn có toàn quyền, không cần liệt kê từng action.
 const ROLE_ACCESS: Record<Exclude<RbacRole, "admin">, ActionAccess> = {
   it: {
+    // IT chỉ được xem dữ liệu. Session view/manage không làm thay đổi quyền IT.
     view: ["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs"],
     manage: [],
   },
   logistic: {
     view: [],
     manage: [
-      "createShipment", "uploadDocument", "passDocument", "archiveDocuments",
-      "editReturnItem", "editShipmentDetails", "cancelShipment",
-      "syncDocuments", "exportShipments",
+      "createShipment", "uploadDocument", "passDocument", "editShipmentDetails",
+      "syncDocuments",
     ],
   },
   van_chuyen: {
     view: [],
-    manage: ["uploadDocument", "editReturnItem", "syncDocuments", "exportShipments"],
+    manage: ["uploadDocument", "passDocument", "archiveDocuments", "editReturnItem", "syncDocuments"],
   },
 };
 
@@ -72,11 +72,17 @@ export function canPerformShipmentAction(user: AuthUser | null, action: Shipment
   const role = normalizeRole(user?.role) as RbacRole;
   const session = normalizeSession(user?.session);
   if (!user || !role || !RBAC_ROLES.includes(role)) return false;
-  if (role === "admin" || role === "it") return true;
+  if (role === "admin") return true;
 
   const access = ROLE_ACCESS[role];
+  if (role === "it") return access.view.includes(action);
   if (access.manage.includes(action)) return session === "manage";
   return access.view.includes(action);
+}
+
+export function canUploadDocumentType(user: AuthUser | null, documentCode: string): boolean {
+  if (!canPerformShipmentAction(user, "uploadDocument")) return false;
+  return normalizeRole(user?.role) !== "van_chuyen" || documentCode.trim().toUpperCase() !== "PI";
 }
 
 export const SHIPMENT_ACTION_PERMISSIONS = Object.fromEntries(
