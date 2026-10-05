@@ -62,6 +62,10 @@ function endpoint(path: string): string {
 function parseDate(value: unknown): string | undefined {
   const raw = String(value ?? "").trim().split(",")[0].trim();
   if (!raw) return undefined;
+  // Date/timestamp từ PostgreSQL đã có ngày lịch đúng; không parse qua UTC
+  // vì múi giờ Việt Nam có thể làm ngày 05/10 thành 04/10.
+  const isoDate = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoDate) return isoDate[1];
   const slashDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (slashDate) {
     const first = Number(slashDate[1]);

@@ -27,7 +27,10 @@ function matchesEtaRange(shipment: Shipment, dateFrom?: string, dateTo?: string)
   // Đơn mới lên thường chưa có ETA. Vẫn giữ các đơn này trong danh sách khi
   // người dùng lọc theo khoảng ETA để không làm mất chúng khỏi dashboard.
   if (!shipment.eta) return true;
-  const eta = new Date(shipment.eta);
+  const etaMatch = String(shipment.eta).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const eta = etaMatch
+    ? new Date(Number(etaMatch[1]), Number(etaMatch[2]) - 1, Number(etaMatch[3]))
+    : new Date(shipment.eta);
   if (Number.isNaN(eta.getTime())) return false;
   const etaDay = new Date(eta.getFullYear(), eta.getMonth(), eta.getDate()).getTime();
   if (dateFrom) {

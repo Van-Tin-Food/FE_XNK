@@ -23,6 +23,12 @@ import { toDatabaseNumber, toDatabasePackageCount } from "@/utils/internationalN
 
 type JsonRecord = Record<string, unknown>;
 
+function dateOnly(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  const isoDate = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return isoDate?.[1] || raw;
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -530,7 +536,7 @@ export async function fetchPostgresReturnItems(contractCode: string): Promise<Re
       return {
         idVanChuyen: transport?.id_van_chuyen || "",
         idBlContainer: container.id_bl_container,
-        ngay: transport?.ngay_van_chuyen || "",
+        ngay: dateOnly(transport?.ngay_van_chuyen),
         soCont: container.ma_container,
         soHd: contractCode,
         nhaXe: transport?.nha_xe || "",
@@ -553,7 +559,7 @@ export async function savePostgresReturnItem(item: ReturnItem): Promise<void> {
   if (!item.idBlContainer) throw new Error("Đơn hàng chưa có container để cập nhật vận chuyển");
   const payload: Omit<ContainerTransportRecord, "id_van_chuyen"> = {
     id_bl_container: item.idBlContainer,
-    ngay_van_chuyen: item.ngay || null,
+    ngay_van_chuyen: dateOnly(item.ngay) || null,
     nha_xe: item.nhaXe || null,
     ten_tai_xe: item.tenTaiXe || null,
     bien_so_xe: item.bienSoXe || null,

@@ -379,7 +379,12 @@ function describeEditedFields(
 
 function formatDate(iso?: string): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("vi-VN");
+  const dateValue = toDateInputValue(iso);
+  const parts = dateValue.split("-").map(Number);
+  if (parts.length === 3 && parts.every(Number.isFinite)) {
+    return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString("vi-VN");
+  }
+  return iso;
 }
 
 function toDateInputValue(value?: string): string {

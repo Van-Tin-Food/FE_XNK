@@ -68,6 +68,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function parseDateStart(value: string | undefined): number | null {
   if (!value) return null;
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+    return date.getTime();
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   date.setHours(0, 0, 0, 0);
