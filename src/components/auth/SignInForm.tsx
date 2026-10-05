@@ -2,7 +2,7 @@
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
-import { login, GOOGLE_MFA_STORAGE_KEY } from "@/services/authApi";
+import { login, startGoogleSignIn, GOOGLE_MFA_STORAGE_KEY } from "@/services/authApi";
 import type { LoginMfaInfo } from "@/types/auth";
 import { ChevronLeftIcon, EyeCloseIcon, EyeIcon } from "@/icons";
 import { useAuth } from "@/context/AuthContext";
@@ -21,6 +21,7 @@ export default function SignInForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const submittingRef = useRef(false);
   const { user: currentUser, setUser } = useAuth();
   const canManageUsers = canPerformShipmentAction(currentUser, "registerUser")
@@ -56,6 +57,24 @@ export default function SignInForm() {
     } finally {
       submittingRef.current = false;
       setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (loading || googleLoading) return;
+    setError("");
+    setGoogleLoading(true);
+    try {
+      const result = await startGoogleSignIn();
+      sessionStorage.setItem(GOOGLE_MFA_STORAGE_KEY, JSON.stringify({
+        state: result.state,
+        mode: "direct",
+        createdAt: Date.now(),
+      }));
+      window.location.href = result.googleAuthUrl;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không thể khởi tạo đăng nhập Google.");
+      setGoogleLoading(false);
     }
   };
 
@@ -187,6 +206,23 @@ export default function SignInForm() {
                 ) : null}
               </div>
             </form>
+
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => void handleGoogleSignIn()}
+                disabled={loading || googleLoading}
+                className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M19.6 10.23c0-.68-.06-1.34-.17-1.97H10v3.73h5.38a4.6 4.6 0 0 1-1.99 3.02v2.51h3.22c1.88-1.73 2.99-4.28 2.99-7.29Z" fill="#4285F4" />
+                  <path d="M10 20c2.7 0 4.96-.9 6.61-2.48l-3.22-2.51c-.9.6-2.04.96-3.39.96-2.6 0-4.8-1.76-5.59-4.12H1.08v2.59A9.98 9.98 0 0 0 10 20Z" fill="#34A853" />
+                  <path d="M4.41 11.85A6 6 0 0 1 4.1 10c0-.64.11-1.27.31-1.85V5.56H1.08A10 10 0 0 0 0 10c0 1.61.39 3.13 1.08 4.44l3.33-2.59Z" fill="#FBBC05" />
+                  <path d="M10 4.03c1.47 0 2.79.51 3.83 1.5l2.87-2.87C14.95.99 12.7 0 10 0a9.98 9.98 0 0 0-8.92 5.56l3.33 2.59C5.2 5.79 7.4 4.03 10 4.03Z" fill="#EA4335" />
+                </svg>
+                {googleLoading ? "Đang chuyển đến Google..." : "Đăng nhập bằng Google"}
+              </button>
+            </div>
 
             <div className="mt-5">
               <p className="text-sm font-normal text-center text-gray-700 dark:text-gray-400 sm:text-start">

@@ -4,8 +4,18 @@ import { createHttpApiError, createInvalidResponseError, createNetworkApiError, 
 
 const AUTH_STORAGE_KEY = "dashboard_auth_user";
 export const AUTH_TOKEN_COOKIE_KEY = "xnk_auth_token";
-/** sessionStorage giữ pendingToken + state giữa 2 bước của luồng MFA Google. */
+/** sessionStorage giữ state giữa luồng Google trực tiếp hoặc bước MFA Google. */
 export const GOOGLE_MFA_STORAGE_KEY = "xnk_google_mfa_pending";
+
+export async function startGoogleSignIn(): Promise<{ googleAuthUrl: string; state: string }> {
+  const apiPath = "/api/auth/google/start";
+  const res = await fetch(backendApiUrl(apiPath), { method: "GET" });
+  const { data, nonJsonPreview } = await parseApiResponse(res);
+  const json = (data || {}) as { googleAuthUrl?: string; state?: string };
+  if (!res.ok) throw createHttpApiError("Đăng nhập Google", "GET", apiPath, res, data, nonJsonPreview);
+  if (!json.googleAuthUrl || !json.state) throw new Error("Máy chủ chưa trả về đường dẫn đăng nhập Google");
+  return { googleAuthUrl: json.googleAuthUrl, state: json.state };
+}
 
 function storeTokenCookie(token: string): void {
   if (typeof document === "undefined") return;
@@ -267,13 +277,13 @@ export async function updateUser(
 }
 
 /**
- * Bước 2 của luồng MFA Google: gửi authorization code + state + pendingToken
- * lên backend. Backend đối chiếu email Google với tài khoản rồi cấp token phiên.
+ * Gửi authorization code + state, kèm pendingToken nếu đây là bước MFA.
+ * Backend đối chiếu email Google với tài khoản rồi cấp token phiên.
  */
 export async function completeGoogleSignIn(params: {
   code: string;
   state: string;
-  pendingToken: string;
+  pendingToken?: string;
 }): Promise<AuthUser> {
   const apiPath = "/api/auth/google/verify";
   try {

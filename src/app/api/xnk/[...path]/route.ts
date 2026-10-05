@@ -8,6 +8,7 @@ type RouteContext = { params: Promise<{ path: string[] }> };
 
 const PUBLIC_ROUTES = new Set([
   "POST api/auth/login",
+  "GET api/auth/google/start",
   // Bước 2 của MFA Google: tự kiểm tra code + state + pendingToken, chưa có
   // token phiên nên phải để public như login.
   "POST api/auth/google/verify",

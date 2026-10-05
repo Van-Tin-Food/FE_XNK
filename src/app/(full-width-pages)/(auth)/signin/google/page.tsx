@@ -7,8 +7,9 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 
 interface PendingMfa {
-  pendingToken: string;
+  pendingToken?: string;
   state: string;
+  mode?: "mfa" | "direct";
   createdAt: number;
 }
 
@@ -20,7 +21,7 @@ function readPendingMfa(): PendingMfa | null {
     const raw = window.sessionStorage.getItem(GOOGLE_MFA_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PendingMfa;
-    if (!parsed?.pendingToken || !parsed?.state) return null;
+    if (!parsed?.state || (!parsed.pendingToken && parsed.mode !== "direct")) return null;
     if (Date.now() - (parsed.createdAt || 0) > PENDING_TTL_MS) return null;
     return parsed;
   } catch {
@@ -63,7 +64,7 @@ function GoogleCallback() {
       return;
     }
     if (!pending) {
-      fail("Không tìm thấy phiên đăng nhập bước 1. Vui lòng đăng nhập lại từ đầu.");
+      fail("Không tìm thấy phiên đăng nhập Google. Vui lòng đăng nhập lại từ đầu.");
       return;
     }
     if (pending.state !== state) {
@@ -71,7 +72,7 @@ function GoogleCallback() {
       return;
     }
 
-    completeGoogleSignIn({ code, state, pendingToken: pending.pendingToken })
+    completeGoogleSignIn({ code, state, ...(pending.pendingToken ? { pendingToken: pending.pendingToken } : {}) })
       .then((user) => {
         setUser(user);
         window.location.replace("/");
