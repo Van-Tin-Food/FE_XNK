@@ -22,6 +22,7 @@ export default function EmailPage() {
   const { notify } = useSystemNotification();
   const router = useRouter();
   const canSend = canPerformShipmentAction(user, "sendEmail");
+  const canView = canPerformShipmentAction(user, "viewEmailTools") || canSend;
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [message, setMessage] = useState("");
@@ -33,7 +34,7 @@ export default function EmailPage() {
   const [error, setError] = useState("");
 
   const loadSuppliers = useCallback(async () => {
-    if (!canSend) return;
+    if (!canView) return;
     setLoading(true);
     setError("");
     try {
@@ -44,15 +45,15 @@ export default function EmailPage() {
     } finally {
       setLoading(false);
     }
-  }, [canSend, t]);
+  }, [canView, t]);
 
   useEffect(() => {
-    if (!canSend) {
+    if (!canView) {
       router.replace("/");
       return;
     }
     void loadSuppliers();
-  }, [canSend, loadSuppliers, router]);
+  }, [canView, loadSuppliers, router]);
 
   const filteredSuppliers = useMemo(() => {
     const query = supplierQuery.trim().toLocaleLowerCase("vi");
@@ -103,7 +104,7 @@ export default function EmailPage() {
     }
   };
 
-  if (!canSend) return null;
+  if (!canView) return null;
 
   return (
     <section className="space-y-5">

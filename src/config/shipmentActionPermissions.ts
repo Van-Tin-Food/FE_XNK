@@ -22,6 +22,7 @@ export type ShipmentActionPermissionKey =
   | "manageMasterData"
   | "registerUser"
   | "updateUserPassword"
+  | "viewEmailTools"
   | "sendEmail"
   | "viewDocumentSync"
   | "syncDocuments"
@@ -39,7 +40,7 @@ type ActionAccess = {
 const ROLE_ACCESS: Record<Exclude<RbacRole, "admin">, ActionAccess> = {
   it: {
     // IT chỉ được xem dữ liệu. Session view/manage không làm thay đổi quyền IT.
-    view: ["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs", "viewDocumentSync"],
+    view: ["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs", "viewEmailTools", "viewDocumentSync"],
     manage: [],
   },
   logistic: {
