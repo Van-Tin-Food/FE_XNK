@@ -47,6 +47,12 @@ export function activityLogSummary(
     return action.toUpperCase() === "UPDATE_USER_PERMISSION" && changes ? compactChanges(subject, changes) : subject;
   }
 
+  if (["CREATE_MASTER_DATA", "UPDATE_MASTER_DATA"].includes(action.toUpperCase())) {
+    const subject = detail.split(";", 1)[0]?.trim() || "";
+    const changes = detail.split(";").slice(1).join(";").trim();
+    return changes ? compactChanges(subject, changes) : subject;
+  }
+
   const firstClause = detail.split(/[;\n]/, 1)[0]?.trim() || "";
   return firstClause.length > 110 ? `${firstClause.slice(0, 107)}…` : firstClause;
 }

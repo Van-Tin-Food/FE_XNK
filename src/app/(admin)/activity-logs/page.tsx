@@ -28,6 +28,10 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   UPDATE_USER_PERMISSION: "logUpdatePermission",
   UPDATE_USER_PASSWORD: "logResetPassword",
   SEND_EMAIL: "logSendEmail",
+  DOCUMENT_SYNC_SCAN: "logDocumentSyncScan",
+  DOCUMENT_SYNC_ACCEPT: "logDocumentSyncAccept",
+  DOCUMENT_SYNC_RENAME: "logDocumentSyncRename",
+  DOCUMENT_SYNC_RESTORE: "logDocumentSyncRestore",
 };
 
 function actionLabel(action: string, t: (key: string) => string): string {

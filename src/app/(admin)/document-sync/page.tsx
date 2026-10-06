@@ -13,11 +13,13 @@ import {
 } from "@/services/shipmentApi";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { recordActivity } from "@/services/activityLogApi";
 
 export default function DocumentSyncPage() {
   const { user } = useAuth();
   const { t } = useLanguage();
   const router = useRouter();
+  const canViewSync = canPerformShipmentAction(user, "viewDocumentSync") || canPerformShipmentAction(user, "syncDocuments");
   const canSync = canPerformShipmentAction(user, "syncDocuments");
   const [result, setResult] = useState<DocumentSyncResult | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -27,14 +29,21 @@ export default function DocumentSyncPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!canSync) router.replace("/");
-  }, [canSync, router]);
+    if (!canViewSync) router.replace("/");
+  }, [canViewSync, router]);
 
   const runScan = async () => {
+    if (!canSync) return;
     setScanning(true);
     setError("");
     try {
-      setResult(await scanDocumentSync());
+      const scanResult = await scanDocumentSync();
+      setResult(scanResult);
+      recordActivity(user, {
+        action: "DOCUMENT_SYNC_SCAN",
+        location: "Support/DocumentSync",
+        detail: `Quét đồng bộ chứng từ Drive; ${scanResult.summary.scannedFiles} file; ${scanResult.summary.pendingCandidates} file chờ xử lý`,
+      });
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : "Khong the dong bo chung tu");
     } finally {
@@ -43,6 +52,7 @@ export default function DocumentSyncPage() {
   };
 
   const accept = async (candidate: DocumentSyncCandidate) => {
+    if (!canSync) return;
     if (!candidate.nameValid) {
       setError(`Ten file "${candidate.fileName}" sai dinh dang. Hay doi ten theo mau ${candidate.expectedFileName}.`);
       return;
@@ -51,6 +61,11 @@ export default function DocumentSyncPage() {
     setError("");
     try {
       await acceptDocumentSync(candidate.candidateId);
+      recordActivity(user, {
+        action: "DOCUMENT_SYNC_ACCEPT",
+        location: `Support/DocumentSync/${candidate.documentCode}`,
+        detail: `Tiếp nhận file ${candidate.fileName}; chứng từ ${candidate.documentCode}; đơn ${candidate.orderCode}`,
+      });
       setResult((current) => current ? {
         ...current,
         candidates: current.candidates.filter((item) => item.candidateId !== candidate.candidateId),
@@ -74,6 +89,7 @@ export default function DocumentSyncPage() {
   };
 
   const rename = async (candidate: DocumentSyncCandidate) => {
+    if (!canSync) return;
     if (!renameValue.trim()) {
       setError("Vui long nhap ten file moi.");
       return;
@@ -82,6 +98,11 @@ export default function DocumentSyncPage() {
     setError("");
     try {
       const renamed = await renameDocumentSync(candidate.candidateId, renameValue.trim(), candidate.documentCode);
+      recordActivity(user, {
+        action: "DOCUMENT_SYNC_RENAME",
+        location: `Support/DocumentSync/${candidate.documentCode}`,
+        detail: `Đổi tên file ${candidate.fileName} thành ${renamed.fileName}; chứng từ ${candidate.documentCode}; đơn ${renamed.orderCode || candidate.orderCode || "chưa xác định"}`,
+      });
       setResult((current) => current ? {
         ...current,
         candidates: current.candidates.map((item) => item.candidateId === candidate.candidateId ? {
@@ -102,10 +123,16 @@ export default function DocumentSyncPage() {
   };
 
   const restore = async (fileId: string, documentCode: string) => {
+    if (!canSync) return;
     setBusyId(fileId);
     setError("");
     try {
       await restoreDocumentSync(fileId, documentCode);
+      recordActivity(user, {
+        action: "DOCUMENT_SYNC_RESTORE",
+        location: `Support/DocumentSync/${documentCode}`,
+        detail: `Khôi phục file ${fileId}; chứng từ ${documentCode}`,
+      });
       setResult((current) => current ? {
         ...current,
         trashedFiles: current.trashedFiles.filter((file) => file.fileId !== fileId),
@@ -121,7 +148,7 @@ export default function DocumentSyncPage() {
     void accept(candidate);
   };
 
-  if (!canSync) return null;
+  if (!canViewSync) return null;
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
@@ -130,9 +157,9 @@ export default function DocumentSyncPage() {
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">{t("documentSync")}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Quet va dong bo file chung tu tu Google Drive vao PostgreSQL.</p>
         </div>
-        <button type="button" onClick={runScan} disabled={scanning} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60">
+        {canSync && <button type="button" onClick={runScan} disabled={scanning} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60">
           {scanning ? "Đang quét..." : "Quét đồng bộ"}
-        </button>
+        </button>}
       </div>
 
       {error && <div className="rounded-lg border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700">{error}</div>}
@@ -158,8 +185,8 @@ export default function DocumentSyncPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <a href={candidate.fileUrl} target="_blank" rel="noreferrer" className="rounded-lg border px-3 py-2 text-xs font-semibold">Mở file</a>
-                  <button type="button" onClick={() => { setRenameCandidate(candidate.candidateId); setRenameValue(candidate.fileName); setError(""); }} disabled={busyId === candidate.candidateId} className="rounded-lg border px-3 py-2 text-xs font-semibold">Đổi tên file</button>
-                  <button type="button" onClick={() => openAccept(candidate)} disabled={busyId === candidate.candidateId} className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white">{busyId === candidate.candidateId ? "Đang lưu..." : "Tiếp nhận"}</button>
+                  {canSync && <><button type="button" onClick={() => { setRenameCandidate(candidate.candidateId); setRenameValue(candidate.fileName); setError(""); }} disabled={busyId === candidate.candidateId} className="rounded-lg border px-3 py-2 text-xs font-semibold">Đổi tên file</button>
+                  <button type="button" onClick={() => openAccept(candidate)} disabled={busyId === candidate.candidateId} className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white">{busyId === candidate.candidateId ? "Đang lưu..." : "Tiếp nhận"}</button></>}
                 </div>
               </div>
 
@@ -182,7 +209,7 @@ export default function DocumentSyncPage() {
           {result?.trashedFiles.map((file) => (
             <div key={file.fileId} className="flex flex-wrap items-center justify-between gap-3 p-4">
               <div><p className="font-medium text-gray-900 dark:text-white">{file.fileName || file.fileId}</p><p className="text-xs text-gray-500">{file.orderCode} · {file.documentCode}</p></div>
-              <button type="button" onClick={() => void restore(file.fileId, file.documentCode)} disabled={busyId === file.fileId} className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white">{busyId === file.fileId ? "Đang khôi phục..." : "Khôi phục file"}</button>
+              {canSync && <button type="button" onClick={() => void restore(file.fileId, file.documentCode)} disabled={busyId === file.fileId} className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white">{busyId === file.fileId ? "Đang khôi phục..." : "Khôi phục file"}</button>}
             </div>
           ))}
         </div>
