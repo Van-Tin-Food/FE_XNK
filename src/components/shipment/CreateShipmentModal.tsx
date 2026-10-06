@@ -10,7 +10,7 @@ import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useLanguage } from "@/context/LanguageContext";
-import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
+import { findBestCatalogMatch } from "@/utils/masterDataMatching";
 import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
 
 interface CreateShipmentModalProps {
@@ -323,11 +323,11 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
                     <span>{t(labelKey)} <span className="text-error-500">*</span></span>
                     {key === "supplier" ? (
                       <select value={fields.supplier} onChange={(event) => handleSupplierChange(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
-                        <option value="">{t("selectSupplier")}</option>
-                        {fields.supplier && !suppliers.some((supplier) => normalizeCatalogText(supplier.ten_ncc) === normalizeCatalogText(fields.supplier)) && (
-                          <option value={fields.supplier} disabled>{t("ocrNotMatched", { value: fields.supplier })}</option>
-                        )}
-                        {suppliers.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.ten_ncc}</option>)}
+                          <option value="">{t("selectSupplier")}</option>
+                          {fields.supplier && !suppliers.some((supplier) => supplier.ten_ncc === fields.supplier) && (
+                            <option value={fields.supplier} disabled>{t("ocrNotMatched", { value: fields.supplier })}</option>
+                          )}
+                          {suppliers.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.ten_ncc}</option>)}
                       </select>
                     ) : (
                       <input type="text" value={fields[key]} readOnly={key === "origin"} onChange={(event) => updateField(key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:read-only:bg-gray-800" />

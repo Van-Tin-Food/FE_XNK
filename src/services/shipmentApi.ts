@@ -142,6 +142,8 @@ function parseDocumentFiles(value: DriveDocumentValue | undefined): DriveDocumen
       idChiTiet: typeof file.idChiTiet === "string" ? file.idChiTiet : undefined,
       requestId: typeof file.requestId === "string" ? file.requestId : undefined,
       uploadedAt: typeof file.uploadedAt === "string" ? file.uploadedAt : undefined,
+      uploadedBy: typeof file.uploadedBy === "string" ? file.uploadedBy : undefined,
+      uploadedByEmail: typeof file.uploadedByEmail === "string" ? file.uploadedByEmail : undefined,
     }];
   });
   return files.filter((file, index) => files.findIndex((other) => (
@@ -469,6 +471,7 @@ export interface UploadDocumentPayload {
   referenceCode?: string;
   idChiTiet?: string;
   requestId: string;
+  transportCode?: string;
 }
 export async function uploadDocument(payload: UploadDocumentPayload): Promise<DriveDataResponse> {
   let result: DriveDataResponse;

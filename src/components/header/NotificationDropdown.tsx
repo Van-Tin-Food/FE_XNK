@@ -140,6 +140,7 @@ export default function NotificationDropdown() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [hasNewNotification, setHasNewNotification] = useState(false);
+  const [orderFilter, setOrderFilter] = useState("");
   const markingReadRef = useRef(false);
 
   const applyRows = useCallback((rows: NotificationRow[], announce = false) => {
@@ -172,7 +173,11 @@ export default function NotificationDropdown() {
     return () => window.removeEventListener(NOTIFICATIONS_SYNC_EVENT, handleUploadSync);
   }, [refreshNotifications, t]);
 
-  const latestThree = useMemo(() => notifications.slice(0, 3), [notifications]);
+  const filteredNotifications = useMemo(() => {
+    const query = orderFilter.trim().toLowerCase();
+    return query ? notifications.filter((item) => item.orderCode.toLowerCase().includes(query)) : notifications;
+  }, [notifications, orderFilter]);
+  const latestThree = useMemo(() => filteredNotifications.slice(0, 3), [filteredNotifications]);
   const unreadCount = useMemo(() => notifications.filter(isUnread).length, [notifications]);
 
   const markUnreadAsRead = useCallback(async () => {
@@ -253,6 +258,16 @@ export default function NotificationDropdown() {
         </div>
 
         <div className="min-h-0 overflow-y-auto overscroll-contain pr-1 custom-scrollbar">
+          <div className="mb-3">
+            <label className="sr-only" htmlFor="notification-order-filter">Lọc theo mã đơn hàng</label>
+            <input
+              id="notification-order-filter"
+              value={orderFilter}
+              onChange={(event) => setOrderFilter(event.target.value)}
+              placeholder="Lọc theo mã đơn hàng..."
+              className="h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs text-gray-700 outline-none transition focus:border-brand-400 focus:bg-white dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+            />
+          </div>
           {hasNewNotification && <div className="mb-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">{t("newUploadNotification")}</div>}
           {error && <div className="mb-2 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-xs font-medium text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">{error}</div>}
 
@@ -290,8 +305,8 @@ export default function NotificationDropdown() {
             </div>
           )}
           <div className="flex flex-col gap-2">
-            {notifications.length > 0
-              ? notifications.map((item, index) => renderNotification(item, index))
+            {filteredNotifications.length > 0
+              ? filteredNotifications.map((item, index) => renderNotification(item, index))
               : <p className="py-8 text-center text-sm text-gray-400">{t("noNotifications")}</p>}
           </div>
         </div>

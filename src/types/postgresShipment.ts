@@ -95,6 +95,8 @@ export interface DriveDocumentFileRecord {
   idChiTiet?: string | null;
   requestId?: string | null;
   uploadedAt?: string | null;
+  uploadedBy?: string | null;
+  uploadedByEmail?: string | null;
 }
 
 export type DriveDocumentValue = string | Array<DriveDocumentFileRecord | string> | null;

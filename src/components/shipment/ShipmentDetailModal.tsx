@@ -537,6 +537,16 @@ function formatDateTime(iso?: string): string {
   return new Date(iso).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function formatUploadDateTime(value: string | null | undefined, language: string): string {
+  if (!value) return "Chưa có thời gian";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Chưa có thời gian";
+  return date.toLocaleString(language === "en" ? "en-GB" : "vi-VN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+}
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1155,6 +1165,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [passingDocumentId, setPassingDocumentId] = useState<string | null>(null);
   const [locallyPassedDocumentIds, setLocallyPassedDocumentIds] = useState<string[]>([]);
   const [selectedMissingDocIds, setSelectedMissingDocIds] = useState<string[]>([]);
+  const [selectedTransportCode, setSelectedTransportCode] = useState("");
+
+  const transportCodes = [...new Set(returnItems.map((item) => item.soCont).filter(Boolean))];
+  const activeTransportCode = selectedTransportCode || (transportCodes.length === 1 ? transportCodes[0] : "");
   const [isSendingEmail] = useState(false);
   const [emailSent] = useState(false);
   const [isOpeningTracking, setIsOpeningTracking] = useState(false);
@@ -1178,6 +1192,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setIsPreviewCollapsed(false);
     setLocalUploads({});
     setOpenDocumentFileListId(null);
+    setSelectedTransportCode("");
   };
 
   const handleModalClose = () => {
@@ -1408,20 +1423,37 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   });
   const documentFileGroups = documentsSorted.map((document) => {
     const archivedFiles = archived?.archived
-      ? (archived.files || []).filter((file) => file.fileName.toUpperCase().startsWith(`${shipment.orderCode}_${document.id}`.toUpperCase()))
+      ? (archived.files || []).filter((file) => (file.fileName || "").toUpperCase().startsWith(`${shipment.orderCode}_${document.id}`.toUpperCase()))
       : [];
     const files = [
-      ...(document.files?.length ? document.files : (document.urls?.length ? document.urls : document.url ? [document.url] : []).map((url) => ({ fileUrl: url, referenceCode: undefined, idChiTiet: undefined, fileName: undefined }))).map((file, index) => ({
+      ...(document.files?.length ? document.files : (document.urls?.length ? document.urls : document.url ? [document.url] : []).map((url) => ({
+        fileUrl: url,
+        referenceCode: undefined,
+        idChiTiet: undefined,
+        fileName: undefined,
+        uploadedAt: undefined,
+        uploadedBy: undefined,
+        uploadedByEmail: undefined,
+      }))).map((file, index) => ({
         url: file.fileUrl,
+        fileName: file.fileName?.trim() || "",
+        uploadedAt: file.uploadedAt || "",
+        uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
         label: [
           file.referenceCode?.trim()
             || shipment.database?.details.find((detail) => detail.id_chi_tiet === file.idChiTiet)?.ten_hang,
           file.fileName?.trim() || t("documentFileIndex", { index: index + 1 }),
         ].filter(Boolean).join(" — "),
       })),
-      ...archivedFiles.map((file) => ({ url: file.fileUrl, label: file.fileName })),
+      ...archivedFiles.map((file) => ({
+        url: file.fileUrl,
+        fileName: file.fileName || "",
+        uploadedAt: file.createdTime || "",
+        uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
+        label: file.fileName || "",
+      })),
       ...(localUploads[document.id] && !document.url
-        ? [{ url: localUploads[document.id], label: t("documentFileIndex", { index: 1 }) }]
+        ? [{ url: localUploads[document.id], fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
         : []),
     ].filter((file, index, allFiles) => file.url && allFiles.findIndex((other) => other.url === file.url) === index);
     return { document, files };
@@ -1630,6 +1662,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   const handlePickUpload = (docId: string, multiple = false) => {
     if (!canUploadDocuments || !canUploadDocumentType(user, docId) || isArchived) return;
+    if (docId === "TRA_CONG" && !activeTransportCode) {
+      notify("Vui lòng chọn mã công trước khi upload chứng từ trả công.", "error");
+      return;
+    }
     setSelectedMissingDocIds([docId]);
     setAllowMultipleUpload(multiple);
     window.setTimeout(() => document.getElementById("shipment-document-upload")?.click(), 0);
@@ -1675,6 +1711,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const file = files[0];
     const docId = selectedMissingDocIds[0];
     if (!file || !docId || !canUploadDocuments || !canUploadDocumentType(user, docId) || isArchived || isOcrAnalyzing || isOcrSaving) return;
+    if (docId === "TRA_CONG" && !activeTransportCode) {
+      setOcrUploadError("Vui lòng chọn mã công trước khi upload chứng từ trả công.");
+      return;
+    }
     event.target.value = "";
     setAllowMultipleUpload(false);
     const documentType = getOcrDocumentType(docId);
@@ -1705,6 +1745,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             fileData,
             mimeType: getDocumentMimeType(selectedFile),
             requestId,
+            ...(docId === "TRA_CONG" ? { transportCode: activeTransportCode } : {}),
           });
         }
         recordActivity(user, {
@@ -2157,10 +2198,25 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setIsSavingReturn(true);
     try {
       await savePostgresReturnItem(returnForm);
+      const transportChanges = describeEditedFields(
+        `Container ${returnForm.soCont || returnItem?.soCont || "(chưa có mã)"}`,
+        returnItem || undefined,
+        returnForm,
+        {
+          ngay: "Ngày vận chuyển",
+          nhaXe: "Nhà xe",
+          tenTaiXe: "Tài xế",
+          bienSoXe: "Biển số xe",
+          noiDi: "Nơi lấy hàng",
+          idKho: "Mã kho",
+          noiTraContainer: "Nơi hạ rỗng",
+          ghiChu: "Ghi chú",
+        },
+      );
       recordActivity(user, {
         action: "EDIT_RETURN_ITEM",
         location: "ShipmentDetailModal/ReturnItem",
-        detail: `Cập nhật vận chuyển Container ${returnForm.soCont} của đơn ${shipment.orderCode}`,
+        detail: `Đơn ${shipment.orderCode}; ${transportChanges.length > 0 ? transportChanges.join(" | ") : "Không thay đổi dữ liệu"}`,
       });
       const refreshed = await fetchReturnItems(shipment.database?.purchase.ma_hop_dong || shipment.orderCode);
       const displayResults = refreshed.map((item) => ({ ...item, soHd: shipment.orderCode }));
@@ -2344,15 +2400,19 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           )}
                         </span>
                         {normalizeSheetField(key) === normalizeSheetField("Nhà cung cấp") ? (
-                          <select
+                          <>
+                          <input
+                            type="search"
                             value={value}
                             onChange={(event) => updateOcrSupplier(event.target.value)}
+                            list={`ocr-supplier-options-${rowIndex}`}
+                            placeholder="Tìm nhà cung cấp..."
                             className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                          >
-                            <option value="">{t("selectSupplier")}</option>
-                            {value && !supplierOptions.some((supplier) => normalizeCatalogText(supplier.ten_ncc) === normalizeCatalogText(value)) && <option value={value} disabled>{t("ocrNotMatched", { value })}</option>}
-                            {supplierOptions.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.ten_ncc}</option>)}
-                          </select>
+                          />
+                          <datalist id={`ocr-supplier-options-${rowIndex}`}>
+                            {supplierOptions.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.id_ncc} - {supplier.quoc_gia || ""}</option>)}
+                          </datalist>
+                          </>
                         ) : normalizeSheetField(key) === normalizeSheetField("Hãng tàu") ? (
                           <select value={value} onChange={(event) => updateOcrCarrier(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
                             <option value="">{t("selectCarrier")}</option>
@@ -2768,13 +2828,24 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 return (
                   <div
                     key={doc.id}
+                    onClick={() => {
+                      if (documentFiles.length > 1) {
+                        setOpenDocumentFileListId((current) => current === doc.id ? null : doc.id);
+                      } else if (documentFiles[0]) {
+                        setPreviewUrl(toDocumentPreviewUrl(documentFiles[0].url));
+                        setPreviewName(documentFiles[0].fileName || doc.name);
+                        setIsPreviewCollapsed(false);
+                      }
+                    }}
                     className={`flex flex-col items-stretch gap-3 rounded-xl border p-3 transition-colors sm:flex-row sm:flex-wrap sm:items-center sm:p-3.5 ${
+                      documentFiles.length > 0 ? "cursor-pointer hover:border-brand-300" : ""
+                    } ${
                       doc.status === "missing"
                         ? "border-error-100 bg-error-50/50 dark:border-error-500/20 dark:bg-error-500/5"
                         : doc.status === "pending"
                         ? "border-warning-100 bg-warning-50/50 dark:border-warning-500/20 dark:bg-warning-500/5"
                         : "border-gray-100 bg-gray-50/50 dark:border-gray-800 dark:bg-white/[0.02]"
-                    }`}
+                      }`}
                   >
                     {/* Icon */}
                     <div className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg ${
@@ -2794,39 +2865,30 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-800 dark:text-white/90 truncate">{language === "en" ? t("documentName", { code: doc.id }) : doc.name}</p>
                       <p className="text-xs text-gray-400">{doc.type.toUpperCase()}</p>
+                      {documentFiles[0] && <p className="mt-1 truncate text-[10px] text-gray-400">{[documentFiles[0].fileName || documentFiles[0].label, documentFiles[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(documentFiles[0].uploadedAt, language)].join(" · ")}</p>}
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
+                      {doc.id === "TRA_CONG" && transportCodes.length > 1 && !isArchived && canUploadDocuments && canUploadDocumentType(user, doc.id) && (
+                        <select
+                          value={selectedTransportCode}
+                          onChange={(event) => setSelectedTransportCode(event.target.value)}
+                          onClick={(event) => event.stopPropagation()}
+                          aria-label="Chọn mã công trả công"
+                          className="max-w-[190px] rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800 outline-none focus:border-amber-400 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+                        >
+                          <option value="">Chọn mã công</option>
+                          {returnItems.map((item) => (
+                            <option key={item.idBlContainer} value={item.soCont}>{item.soCont}</option>
+                          ))}
+                        </select>
+                      )}
                       <span className={`flex items-center gap-1 text-xs font-semibold ${docStatus?.color}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${docStatus?.dot}`} />
                         {isPassed ? t("passed") : t({ ok: "available", missing: "missing", pending: "pending", expired: "expired" }[doc.status] || "status")}
                       </span>
-                      {documentFiles.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (documentFiles.length > 1) {
-                              setOpenDocumentFileListId((current) => current === doc.id ? null : doc.id);
-                              return;
-                            }
-                            setOpenDocumentFileListId(null);
-                            setPreviewUrl(toDocumentPreviewUrl(documentFiles[0].url));
-                            setPreviewName(doc.name);
-                            setIsPreviewCollapsed(false);
-                          }}
-                          aria-label={t("viewDocument")}
-                          aria-expanded={documentFiles.length > 1 ? openDocumentFileListId === doc.id : undefined}
-                          className="flex items-center justify-center w-7 h-7 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                            <polyline points="15 3 21 3 21 9"/>
-                            <line x1="10" y1="14" x2="21" y2="3"/>
-                          </svg>
-                        </button>
-                      )}
                       {!isArchived && canUploadDocuments && canUploadDocumentType(user, doc.id) && (
-                        <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                        <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={(event) => { event.stopPropagation(); handlePickUpload(doc.id); }} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
                           {isOcrAnalyzing && ocrUploadDocId === doc.id ? t("analyzingDocument") : doc.status === "ok" ? t("uploadAnother") : localUploads[doc.id] ? t("uploadAnother") : t("uploadDocument")}
                         </button>
                       )}
@@ -2858,7 +2920,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
                             >
                               <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-400">{doc.id === "BL" ? "B/L" : doc.id} {index + 1}</span>
-                              <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">{file.label}</span>
+                              <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">
+                                <span className="block truncate">{file.fileName || file.label}</span>
+                                <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
+                              </span>
                             </button>
                           ))}
                         </div>
@@ -2894,12 +2959,26 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       role="button"
                       tabIndex={isArchived || !canUploadThisDocument ? -1 : 0}
                       onClick={() => {
-                        if (!isArchived && canUploadThisDocument) handlePickUpload(document.id, true);
+                        if (hasFile) {
+                          if (files.length > 1) setOpenDocumentFileListId((current) => current === document.id ? null : document.id);
+                          else {
+                            setPreviewUrl(toDocumentPreviewUrl(files[0].url));
+                            setPreviewName(files[0].fileName || document.name);
+                            setIsPreviewCollapsed(false);
+                          }
+                        } else if (!isArchived && canUploadThisDocument) handlePickUpload(document.id, true);
                       }}
                       onKeyDown={(event) => {
                         if ((event.key === "Enter" || event.key === " ") && !isArchived && canUploadThisDocument) {
                           event.preventDefault();
-                          handlePickUpload(document.id, true);
+                          if (hasFile) {
+                            if (files.length > 1) setOpenDocumentFileListId((current) => current === document.id ? null : document.id);
+                            else {
+                              setPreviewUrl(toDocumentPreviewUrl(files[0].url));
+                              setPreviewName(files[0].fileName || document.name);
+                              setIsPreviewCollapsed(false);
+                            }
+                          } else handlePickUpload(document.id, true);
                         }
                       }}
                       className={`group flex min-w-0 flex-col items-start gap-3 rounded-lg border bg-white p-3 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${!isArchived && canUploadThisDocument ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
@@ -2915,25 +2994,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         <p className={`mt-1 text-[11px] ${hasFile ? "text-success-600 dark:text-success-400" : "text-gray-400"}`}>
                           {hasFile ? `${files.length} file đã đính kèm` : "Bấm để chọn file"}
                         </p>
+                        {hasFile && files[0] && <p className="mt-1 truncate text-[10px] text-gray-400">{[files[0].fileName || files[0].label, files[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(files[0].uploadedAt, language)].join(" · ")}</p>}
                       </div>
-                      {hasFile && (
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (files.length > 1) {
-                              setOpenDocumentFileListId((current) => current === document.id ? null : document.id);
-                              return;
-                            }
-                            setPreviewUrl(toDocumentPreviewUrl(files[0].url));
-                            setPreviewName(document.name);
-                            setIsPreviewCollapsed(false);
-                          }}
-                          className="w-full rounded-md border border-gray-200 px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                        >
-                          {files.length > 1 ? `Xem ${files.length} file` : "Xem file"}
-                        </button>
-                      )}
                       {openDocumentFileListId === document.id && files.length > 1 && (
                         <div className="w-full space-y-1 border-t border-gray-100 pt-2 dark:border-gray-800">
                           {files.map((file, index) => (
@@ -2950,7 +3012,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                             >
                               <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-300">{document.id} {index + 1}</span>
-                              <span className="min-w-0 truncate">{file.label}</span>
+                              <span className="min-w-0 truncate">
+                                <span className="block truncate">{file.fileName || file.label}</span>
+                                <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
+                              </span>
                             </button>
                           ))}
                         </div>
@@ -3385,8 +3450,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               {archived?.files && archived.files.length > 0 && (
                 <div className="mt-4 flex flex-col gap-2">
                   {archived.files.map((file, fileIndex) => (
-                    <button key={file.fileId || file.fileUrl || `${file.fileName}-${fileIndex}`} type="button" onClick={() => { setPreviewUrl(toDocumentPreviewUrl(file.fileUrl)); setPreviewName(file.fileName); }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-                      {file.fileName}
+                    <button key={file.fileId || file.fileUrl || `${file.fileName || "file"}-${fileIndex}`} type="button" onClick={() => { setPreviewUrl(toDocumentPreviewUrl(file.fileUrl)); setPreviewName(file.fileName || file.fileUrl); }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                      {file.fileName || file.fileUrl}
                     </button>
                   ))}
                 </div>

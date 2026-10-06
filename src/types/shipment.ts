@@ -43,6 +43,8 @@ export interface ArchivedDocumentFile {
   mimeType?: string;
   createdTime?: string;
   updatedTime?: string;
+  uploadedBy?: string | null;
+  uploadedByEmail?: string | null;
 }
 
 export interface ArchivedDocumentsResponse {
