@@ -26,7 +26,7 @@ const AppSidebar: React.FC = () => {
   const canSendEmail = !isOperationalRole && canPerformShipmentAction(user, "sendEmail");
   const canSyncDocuments = canPerformShipmentAction(user, "syncDocuments");
   const canManageUsers = !isOperationalRole && (canPerformShipmentAction(user, "viewUsers") || canPerformShipmentAction(user, "manageUsers"));
-  const canManageMasterData = !isOperationalRole && (canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData"));
+  const canManageMasterData = canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData");
   const { t } = useLanguage();
 
   return (

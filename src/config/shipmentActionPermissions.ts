@@ -45,12 +45,12 @@ const ROLE_ACCESS: Record<Exclude<RbacRole, "admin">, ActionAccess> = {
     view: [],
     manage: [
       "createShipment", "uploadDocument", "passDocument", "editShipmentDetails",
-      "syncDocuments",
+      "syncDocuments", "manageMasterData",
     ],
   },
   van_chuyen: {
     view: [],
-    manage: ["uploadDocument", "passDocument", "archiveDocuments", "editReturnItem", "syncDocuments"],
+    manage: ["uploadDocument", "passDocument", "archiveDocuments", "editReturnItem", "syncDocuments", "manageMasterData"],
   },
 };
 
