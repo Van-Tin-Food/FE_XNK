@@ -1489,7 +1489,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const isEvergreenTracking = carrierTrackingLink?.name === "EVERGREEN";
   const isCkLineTracking = carrierTrackingLink?.name === "CK LINE";
   const isCmaTracking = carrierTrackingLink?.name === "CMA CGM";
-  const fallbackContainers = (overviewInfo.container || "").split(",").map((code) => code.trim()).filter(Boolean);
+  // "Số Container" is a quantity (for example: 1), not a tracking code.
+  // Tracking must only use actual container numbers.
+  const trackingContainerSummary = getSummaryValue(summaryFields, ["Mã Container", "Số cont", "Container"]);
+  const fallbackContainers = trackingContainerSummary.split(",").map((code) => code.trim()).filter(Boolean);
   const fallbackBills = (shipment.bill || "").split(",").map((code) => code.trim()).filter(Boolean);
   const containerCodes = [...new Set([
     fallbackContainers[0],
