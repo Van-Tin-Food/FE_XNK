@@ -122,7 +122,7 @@ export default function DocumentSyncPage() {
     }
   };
 
-  const restore = async (fileId: string, documentCode: string) => {
+  const restore = async (fileId: string, documentCode: string, fileName: string) => {
     if (!canSync) return;
     setBusyId(fileId);
     setError("");
@@ -131,7 +131,7 @@ export default function DocumentSyncPage() {
       recordActivity(user, {
         action: "DOCUMENT_SYNC_RESTORE",
         location: `Support/DocumentSync/${documentCode}`,
-        detail: t("documentSyncActivityRestore", { fileId, documentCode }),
+        detail: `Khôi phục file ${fileName} (ID ${fileId}); chứng từ ${documentCode}`,
       });
       setResult((current) => current ? {
         ...current,
@@ -209,7 +209,7 @@ export default function DocumentSyncPage() {
           {result?.trashedFiles.map((file) => (
             <div key={file.fileId} className="flex flex-wrap items-center justify-between gap-3 p-4">
               <div><p className="font-medium text-gray-900 dark:text-white">{file.fileName || file.fileId}</p><p className="text-xs text-gray-500">{file.orderCode} · {file.documentCode}</p></div>
-              {canSync && <button type="button" onClick={() => void restore(file.fileId, file.documentCode)} disabled={busyId === file.fileId} className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white">{busyId === file.fileId ? t("documentSyncRestoring") : t("documentSyncRestore")}</button>}
+              {canSync && <button type="button" onClick={() => void restore(file.fileId, file.documentCode, file.fileName || file.fileId)} disabled={busyId === file.fileId} className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white">{busyId === file.fileId ? t("documentSyncRestoring") : t("documentSyncRestore")}</button>}
             </div>
           ))}
         </div>

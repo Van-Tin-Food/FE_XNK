@@ -191,7 +191,7 @@ export default function MasterDataPage() {
         location: `/master-data/${config.endpoint}`,
         detail: editingId
           ? `Cập nhật ${t(config.singularKey)} ${editingId}; thay đổi: ${fieldChanges.join(" | ") || "Không thay đổi"}`
-          : `Tạo ${t(config.singularKey)} (ID tự động)`,
+          : `Tạo ${t(config.singularKey)} (ID tự động); dữ liệu: ${Object.entries(form).filter(([key, value]) => key !== config.idField && String(value).trim()).map(([key, value]) => `${key}=${String(value).trim()}`).join(" | ") || "Không có dữ liệu bổ sung"}`,
       });
       notify(editingId ? t("catalogUpdated", { catalog: t(config.singularKey) }) : t("catalogAdded", { catalog: t(config.singularKey) }), "success");
       beginCreate();

@@ -265,8 +265,7 @@ const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
     name: "Yang Ming",
     aliases: ["yang ming", "yangming", "yml"],
     requiresManualCode: false,
-    usesBackendApi: true,
-    buildUrl: (trackingCode) => `https://www.yangming.com/en/esolution/cargo_tracking?service=${trackingCode}`,
+    buildUrl: (trackingCode) => `https://www.yangming.com/en/esolution/cargo_tracking?service=${encodeURIComponent(trackingCode)}`,
   },
   {
     name: "CK LINE",
@@ -895,18 +894,20 @@ function PurchaseDetailsTable({
         {editing && <button type="button" onClick={onAddRow} className="ml-auto shrink-0 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 dark:border-brand-500/30 dark:bg-gray-900 dark:text-brand-300">{translate("addRow")}</button>}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[680px] table-fixed text-left xl:min-w-0">
+        <table className="w-full min-w-[780px] table-fixed text-left xl:min-w-0">
           <colgroup>
             <col className="w-[6%]" />
-            <col className="w-[39%]" />
-            <col className="w-[35%]" />
-            <col className="w-[20%]" />
+            <col className="w-[32%]" />
+            <col className="w-[28%]" />
+            <col className="w-[18%]" />
+            <col className="w-[16%]" />
           </colgroup>
           <thead className="bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
             <tr>
               <th className="px-4 py-3">#</th>
               <th className="px-4 py-3">{translate("productName")}</th>
               <th className="px-4 py-3">{translate("itemCode")}<span className="mt-0.5 block text-[9px] font-medium normal-case tracking-normal">{translate("factoryCode")}</span></th>
+              <th className="px-4 py-3">{translate("unitPrice")}</th>
               <th className="px-4 py-3">{translate("itemPackageCount")}</th>
             </tr>
           </thead>
@@ -935,12 +936,18 @@ function PurchaseDetailsTable({
                     )}
                   </div>
                 </td>
+                <EditableTableCell
+                  value={detail.don_gia}
+                  editing={editing}
+                  onChange={(value) => onChange(detail.id_chi_tiet, "don_gia", value)}
+                  displayFormatter={formatMoney}
+                />
                 <td className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
                   {getItemPackageCount(detail, item) || ""}{getItemPackageCount(detail, item) && detail.don_vi_kien ? ` ${detail.don_vi_kien}` : ""}
                 </td>
               </tr>
             ))}
-            {tableRows.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-400">{translate("noPurchaseDetails")}</td></tr>}
+            {tableRows.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400">{translate("noPurchaseDetails")}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1350,6 +1357,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     container: getSummaryValue(summaryFields, ["Số Container", "Mã Container", "Số cont", "Container"]),
     packageCount: getSummaryValue(summaryFields, ["Số kiện hàng", "Số kiện", "Số hộp"]),
     netWeight: getSummaryValue(summaryFields, ["Net weight", "Trọng lượng", "Trọng lượng tịnh"]),
+    unitPrice: getSummaryValue(summaryFields, ["Đơn giá", "Unit price"]),
     goodsValue: getSummaryValue(summaryFields, ["Tiền hàng", "Giá tổng", "Trị giá", "Tổng tiền"]),
     releaseOrder: getSummaryValue(summaryFields, ["Lệnh thả hàng", "Lệnh giao hàng", "Telex", "Telex release"]),
   };
@@ -1365,6 +1373,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const overviewPackageUnit = packageUnits.length === 1 ? packageUnits[0] : "CARTONS";
   const overviewPackageDisplay = overviewPackageCount ? `${overviewPackageCount} ${overviewPackageUnit}` : "";
   const overviewNetWeightDisplay = overviewInfo.netWeight ? formatOverviewNetWeight(overviewInfo.netWeight) : "";
+  const overviewUnitPriceDisplay = overviewInfo.unitPrice ? `${formatOverviewMoney(overviewInfo.unitPrice)} USD` : "";
   const overviewGoodsValueDisplay = overviewGoodsValue ? `${overviewGoodsValue} USD` : "USD";
   const etaStatus = formatEtaStatus(shipment.eta, shipment.ata, currentDay, language);
   const piDate = getSummaryValue(summaryFields, ["Ngày HĐ PI", "Ngày PI", "PI Date"]);
@@ -1751,7 +1760,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         recordActivity(user, {
           action: "UPLOAD_DOCUMENT",
           location: "ShipmentDetailModal/Documents",
-          detail: `Đã upload ${files.length} file chứng từ ${docId} cho đơn ${shipment.orderCode}`,
+          detail: `Đã upload file chứng từ ${docId} cho đơn ${shipment.orderCode}; ${files.map((selectedFile) => selectedFile.name).join(", ")}${docId === "TRA_CONG" ? `; mã công ${activeTransportCode}` : ""}`,
         });
         setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
         await onRefresh?.();
@@ -1879,13 +1888,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         recordActivity(user, {
           action: "UPLOAD_OCR_DOCUMENT",
           location: `ShipmentDetailModal/Documents/${ocrUploadDocId}`,
-          detail: describeFieldChanges(shipment.orderCode, changedOcrFields, shipment.summaryFields),
+          detail: `Đã xử lý file ${ocrUploadFile.name}; ${describeFieldChanges(shipment.orderCode, changedOcrFields, shipment.summaryFields)}`,
         });
       } else {
         recordActivity(user, {
           action: "UPLOAD_OCR_DOCUMENT",
           location: `ShipmentDetailModal/Documents/${ocrUploadDocId}`,
-          detail: `Đã upload chứng từ ${ocrUploadDocId} cho đơn ${shipment.orderCode}`,
+          detail: `Đã upload file ${ocrUploadFile.name} chứng từ ${ocrUploadDocId} cho đơn ${shipment.orderCode}`,
         });
       }
       setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: URL.createObjectURL(ocrUploadFile) }));
@@ -2468,6 +2477,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <InfoRow label={t("invoiceNumber")} value={overviewInfo.invoice || t("notAvailable")} mono />
                   <InfoRow label={t("packageCount")} value={overviewPackageDisplay || t("notAvailable")} />
                   <InfoRow label={t("netWeight")} value={overviewNetWeightDisplay || t("notAvailable")} />
+                  <InfoRow label={t("unitPrice")} value={overviewUnitPriceDisplay || t("notAvailable")} />
                   <InfoRow label={t("goodsValue")} value={overviewGoodsValueDisplay || t("notAvailable")} />
                 </div>
               </div>
