@@ -296,6 +296,7 @@ function mapPostgresShipment(
     "ATA": primaryBill?.ata || "",
     "Item code": itemCodes.map((item) => item.item_code).filter(Boolean).join(", "),
     "Mã nhà máy": itemCodes.map((item) => item.ma_nha_may).filter(Boolean).join(", "),
+    "Tên nhà máy": itemCodes.map((item) => item.ten_nha_may).filter(Boolean).join(", "),
     "Số tiền cọc": "",
     "Số tiền thanh toán": "",
     "Lệnh thả hàng": "",
@@ -333,6 +334,14 @@ function mapPostgresShipment(
 
 export async function fetchReturnItems(orderCode: string): Promise<ReturnItem[]> {
   return fetchPostgresReturnItems(orderCode);
+}
+
+export async function exportEtaRows(payload: { title: string; headers: string[]; rows: Array<Record<string, unknown>> }): Promise<void> {
+  await requestJson("eta-export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getNotifications(): Promise<NotificationRecord[]> {

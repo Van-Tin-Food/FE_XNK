@@ -1,8 +1,8 @@
 "use client";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import type { Shipment, ShipmentFilter, ShipmentStatus, ShipmentFilterStatus } from "@/types/shipment";
-import { fetchShipments, computeMetrics, fetchReturnItems } from "@/services/shipmentApi";
-import { buildShipmentWorkbook, saveShipmentWorkbook } from "@/services/shipmentExcelExport";
+import { fetchShipments, computeMetrics, fetchReturnItems, exportEtaRows } from "@/services/shipmentApi";
+import { buildEtaRows, getEtaHeaders } from "@/services/shipmentExcelExport";
 import ShipmentMetrics from "./ShipmentMetrics";
 import DashboardInfoBar from "./DashboardInfoBar";
 import ShipmentFilters from "./ShipmentFilters";
@@ -160,9 +160,11 @@ export default function ShipmentDashboard() {
       const orderCodes = [...new Set(filteredShipments.map((shipment) => shipment.orderCode).filter(Boolean))];
       const returnEntries = await Promise.all(orderCodes.map(async (orderCode) => [orderCode, await fetchReturnItems(orderCode)] as const));
       const returnItemsByOrder = Object.fromEntries(returnEntries);
-      const workbook = buildShipmentWorkbook(filteredShipments, returnItemsByOrder);
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
-      await saveShipmentWorkbook(workbook, `xnk_export_${stamp}.xlsx`);
+      const rows = buildEtaRows(filteredShipments, returnItemsByOrder);
+      const exportedAt = new Date();
+      const pad = (value: number) => String(value).padStart(2, "0");
+      const version = `${pad(exportedAt.getHours())}:${pad(exportedAt.getMinutes())} ${pad(exportedAt.getDate())}/${pad(exportedAt.getMonth() + 1)}/${exportedAt.getFullYear()}`;
+      await exportEtaRows({ title: `Bảng ETA được xuất vào ${version}`, rows, headers: getEtaHeaders() });
       notify(t("exportExcelSucceeded"), "success");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;

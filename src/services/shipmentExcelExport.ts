@@ -13,6 +13,20 @@ function joinValues(values: unknown[]): string {
   return values.map((value) => String(value ?? "").trim()).filter(Boolean).join(" | ");
 }
 
+function exportDate(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const slash = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (!slash) return raw;
+  const first = Number(slash[1]);
+  const second = Number(slash[2]);
+  const day = first > 12 ? first : second;
+  const month = first > 12 ? second : first;
+  return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${slash[3]}`;
+}
+
 function addSheet(workbook: XLSX.WorkBook, name: string, rows: Array<Record<string, unknown>>) {
   const safeRows = rows.length > 0 ? rows : [{ "Thông tin": "Không có dữ liệu" }];
   const normalized = safeRows.map((row) => Object.fromEntries(
@@ -48,6 +62,7 @@ function buildSummaryRows(shipments: Shipment[]): Array<Record<string, unknown>>
         "Xuất xứ": shipment.origin,
         "Item code": joinValues(itemCodes.map((item) => item.item_code)),
         "Mã nhà máy": joinValues(itemCodes.map((item) => item.ma_nha_may)),
+        "Tên nhà máy": joinValues(itemCodes.map((item) => item.ten_nha_may)),
         "Số lượng kiện": detail?.so_kien,
         "Số lượng NET": detail?.net_weight,
         "Đơn giá": detail?.don_gia,
@@ -159,30 +174,78 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
   return workbook;
 }
 
-export async function saveShipmentWorkbook(workbook: XLSX.WorkBook, suggestedName: string): Promise<void> {
-  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const pickerWindow = window as Window & {
-    showSaveFilePicker?: (options?: Record<string, unknown>) => Promise<{
-      createWritable: () => Promise<{ write: (data: Blob) => Promise<void>; close: () => Promise<void> }>;
-    }>;
-  };
+export const ETA_EXPORT_HEADERS = [
+  "STT", "Số HĐ", "Ngày HĐ", "INV", "Ngày INV", "ITEM CODE", "Tên hàng",
+  "Nhà cung cấp", "XUẤT XỨ", "MÃ NHÀ MÁY", "Tên nhà máy", "Cảng", "BL NO.",
+  "Mã công", "Hãng tàu", "ETD", "ETA", "Thùng", "Trlg", "Giá bán($)",
+  "Thành tiền ($)", "Ngày vận chuyển", "Mã kho", "Nhà xe", "Nơi lấy công", "Nơi trả công",
+];
 
-  if (pickerWindow.showSaveFilePicker) {
-    const handle = await pickerWindow.showSaveFilePicker({
-      suggestedName,
-      types: [{ description: "Excel workbook", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
+/** Builds the contract-focused layout used by the ETA Google Sheet. */
+export function buildEtaRows(shipments: Shipment[], returnItemsByOrder: ReturnItemsByOrder): Array<Record<string, unknown>> {
+  let sequence = 1;
+  return shipments
+    .filter((shipment) => String(shipment.orderCode || "").trim() !== "")
+    .flatMap((shipment) => {
+    const purchase = shipment.database?.purchase;
+    const details = shipment.database?.details?.length ? shipment.database.details : [null];
+    const bills = shipment.database?.bills?.length ? shipment.database.bills : [null];
+    const returnItems = returnItemsByOrder[shipment.orderCode] || [];
+
+    return details.flatMap((detail) => {
+      const itemCodes = detail?.itemCodes || [];
+      const itemCode = joinValues(itemCodes.map((item) => item.item_code));
+      const factoryCode = joinValues(itemCodes.map((item) => item.ma_nha_may));
+      const factoryName = joinValues(itemCodes.map((item) => item.ten_nha_may));
+
+      return bills.flatMap((bill) => {
+        const containers = bill?.containers?.length ? bill.containers : [null];
+        return containers.flatMap((container) => {
+          const transports = container?.transports?.length ? container.transports : [null];
+          return transports.map((transport) => {
+            const returnItem = returnItems.find((item) => (
+              (transport?.id_van_chuyen && item.idVanChuyen === transport.id_van_chuyen)
+              || (container?.id_bl_container && item.idBlContainer === container.id_bl_container)
+            ));
+            const carrier = bill?.carrier?.ten_hang_tau || bill?.id_hang_tau || shipment.vessel || "";
+            const port = [bill?.cang_di, bill?.cang_den].filter(Boolean).join(" → ");
+            return {
+              "STT": sequence++,
+              "Số HĐ": shipment.orderCode,
+              "Ngày HĐ": exportDate(purchase?.ngay_hop_dong),
+              "INV": purchase?.ma_inv,
+              "Ngày INV": exportDate(purchase?.ngay_inv),
+              "ITEM CODE": itemCode,
+              "Tên hàng": detail?.ten_hang || shipment.shipName,
+              "Nhà cung cấp": shipment.supplier,
+              "XUẤT XỨ": shipment.origin,
+
+              "MÃ NHÀ MÁY": factoryCode,
+              "Tên nhà máy": factoryName,
+              "Cảng": port || shipment.port,
+              "BL NO.": bill?.ma_bl || shipment.bill,
+              "Mã công": container?.ma_container || returnItem?.soCont,
+              "Hãng tàu": carrier,
+              "ETD": exportDate(bill?.etd || shipment.etd),
+              "ETA": exportDate(bill?.eta || shipment.eta),
+              "Thùng": detail?.so_kien,
+              "Trlg": detail?.net_weight,
+              "Giá bán($)": detail?.don_gia,
+              "Thành tiền ($)": detail?.tong_gia,
+              "Ngày vận chuyển": exportDate(transport?.ngay_van_chuyen || returnItem?.ngay),
+              "Mã kho": transport?.id_kho || returnItem?.idKho,
+              "Nhà xe": transport?.nha_xe || returnItem?.nhaXe,
+              "Nơi lấy công": transport?.noi_di || returnItem?.noiDi,
+              "Nơi trả công": transport?.noi_tra_container || returnItem?.noiTraContainer,
+            };
+          });
+        });
+      });
     });
-    const writable = await handle.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    return;
-  }
-
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = suggestedName;
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
 }
+
+export function getEtaHeaders(): string[] {
+  return [...ETA_EXPORT_HEADERS];
+}
+

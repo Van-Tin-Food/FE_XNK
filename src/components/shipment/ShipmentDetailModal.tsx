@@ -863,7 +863,7 @@ function PurchaseDetailsTable({
   containerDetails: ContainerDetailRecord[];
   editing: boolean;
   onChange: (id: string, field: keyof PurchaseDetailRecord, value: string) => void;
-  onItemChange: (detailId: string, itemId: string, field: "item_code" | "ma_nha_may", value: string) => void;
+  onItemChange: (detailId: string, itemId: string, field: "item_code" | "ma_nha_may" | "ten_nha_may", value: string) => void;
   onAddItem: (detailId: string) => void;
   onAddRow: () => void;
   translate: (key: string) => string;
@@ -906,7 +906,7 @@ function PurchaseDetailsTable({
             <tr>
               <th className="px-4 py-3">#</th>
               <th className="px-4 py-3">{translate("productName")}</th>
-              <th className="px-4 py-3">{translate("itemCode")}<span className="mt-0.5 block text-[9px] font-medium normal-case tracking-normal">{translate("factoryCode")}</span></th>
+              <th className="px-4 py-3">{translate("itemCode")} / {translate("factoryCode")} / {translate("factoryName")}</th>
               <th className="px-4 py-3">{translate("unitPrice")}</th>
               <th className="px-4 py-3">{translate("itemPackageCount")}</th>
             </tr>
@@ -919,14 +919,16 @@ function PurchaseDetailsTable({
                 <td className="px-4 py-3">
                   <div className="space-y-2">
                     {item && (editing ? (
-                      <div className="grid grid-cols-2 gap-1.5">
+                      <div className="grid grid-cols-3 gap-1.5">
                         <input value={item.item_code || ""} onChange={(event) => onItemChange(detail.id_chi_tiet, item.id_item_code, "item_code", event.target.value)} placeholder="Item code" className="h-8 min-w-0 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                         <input value={item.ma_nha_may || ""} onChange={(event) => onItemChange(detail.id_chi_tiet, item.id_item_code, "ma_nha_may", event.target.value)} placeholder={translate("factoryCode")} className="h-8 min-w-0 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                        <input value={item.ten_nha_may || ""} onChange={(event) => onItemChange(detail.id_chi_tiet, item.id_item_code, "ten_nha_may", event.target.value)} placeholder={translate("factoryName")} className="h-8 min-w-0 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                       </div>
-                    ) : item.item_code || item.ma_nha_may ? (
+                    ) : item.item_code || item.ma_nha_may || item.ten_nha_may ? (
                       <div className="flex flex-wrap items-center gap-2">
                         {item.item_code && <span className="rounded-md bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{item.item_code}</span>}
                         {item.ma_nha_may && <span className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">{item.ma_nha_may}</span>}
+                        {item.ten_nha_may && <span className="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">{item.ten_nha_may}</span>}
                       </div>
                     ) : null)}
                     {editing && itemIndex === 0 && (
@@ -1978,6 +1980,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             id_chi_tiet: detail.id_chi_tiet,
             item_code: "",
             ma_nha_may: "",
+            ten_nha_may: "",
           }],
         }
     )));
@@ -2012,13 +2015,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       if (item.id_item_code.startsWith("new-item-")) return false;
       const originalDetail = shipment.database?.details.find((detail) => detail.id_chi_tiet === draft.id_chi_tiet);
       const original = originalDetail?.itemCodes.find((candidate) => candidate.id_item_code === item.id_item_code);
-      return !original || item.item_code !== original.item_code || String(item.ma_nha_may || "") !== String(original.ma_nha_may || "");
+      return !original || item.item_code !== original.item_code
+        || String(item.ma_nha_may || "") !== String(original.ma_nha_may || "")
+        || String(item.ten_nha_may || "") !== String(original.ten_nha_may || "");
     }));
     const newItemCodes = purchaseDetailForms.flatMap((detail) => (
       detail.id_chi_tiet.startsWith("new-")
         ? []
         : detail.itemCodes
-          .filter((item) => item.id_item_code.startsWith("new-item-") && (item.item_code.trim() || String(item.ma_nha_may || "").trim()))
+          .filter((item) => item.id_item_code.startsWith("new-item-") && (item.item_code.trim() || String(item.ma_nha_may || "").trim() || String(item.ten_nha_may || "").trim()))
           .map((item) => ({ detailId: detail.id_chi_tiet, item }))
     ));
     const invalidNewRowIndex = newPurchaseDetails.findIndex((detail) => !detail.ten_hang.trim());
@@ -2111,6 +2116,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           {
             item_code: item.item_code,
             ma_nha_may: item.ma_nha_may || null,
+            ten_nha_may: item.ten_nha_may || null,
           },
         )),
         ...changedContainerDetails.map((detail) => updateDatabaseRow<ContainerDetailRecord>(
@@ -2140,6 +2146,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             id_chi_tiet: created.id_chi_tiet,
             item_code: item.item_code.trim(),
             ma_nha_may: item.ma_nha_may || "",
+            ten_nha_may: item.ten_nha_may || "",
           });
         }
       }
@@ -2148,6 +2155,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           id_chi_tiet: detailId,
           item_code: item.item_code.trim(),
           ma_nha_may: String(item.ma_nha_may || "").trim(),
+          ten_nha_may: String(item.ten_nha_may || "").trim(),
         });
       }
       for (const detail of newContainerDetails) {
@@ -2179,7 +2187,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             `Item Code ${original?.item_code || item.id_item_code}`,
             original,
             item,
-            { item_code: "Mã", ma_nha_may: "Mã nhà máy" },
+            { item_code: "Mã", ma_nha_may: "Mã nhà máy", ten_nha_may: "Tên nhà máy" },
           );
         }),
         ...newContainerDetails.map((detail) => `thêm chi tiết container ${detail.id_bl_container}: ${detail.so_kien || 0} kiện`),
@@ -3233,6 +3241,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           id_chi_tiet: detailId,
                           item_code: "",
                           ma_nha_may: "",
+                          ten_nha_may: "",
                         }],
                       }
                       : detail
@@ -3253,6 +3262,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         id_chi_tiet: temporaryId,
                         item_code: "",
                         ma_nha_may: "",
+                        ten_nha_may: "",
                       }],
                     }]);
                   }}

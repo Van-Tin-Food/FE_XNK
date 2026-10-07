@@ -45,6 +45,7 @@ export interface PurchaseItemCodeRecord {
   id_item_code: string;
   id_chi_tiet: string;
   ma_nha_may?: string | null;
+  ten_nha_may?: string | null;
   item_code: string;
 }
 
