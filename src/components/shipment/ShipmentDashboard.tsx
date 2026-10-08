@@ -186,7 +186,7 @@ export default function ShipmentDashboard() {
   const supplierOptions = useMemo(() => [...new Set(
     filterOptionShipments
       .filter((shipment) => !filter.supplier || matchesFilterValue(shipment.supplier, filter.supplier))
-      .map((shipment) => shipment.supplier.trim()).filter(Boolean),
+      .map((shipment) => String(shipment.supplier || "").trim()).filter(Boolean),
   )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments, filter.supplier]);
 
   const carrierOptions = useMemo(() => [...new Set(

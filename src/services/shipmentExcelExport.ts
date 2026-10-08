@@ -27,6 +27,35 @@ function exportDate(value: unknown): string {
   return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${slash[3]}`;
 }
 
+function contractDateKey(value: unknown): number {
+  const raw = String(value ?? "").trim();
+  if (!raw) return Number.POSITIVE_INFINITY;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const timestamp = Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp;
+  }
+  const slash = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (!slash) return Number.POSITIVE_INFINITY;
+  const first = Number(slash[1]);
+  const second = Number(slash[2]);
+  const day = first > 12 ? first : second;
+  const month = first > 12 ? second : first;
+  const timestamp = Date.UTC(Number(slash[3]), month - 1, day);
+  return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp;
+}
+
+function sortByContractDate(shipments: Shipment[]): Shipment[] {
+  return shipments
+    .map((shipment, index) => ({ shipment, index }))
+    .sort((left, right) => (
+      contractDateKey(left.shipment.database?.purchase?.ngay_hop_dong)
+      - contractDateKey(right.shipment.database?.purchase?.ngay_hop_dong)
+      || left.index - right.index
+    ))
+    .map(({ shipment }) => shipment);
+}
+
 function addSheet(workbook: XLSX.WorkBook, name: string, rows: Array<Record<string, unknown>>) {
   const safeRows = rows.length > 0 ? rows : [{ "Thông tin": "Không có dữ liệu" }];
   const normalized = safeRows.map((row) => Object.fromEntries(
@@ -92,11 +121,12 @@ function buildSummaryRows(shipments: Shipment[]): Array<Record<string, unknown>>
 
 export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder: ReturnItemsByOrder): XLSX.WorkBook {
   const workbook = XLSX.utils.book_new();
-  const orderCodes = [...new Set(shipments.map((shipment) => shipment.orderCode).filter(Boolean))];
+  const orderedShipments = sortByContractDate(shipments);
+  const orderCodes = [...new Set(orderedShipments.map((shipment) => shipment.orderCode).filter(Boolean))];
 
-  addSheet(workbook, "Tổng hợp XNK", buildSummaryRows(shipments));
+  addSheet(workbook, "Tổng hợp XNK", buildSummaryRows(orderedShipments));
 
-  addSheet(workbook, "Chi tiết mua hàng", shipments.flatMap((shipment) => (shipment.database?.details || []).map((detail) => ({
+  addSheet(workbook, "Chi tiết mua hàng", orderedShipments.flatMap((shipment) => (shipment.database?.details || []).map((detail) => ({
     "Mã đơn hàng": shipment.orderCode,
     "ID chi tiết": detail.id_chi_tiet,
     "Tên hàng": detail.ten_hang,
@@ -107,7 +137,7 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
     "Giá tổng": detail.tong_gia,
   }))));
 
-  addSheet(workbook, "Vận đơn", shipments.flatMap((shipment) => (shipment.database?.bills || []).map((bill) => ({
+  addSheet(workbook, "Vận đơn", orderedShipments.flatMap((shipment) => (shipment.database?.bills || []).map((bill) => ({
     "Mã đơn hàng": shipment.orderCode,
     "Mã BL": bill.ma_bl,
     "Hãng tàu": bill.carrier?.ten_hang_tau || bill.id_hang_tau,
@@ -118,7 +148,7 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
     "ATA": bill.ata,
   }))));
 
-  addSheet(workbook, "Container", shipments.flatMap((shipment) => (shipment.database?.bills || []).flatMap((bill) => bill.containers.map((container) => ({
+  addSheet(workbook, "Container", orderedShipments.flatMap((shipment) => (shipment.database?.bills || []).flatMap((bill) => bill.containers.map((container) => ({
     "Mã đơn hàng": shipment.orderCode,
     "Mã BL": bill.ma_bl,
     "ID B/L - container": container.id_bl_container,
@@ -126,7 +156,7 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
     "Chi tiết hàng trong container": JSON.stringify(container.details || []),
   })))));
 
-  addSheet(workbook, "Vận chuyển", shipments.flatMap((shipment) => (shipment.database?.bills || []).flatMap((bill) => bill.containers.flatMap((container) => container.transports.map((transport) => ({
+  addSheet(workbook, "Vận chuyển", orderedShipments.flatMap((shipment) => (shipment.database?.bills || []).flatMap((bill) => bill.containers.flatMap((container) => container.transports.map((transport) => ({
     "Mã đơn hàng": shipment.orderCode,
     "Mã BL": bill.ma_bl,
     "Mã container": container.ma_container,
@@ -158,7 +188,7 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
     "Ghi chú": item.ghiChu,
   }))));
 
-  addSheet(workbook, "Chứng từ", shipments.flatMap((shipment) => (shipment.documents || []).flatMap((document) => {
+  addSheet(workbook, "Chứng từ", orderedShipments.flatMap((shipment) => (shipment.documents || []).flatMap((document) => {
     const files = document.files?.length ? document.files : [{ fileUrl: document.url || "" }];
     return files.map((file) => ({
       "Mã đơn hàng": shipment.orderCode,
@@ -184,7 +214,7 @@ export const ETA_EXPORT_HEADERS = [
 /** Builds the contract-focused layout used by the ETA Google Sheet. */
 export function buildEtaRows(shipments: Shipment[], returnItemsByOrder: ReturnItemsByOrder): Array<Record<string, unknown>> {
   let sequence = 1;
-  return shipments
+  return sortByContractDate(shipments)
     .filter((shipment) => String(shipment.orderCode || "").trim() !== "")
     .flatMap((shipment) => {
     const purchase = shipment.database?.purchase;
