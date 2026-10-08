@@ -133,9 +133,12 @@ function parseDocumentFiles(value: DriveDocumentValue | undefined): DriveDocumen
     }
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
     const file = entry as Record<string, unknown>;
-    if (typeof file.fileUrl !== "string" || !/^https?:\/\//i.test(file.fileUrl.trim())) return [];
+    const fileUrl = [file.fileUrl, file.url, file.webViewLink].find((value): value is string => (
+      typeof value === "string" && /^https?:\/\//i.test(value.trim())
+    ));
+    if (!fileUrl) return [];
     return [{
-      fileUrl: file.fileUrl.trim(),
+      fileUrl: fileUrl.trim(),
       fileId: typeof file.fileId === "string" ? file.fileId : undefined,
       fileName: typeof file.fileName === "string" ? file.fileName : undefined,
       referenceCode: typeof file.referenceCode === "string" ? file.referenceCode : undefined,

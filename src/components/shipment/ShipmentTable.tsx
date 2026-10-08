@@ -370,6 +370,9 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[15%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
                 <div className="flex items-center gap-1.5">{t("supplier")} <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[13%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`}>
+                {t("factoryName")}
+              </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
                 <div className="flex items-center gap-1.5">{t("arrivalDuration")} <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
@@ -385,7 +388,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
             {paged.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-16 text-center text-sm text-gray-400">
+                <td colSpan={9} className="py-16 text-center text-sm text-gray-400">
                   <div className="flex flex-col items-center gap-2">
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
                       <circle cx="11" cy="11" r="8"/>
@@ -449,6 +452,16 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                           </div>
                         )}
                       </div>
+                    </td>
+
+                    {/* Factory */}
+                    <td className="py-3.5 px-4">
+                      <span
+                        className="block truncate text-xs font-medium text-gray-700 dark:text-gray-300"
+                        title={shipment.summaryFields?.["Tên nhà máy"] || shipment.factoryCode || ""}
+                      >
+                        {shipment.summaryFields?.["Tên nhà máy"] || shipment.factoryCode || "—"}
+                      </span>
                     </td>
 
                     {/* Arrival status */}

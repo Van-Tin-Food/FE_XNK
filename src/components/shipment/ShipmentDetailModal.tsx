@@ -7,7 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { analyzeDocument, checkDocumentProgress, fetchReturnItems, getArchivedDocuments, launchEvergreenTracking, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentProgressResponse } from "@/services/shipmentApi";
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listDatabaseRows, passDriveDocument, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
-import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
+import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
@@ -188,7 +188,7 @@ const OPTIONAL_DOCUMENT_COLORS: Record<string, { badge: string; dot: string }> =
 type CarrierTrackingLink = {
   name: string;
   aliases: string[];
-  trackingType?: "BL" | "CONTAINER";
+  trackingType?: "CONTAINER";
   requiresManualCode: boolean;
   usesBackendApi?: boolean;
   buildUrl?: (trackingCode: string) => string;
@@ -210,8 +210,7 @@ function buildMscTrackingUrl(trackingCode: string): string {
 
 function buildCmaTrackingUrl(reference: string): string {
   const normalizedReference = reference.trim().toUpperCase();
-  const searchBy = /^[A-Z]{4}\d{7}$/.test(normalizedReference) ? "Container" : "Booking";
-  const params = new URLSearchParams({ Reference: normalizedReference, SearchBy: searchBy });
+  const params = new URLSearchParams({ Reference: normalizedReference, SearchBy: "Container" });
   return `https://www.cma-cgm.com/ebusiness/tracking?${params.toString()}`;
 }
 
@@ -247,7 +246,7 @@ const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
     name: "COSCO",
     aliases: ["cosco", "cosco shipping"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=BOOKING&number=${trackingCode}`,
+    buildUrl: (trackingCode) => `https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=CONTAINER&number=${trackingCode}`,
   },
   {
     name: "HMM",
@@ -270,7 +269,7 @@ const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
   {
     name: "CK LINE",
     aliases: ["ck line", "ckline", "ck"],
-    trackingType: "BL",
+    trackingType: "CONTAINER",
     requiresManualCode: false,
     usesBackendApi: false,
     buildUrl: () => "https://es.ckline.co.kr/",
@@ -1423,11 +1422,21 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       : shipment.flowStageKey === "buying"
         ? "bg-amber-500"
         : "bg-blue-light-500";
-  const documentsSorted = [...(shipment.documents || [])].map((document) => (
-    locallyPassedDocumentIds.includes(document.id)
-      ? { ...document, status: "ok" as const, url: undefined, urls: [], files: [], fileId: undefined, note: "Chứng từ đã được PASS" }
-      : document
-  )).sort((a, b) => {
+  const progressDocuments = documentProgress?.documents as Record<string, { files?: DriveDocumentFileRecord[] }> | undefined;
+  const documentsSorted = [...(shipment.documents || [])].map((document) => {
+    if (locallyPassedDocumentIds.includes(document.id)) {
+      return { ...document, status: "ok" as const, url: undefined, urls: [], files: [], fileId: undefined, note: "Chứng từ đã được PASS" };
+    }
+
+    const refreshedFiles = progressDocuments?.[document.id.toUpperCase()]?.files;
+    if (!Array.isArray(refreshedFiles) || refreshedFiles.length === 0) return document;
+    return {
+      ...document,
+      files: refreshedFiles,
+      urls: refreshedFiles.map((file) => file.fileUrl),
+      url: refreshedFiles[0]?.fileUrl,
+    };
+  }).sort((a, b) => {
     const orderA = DOCUMENT_DISPLAY_ORDER.indexOf(a.id.toUpperCase());
     const orderB = DOCUMENT_DISPLAY_ORDER.indexOf(b.id.toUpperCase());
     return (orderA < 0 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB < 0 ? Number.MAX_SAFE_INTEGER : orderB);
@@ -1490,26 +1499,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
   const isEvergreenTracking = carrierTrackingLink?.name === "EVERGREEN";
   const isCkLineTracking = carrierTrackingLink?.name === "CK LINE";
-  const isCmaTracking = carrierTrackingLink?.name === "CMA CGM";
   // "Số Container" is a quantity (for example: 1), not a tracking code.
   // Tracking must only use actual container numbers.
   const trackingContainerSummary = getSummaryValue(summaryFields, ["Mã Container", "Số cont", "Container"]);
   const fallbackContainers = trackingContainerSummary.split(",").map((code) => code.trim()).filter(Boolean);
-  const fallbackBills = (shipment.bill || "").split(",").map((code) => code.trim()).filter(Boolean);
   const containerCodes = [...new Set([
-    fallbackContainers[0],
+    ...fallbackContainers,
     ...(shipment.database?.bills.flatMap((bill) => bill.containers.map((container) => container.ma_container)) || []),
   ].map((code) => code?.trim()).filter((code): code is string => Boolean(code)))];
-  const billCodes = [...new Set([
-    fallbackBills[0],
-    ...(shipment.database?.bills.map((bill) => bill.ma_bl) || []),
-  ].map((code) => code?.trim()).filter((code): code is string => Boolean(code)))];
-  const trackingOptions = isEvergreenTracking
-    ? (containerCodes.length ? containerCodes : fallbackContainers)
-    : (billCodes.length ? billCodes : fallbackBills);
-  const availableTrackingCodes = trackingOptions.length || !isCmaTracking
-    ? trackingOptions
-    : containerCodes.length ? containerCodes : fallbackContainers;
+  const availableTrackingCodes = containerCodes;
   const trackingCode = availableTrackingCodes.includes(selectedTrackingCode)
     ? selectedTrackingCode
     : availableTrackingCodes[0] || "";
@@ -2586,7 +2584,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
               {availableTrackingCodes.length > 1 && (
                 <label className="mt-4 flex flex-col gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300">
-                  <span>{t(isEvergreenTracking ? "selectTrackingContainer" : "selectTrackingBill")}</span>
+                  <span>{t("selectTrackingContainer")}</span>
                   <select
                     value={trackingCode}
                     onChange={(event) => setSelectedTrackingCode(event.target.value)}
@@ -2694,9 +2692,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   </p>
                   <p className="mt-1 text-xs text-warning-600 dark:text-warning-400">
                     {carrierTrackingLink
-                      ? carrierTrackingLink.trackingType === "BL"
-                        ? t("ckLineMissingBill")
-                        : t("addTrackingCode")
+                      ? t("addTrackingCode")
                       : t("noCarrierLink")}
                   </p>
                 </div>
