@@ -10,6 +10,7 @@ import { GridIcon, HorizontaLDots } from "../icons/index";
 import { useLanguage } from "../context/LanguageContext";
 
 const MARKET_RESEARCH_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbx9gxbHB-b5UMbF6x9NrdDmc-abshieQ5pZfhFQRbHXhLGw-Cxv91kkssrmz0hZBabNXA/exec";
+const LEGACY_ETA_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbwlTy4uv4eGx5beJfLKRwJj-VW0H5uFxSeRbhGOstoGn4bPjjJ2-0E0xqwghxvB3R3_7g/exec";
 
 const AppSidebar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -184,6 +185,13 @@ const AppSidebar: React.FC = () => {
             <li className="-mt-3 pl-11">
               <a href={MARKET_RESEARCH_HREF} target="_blank" rel="noopener noreferrer" className="block rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]">
                 {t("marketResearch")}
+              </a>
+            </li>
+          )}
+          {(canViewEmailTools || canViewDocumentSync) && supportOpen && showText && (
+            <li className="-mt-3 pl-11">
+              <a href={LEGACY_ETA_HREF} target="_blank" rel="noopener noreferrer" className="block rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]">
+                {t("legacyEtaOrders")}
               </a>
             </li>
           )}

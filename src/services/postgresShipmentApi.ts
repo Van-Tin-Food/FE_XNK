@@ -277,6 +277,7 @@ export async function updatePostgresShipmentFields(
   }
 
   const currentBill = relations.bills[0];
+  let targetXnkId = currentBill?.id_xnk;
   const billCode = fieldValue(fields, ["BL NO.", "Mã BL"]);
   const carrierName = fieldValue(fields, ["Hãng tàu"]);
   const billPatch: Partial<XnkRecord> = {};
@@ -299,11 +300,11 @@ export async function updatePostgresShipmentFields(
   if (currentBill) {
     if (billCode !== undefined) billPatch.ma_bl = billCode;
     if (Object.keys(billPatch).length > 0) {
-      await updateDatabaseRow<XnkRecord>(databaseEndpoints.bills, currentBill.ma_bl, billPatch);
+      await updateDatabaseRow<XnkRecord>(databaseEndpoints.bills, currentBill.id_xnk, billPatch);
     }
   } else if (billCode) {
     if (!billPatch.id_hang_tau) throw new Error("Cần chọn hãng tàu trước khi tạo B/L");
-    await createDatabaseRow<XnkRecord>(databaseEndpoints.bills, {
+    const createdBill = await createDatabaseRow<XnkRecord>(databaseEndpoints.bills, {
       ma_bl: billCode,
       ma_hop_dong: relations.purchase.ma_hop_dong,
       id_hang_tau: billPatch.id_hang_tau,
@@ -313,6 +314,7 @@ export async function updatePostgresShipmentFields(
       eta: billPatch.eta ?? null,
       ata: billPatch.ata ?? null,
     });
+    targetXnkId = createdBill.id_xnk;
   }
 
   const containerCode = fieldValue(fields, ["Mã Container", "Số Container", "Số cont", "Container"]);
@@ -323,10 +325,9 @@ export async function updatePostgresShipmentFields(
         ma_container: containerCode,
       });
     } else {
-      const targetBill = billCode || currentBill?.ma_bl;
-      if (targetBill && containerCode) {
+      if (targetXnkId && containerCode) {
         await createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, {
-          ma_bl: targetBill,
+          id_xnk: targetXnkId,
           ma_container: containerCode,
         });
       }
@@ -352,7 +353,7 @@ export async function savePostgresBlOcrRows(
     || carriers.find((item) => normalizeField(item.ten_hang_tau) === normalizeField(carrierName || ""));
   if (!carrier) throw new Error("Hãng tàu OCR chưa khớp danh mục PostgreSQL");
 
-  const billPayload: XnkRecord = {
+  const billPayload: Omit<XnkRecord, "id_xnk"> = {
     ma_bl: billCode,
     ma_hop_dong: relations.purchase.ma_hop_dong,
     id_hang_tau: carrier.id_hang_tau,
@@ -363,16 +364,19 @@ export async function savePostgresBlOcrRows(
     ata: null,
   };
   const existingBill = relations.bills.find((bill) => bill.ma_bl === billCode);
+  let xnkId = existingBill?.id_xnk;
   if (existingBill) {
-    await updateDatabaseRow<XnkRecord>(databaseEndpoints.bills, billCode, {
+    await updateDatabaseRow<XnkRecord>(databaseEndpoints.bills, existingBill.id_xnk, {
       id_hang_tau: billPayload.id_hang_tau,
       cang_di: billPayload.cang_di,
       cang_den: billPayload.cang_den,
       etd: billPayload.etd,
     });
   } else {
-    await createDatabaseRow<XnkRecord>(databaseEndpoints.bills, billPayload);
+    const createdBill = await createDatabaseRow<XnkRecord>(databaseEndpoints.bills, billPayload);
+    xnkId = createdBill.id_xnk;
   }
+  if (!xnkId) throw new Error("Không lấy được id_xnk của B/L để tạo container");
 
   const existingCodes = new Set(
     (existingBill?.containers || []).map((container) => container.ma_container.trim().toUpperCase()),
@@ -385,7 +389,7 @@ export async function savePostgresBlOcrRows(
   for (const containerCode of requestedCodes) {
     if (existingCodes.has(containerCode)) continue;
     await createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, {
-      ma_bl: billCode,
+      id_xnk: xnkId,
       ma_container: containerCode,
     });
   }
@@ -529,9 +533,9 @@ export async function fetchPostgresReturnItems(contractCode: string): Promise<Re
     listDatabaseRows<ContainerTransportRecord>(databaseEndpoints.transports),
     listDatabaseRows<WarehouseRecord>(databaseEndpoints.warehouses),
   ]);
-  const billIds = new Set(bills.filter((bill) => bill.ma_hop_dong === contractCode).map((bill) => bill.ma_bl));
+  const billIds = new Set(bills.filter((bill) => bill.ma_hop_dong === contractCode).map((bill) => bill.id_xnk));
   return containers
-    .filter((item) => billIds.has(item.ma_bl))
+    .filter((item) => billIds.has(item.id_xnk))
     .map((container) => {
       const transport = transports.find((item) => item.id_bl_container === container.id_bl_container);
       const warehouse = transport?.id_kho

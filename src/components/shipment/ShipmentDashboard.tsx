@@ -222,6 +222,10 @@ export default function ShipmentDashboard() {
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
+      <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm font-medium text-blue-600 shadow-sm dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+        {t("etaDataNotice")}
+      </div>
+
       {/* Page title */}
       <div className="flex items-start justify-between">
         <div>

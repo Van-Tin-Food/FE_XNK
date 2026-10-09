@@ -214,7 +214,7 @@ export const ETA_EXPORT_HEADERS = [
 /** Builds the contract-focused layout used by the ETA Google Sheet. */
 export function buildEtaRows(shipments: Shipment[], returnItemsByOrder: ReturnItemsByOrder): Array<Record<string, unknown>> {
   let sequence = 1;
-  return sortByContractDate(shipments)
+  const rows: Array<Record<string, unknown>> = sortByContractDate(shipments)
     .filter((shipment) => String(shipment.orderCode || "").trim() !== "")
     .flatMap((shipment) => {
     const purchase = shipment.database?.purchase;
@@ -273,6 +273,12 @@ export function buildEtaRows(shipments: Shipment[], returnItemsByOrder: ReturnIt
       });
     });
   });
+
+  // Giữ mọi dòng cùng một schema và cùng thứ tự cột trước khi gửi sang Apps Script.
+  // Điều này tránh dữ liệu bị lệch cột khi một trường trong dòng bị rỗng.
+  return rows.map((row) => Object.fromEntries(
+    ETA_EXPORT_HEADERS.map((header) => [header, row[header] ?? ""]),
+  ));
 }
 
 export function getEtaHeaders(): string[] {

@@ -1,26 +1,11 @@
 export const EVERGREEN_TRACKING_ACTION =
   "https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do";
 
-export interface EvergreenTrackingRequest {
-  method: string;
-  action: string;
-  fields: Record<string, unknown>;
-}
-
-export interface EvergreenTrackingLaunchResponse {
-  success: boolean;
-  carrier?: string;
-  containerNo?: string;
-  message?: string;
-  trackingRequest?: EvergreenTrackingRequest;
-}
-
 interface TrackingTab {
   close: () => void;
 }
 
 interface EvergreenTrackingDependencies {
-  requestLaunch: (containerNo: string) => Promise<EvergreenTrackingLaunchResponse>;
   showError: (message: string) => void;
   openTab?: (url: string, target: string, features?: string) => TrackingTab | null;
   documentRef?: Document;
@@ -47,6 +32,11 @@ export async function submitEvergreenTracking(
   containerNo: string,
   dependencies: EvergreenTrackingDependencies,
 ): Promise<boolean> {
+  const normalizedContainerNo = String(containerNo || "").trim().replace(/[\s-]/g, "").toUpperCase();
+  if (!/^[A-Z]{4}\d{7}$/.test(normalizedContainerNo)) {
+    dependencies.showError("Mã container không hợp lệ.");
+    return false;
+  }
   const targetName = `evergreen_tracking_${(dependencies.now || Date.now)()}`;
   const openTab = dependencies.openTab
     || ((url: string, target: string, features?: string) => window.open(url, target, features));
@@ -60,34 +50,31 @@ export async function submitEvergreenTracking(
   dependencies.onStarted?.();
 
   try {
-    const response = await dependencies.requestLaunch(containerNo);
-    const trackingRequest = response.trackingRequest;
-
-    if (response.success !== true || !trackingRequest) {
-      throw new Error(response.message || "Backend không trả về cấu hình tracking Evergreen");
-    }
-    if (trackingRequest.action !== EVERGREEN_TRACKING_ACTION) {
-      throw new Error("Tracking URL không hợp lệ");
-    }
-    if (!trackingRequest.method?.trim()) {
-      throw new Error("Tracking method không hợp lệ");
-    }
-    if (!trackingRequest.fields || typeof trackingRequest.fields !== "object") {
-      throw new Error("Tracking fields không hợp lệ");
-    }
-
     const documentRef = dependencies.documentRef || document;
     const form = documentRef.createElement("form");
-    form.method = trackingRequest.method;
-    form.action = trackingRequest.action;
+    form.method = "POST";
+    form.action = EVERGREEN_TRACKING_ACTION;
     form.target = targetName;
     form.style.display = "none";
 
-    Object.entries(trackingRequest.fields).forEach(([name, value]) => {
+    const fields: Record<string, string> = {
+      TYPE: "CNTR",
+      BL: "",
+      CNTR: normalizedContainerNo,
+      bkno: "",
+      query_bkno: "",
+      query_rvs: "",
+      query_docno: "",
+      query_seq: "",
+      PRINT: "",
+      SEL: "s_cntr",
+      NO: normalizedContainerNo,
+    };
+    Object.entries(fields).forEach(([name, value]) => {
       const input = documentRef.createElement("input");
       input.type = "hidden";
       input.name = name;
-      input.value = String(value ?? "");
+      input.value = value;
       form.appendChild(input);
     });
 

@@ -16,7 +16,6 @@ import {
   databaseEndpoints,
   updateDatabaseRow,
 } from "@/services/postgresShipmentApi";
-import type { EvergreenTrackingLaunchResponse } from "@/utils/evergreenTracking";
 import type { DriveDocumentFileRecord, DriveDocumentRecord, DriveDocumentValue, NotificationRecord, PostgresShipmentRelations, PostgresShipmentSnapshot, PurchaseRecord } from "@/types/postgresShipment";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
@@ -164,11 +163,9 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = `/api/${path.replace(/^\//, "")}`;
   const scope = path.startsWith("ocr/")
     ? "OCR"
-    : path.startsWith("tracking/")
-      ? "Tracking"
-      : ["uploadDocument", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
-        ? "Drive"
-        : "Backend";
+    : ["uploadDocument", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
+      ? "Drive"
+      : "Backend";
   try {
     const response = await fetch(endpoint(path), {
       cache: "no-store",
@@ -255,7 +252,7 @@ function mapPostgresShipment(
       ...bill,
       carrier: database.carriers.find((item) => item.id_hang_tau === bill.id_hang_tau),
       containers: database.containers
-        .filter((item) => item.ma_bl === bill.ma_bl)
+        .filter((item) => item.id_xnk === bill.id_xnk)
         .map((container) => ({
           ...container,
           details: database.containerDetails.filter((item) => item.id_bl_container === container.id_bl_container),
@@ -517,18 +514,6 @@ export async function uploadDocument(payload: UploadDocumentPayload): Promise<Dr
     window.dispatchEvent(new Event(NOTIFICATIONS_SYNC_EVENT));
   }
   return result;
-}
-
-export function launchEvergreenTracking(containerNo: string): Promise<EvergreenTrackingLaunchResponse> {
-  const token = getStoredUser()?.token?.trim();
-  return requestJson<EvergreenTrackingLaunchResponse>("tracking/evergreen/launch", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ containerNo }),
-  });
 }
 
 export type OcrDataRow = Record<string, string>;

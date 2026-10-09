@@ -4,7 +4,7 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentProgress, fetchReturnItems, getArchivedDocuments, launchEvergreenTracking, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentProgressResponse } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentProgress, fetchReturnItems, getArchivedDocuments, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentProgressResponse } from "@/services/shipmentApi";
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listDatabaseRows, passDriveDocument, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
@@ -17,7 +17,6 @@ import { getMissingArchiveDetailFields, getMissingArchiveTransportFields } from 
 import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
 import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCatalogOptions";
 import { toDocumentPreviewUrl } from "@/utils/documentPreview";
-import { backendApiUrl } from "@/services/backendApiUrl";
 import { shouldValidateContainerPackages } from "@/utils/containerPackageValidation";
 import { canPerformShipmentAction, canUploadDocumentType } from "@/config/shipmentActionPermissions";
 import {
@@ -190,18 +189,8 @@ type CarrierTrackingLink = {
   aliases: string[];
   trackingType?: "CONTAINER";
   requiresManualCode: boolean;
-  usesBackendApi?: boolean;
   buildUrl?: (trackingCode: string) => string;
 };
-
-type TrackingApiResponse = {
-  success?: boolean;
-  message?: string;
-};
-
-function buildBackendTrackingUrl(endpoint: string, trackingCode: string): string {
-  return `${backendApiUrl(endpoint)}/${encodeURIComponent(trackingCode)}`;
-}
 
 function buildMscTrackingUrl(trackingCode: string): string {
   const params = btoa(`trackingNumber=${trackingCode}&trackingMode=0`);
@@ -221,13 +210,13 @@ const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
     name: "Hapag-Lloyd",
     aliases: ["happ","hapag", "hapag-lloyd", "hapag lloyd"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.hapag-lloyd.com/en/online-business/track/track-by-booking-solution.html?blno=${trackingCode}`,
+    buildUrl: (trackingCode) => `https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container=${encodeURIComponent(trackingCode)}`,
   },
   {
     name: "Maersk",
     aliases: ["maersk", "a.p. moller", "apm"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.maersk.com/tracking/${trackingCode}`,
+    buildUrl: (trackingCode) => `https://www.maersk.com/tracking/${encodeURIComponent(trackingCode)}`,
   },
   {
     name: "MSC",
@@ -239,26 +228,25 @@ const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
     name: "CMA CGM",
     aliases: ["cma", "cma cgm"],
     requiresManualCode: false,
-    usesBackendApi: false,
     buildUrl: buildCmaTrackingUrl,
   },
   {
     name: "COSCO",
     aliases: ["cosco", "cosco shipping"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=CONTAINER&number=${trackingCode}`,
+    buildUrl: (trackingCode) => `https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=CONTAINER&number=${encodeURIComponent(trackingCode)}`,
   },
   {
     name: "HMM",
     aliases: ["hmm", "hyundai merchant marine"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.hmm21.com/e-service/search/index.do?query=${trackingCode}`,
+    buildUrl: (trackingCode) => `https://www.hmm21.com/e-service/search/index.do?query=${encodeURIComponent(trackingCode)}`,
   },
   {
     name: "FESCO",
     aliases: ["fesco"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://my.fesco.com/tracking?tab=${trackingCode}`,
+    buildUrl: (trackingCode) => `https://my.fesco.com/tracking?tab=${encodeURIComponent(trackingCode)}`,
   },
   {
     name: "Yang Ming",
@@ -271,40 +259,38 @@ const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
     aliases: ["ck line", "ckline", "ck"],
     trackingType: "CONTAINER",
     requiresManualCode: false,
-    usesBackendApi: false,
     buildUrl: () => "https://es.ckline.co.kr/",
   },
   {
     name: "EVERGREEN",
     aliases: ["evergreen", "evergreen marine", "ever", "emc", "shipmentlink"],
     requiresManualCode: false,
-    usesBackendApi: true,
-    buildUrl: (trackingCode) => buildBackendTrackingUrl("/api/tracking/shipmentlink", trackingCode),
+    buildUrl: (trackingCode) => `https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do?CNTR=${encodeURIComponent(trackingCode)}`,
   },
   {
     name: "ONE",
     aliases: ["one",
       "ONE", "one cargo"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam=${trackingCode}&trakNoTpCdParam=B`,
+    buildUrl: (trackingCode) => `https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam=${encodeURIComponent(trackingCode)}&trakNoTpCdParam=C`,
   },
   {
     name: "OOCL",
     aliases: ["oocl", "oocl shipping"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.oocl.com/Pages/ExpressLink.aspx?eltype=ct&businessType=bookingNumber&businessNumber=${trackingCode}&language=en`,
+    buildUrl: (trackingCode) => `https://www.oocl.com/Pages/ExpressLink.aspx?eltype=ct&businessType=containerNumber&businessNumber=${encodeURIComponent(trackingCode)}&language=en`,
   },
   {
     name: "PIL",
     aliases: ["pil", "pacific international lines"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.pilship.com/digital-solutions/?tab=customer&id=track-trace&label=containerTandT&module=TrackTraceBL&refNo=${trackingCode}`,
+    buildUrl: (trackingCode) => `https://www.pilship.com/digital-solutions/?tab=customer&id=track-trace&label=containerTandT&module=TrackTraceBL&refNo=${encodeURIComponent(trackingCode)}`,
   },
   {
     name: "SINOKOR",
     aliases: ["sinokor", "sinokor shipping"],
     requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://ebiz.sinokor.co.kr/BLDetail?blno=${trackingCode}`,
+    buildUrl: (trackingCode) => `https://ebiz.sinokor.co.kr/BLDetail?containerNo=${encodeURIComponent(trackingCode)}`,
   }
 ];
 
@@ -756,7 +742,7 @@ function isReadOnlyDetailField(field: string): boolean {
 }
 
 type PurchaseDetailWithItems = PostgresShipmentRelations["details"][number];
-type ShipmentContainer = ContainerRecord & { ma_bl: string };
+type ShipmentContainer = ContainerRecord & { billNumber: string };
 
 function flattenContainerDetails(database?: PostgresShipmentRelations): ContainerDetailRecord[] {
   const details = database?.bills.flatMap((bill) => bill.containers.flatMap((container) => container.details)) || [];
@@ -770,7 +756,7 @@ function flattenContainerDetails(database?: PostgresShipmentRelations): Containe
 }
 
 function flattenShipmentContainers(database?: PostgresShipmentRelations): ShipmentContainer[] {
-  const containers = database?.bills.flatMap((bill) => bill.containers.map((container) => ({ ...container, ma_bl: bill.ma_bl }))) || [];
+  const containers = database?.bills.flatMap((bill) => bill.containers.map((container) => ({ ...container, billNumber: bill.ma_bl }))) || [];
   const seen = new Set<string>();
   return containers.filter((container, index) => {
     const key = container.id_bl_container || `container-${index}`;
@@ -1034,7 +1020,7 @@ function ContainerCargoDetailsTable({
               return (
                 <tr key={detail.id_chi_tiet_container || `container-detail-${index}`} className="align-top hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
                   <td className="px-4 py-3 text-xs font-semibold text-gray-400">{index + 1}</td>
-                  <td className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200">{selectedContainer?.ma_bl || "—"}</td>
+                  <td className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200">{selectedContainer?.billNumber || "—"}</td>
                   <td className="px-4 py-3">
                     {editing ? (
                       <select value={detail.id_bl_container} onChange={(event) => onChange(detail.id_chi_tiet_container, "id_bl_container", event.target.value)} className="h-9 min-w-40 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
@@ -1183,10 +1169,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [selectedTrackingCode, setSelectedTrackingCode] = useState("");
   const [openDocumentFileListId, setOpenDocumentFileListId] = useState<string | null>(null);
   const evergreenTrackingInProgress = React.useRef(false);
-  const [trackingFeedback, setTrackingFeedback] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
   const [documentProgress, setDocumentProgress] = useState<DocumentProgressResponse | null>(null);
   const [documentProgressError, setDocumentProgressError] = useState("");
   const [supplierOptions, setSupplierOptions] = useState<SupplierRecord[]>([]);
@@ -1257,12 +1239,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     }, 0);
     return () => window.clearTimeout(timer);
   }, [carrierOptions, ocrUploadDocId, supplierOptions]);
-
-  useEffect(() => {
-    if (activeTab === "journey") {
-      setTrackingFeedback(null);
-    }
-  }, [activeTab, shipment?.id]);
 
   useEffect(() => {
     if (!isOpen || !shipment) return;
@@ -1498,7 +1474,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     : t("processing");
   const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
   const isEvergreenTracking = carrierTrackingLink?.name === "EVERGREEN";
-  const isCkLineTracking = carrierTrackingLink?.name === "CK LINE";
   // "Số Container" is a quantity (for example: 1), not a tracking code.
   // Tracking must only use actual container numbers.
   const trackingContainerSummary = getSummaryValue(summaryFields, ["Mã Container", "Số cont", "Container"]);
@@ -1512,7 +1487,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     ? selectedTrackingCode
     : availableTrackingCodes[0] || "";
   const evergreenContainerNo = isEvergreenTracking ? trackingCode : "";
-  const carrierTrackingUrl = carrierTrackingLink?.buildUrl && !isEvergreenTracking && (trackingCode || isCkLineTracking)
+  const carrierTrackingUrl = carrierTrackingLink?.buildUrl && !isEvergreenTracking && trackingCode
     ? carrierTrackingLink.buildUrl(trackingCode)
     : null;
   const currentOcrDocumentType = ocrUploadDocId ? getOcrDocumentType(ocrUploadDocId) : null;
@@ -1604,45 +1579,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     }
   };
 
-  const handleOpenCarrierTracking = async () => {
-    if (!carrierTrackingLink?.usesBackendApi || !carrierTrackingUrl) return;
-
-    setIsOpeningTracking(true);
-    setTrackingFeedback(null);
-
-    try {
-      const response = await fetch(carrierTrackingUrl, {
-        method: "GET",
-        cache: "no-store",
-      });
-      const result = await response
-        .json()
-        .catch(() => ({})) as TrackingApiResponse;
-      const message = result.message?.trim();
-
-      if (!response.ok || result.success !== true) {
-        console.error("[Backend API tracking]", {
-          status: response.status,
-          carrier: carrierTrackingLink.name,
-          message,
-        });
-        throw new Error(`Không thể mở tracking ${carrierTrackingLink.name}. Vui lòng thử lại sau.`);
-      }
-
-      setTrackingFeedback({
-        type: "success",
-        message: message || `Đã mở tracking ${carrierTrackingLink.name}.`,
-      });
-    } catch (error) {
-      setTrackingFeedback({
-        type: "error",
-        message: error instanceof Error ? error.message : `Không thể mở tracking ${carrierTrackingLink.name}.`,
-      });
-    } finally {
-      setIsOpeningTracking(false);
-    }
-  };
-
   const handleExternalCarrierTracking = () => {
     if (!carrierTrackingUrl) return;
     const trackingWindow = window.open(
@@ -1659,7 +1595,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
     try {
       await submitEvergreenTracking(evergreenContainerNo, {
-        requestLaunch: launchEvergreenTracking,
         showError: (message) => notify(message, "error"),
         onStarted: () => {
           evergreenTrackingInProgress.current = true;
@@ -2632,32 +2567,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         <p className="mt-2 text-xs text-warning-600 dark:text-warning-400">{t("addTrackingCode")}</p>
                       )}
                     </>
-                  ) : carrierTrackingLink.usesBackendApi ? (
-                    <button
-                      type="button"
-                      onClick={handleOpenCarrierTracking}
-                      disabled={isOpeningTracking}
-                      className="mt-4 flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-500 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 disabled:cursor-wait disabled:opacity-70 dark:border-brand-500/30 sm:px-4"
-                    >
-                      <span className="min-w-0 break-words text-left leading-5">
-                        {isOpeningTracking
-                          ? `${t("updating")} ${carrierTrackingLink.name}...`
-                          : `${t("scheduleLookup")} ${carrierTrackingLink.name}`}
-                      </span>
-                      {isOpeningTracking ? (
-                        <svg className="flex-shrink-0 animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="23 4 23 10 17 10" />
-                          <polyline points="1 20 1 14 7 14" />
-                          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                        </svg>
-                      ) : (
-                        <svg className="flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                          <polyline points="15 3 21 3 21 9" />
-                          <line x1="10" y1="14" x2="21" y2="3" />
-                        </svg>
-                      )}
-                    </button>
                   ) : (
                     <button
                       type="button"
@@ -2671,18 +2580,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         <line x1="10" y1="14" x2="21" y2="3" />
                       </svg>
                     </button>
-                  )}
-                  {carrierTrackingLink.usesBackendApi && trackingFeedback && (
-                    <p
-                      role={trackingFeedback.type === "error" ? "alert" : "status"}
-                      className={`mt-2 rounded-lg border px-3 py-2 text-xs ${
-                        trackingFeedback.type === "success"
-                          ? "border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300"
-                          : "border-error-200 bg-error-50 text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300"
-                      }`}
-                    >
-                      {trackingFeedback.message}
-                    </p>
                   )}
                 </>
               ) : (

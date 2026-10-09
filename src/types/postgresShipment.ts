@@ -50,6 +50,7 @@ export interface PurchaseItemCodeRecord {
 }
 
 export interface XnkRecord {
+  id_xnk: string;
   ma_bl: string;
   ma_hop_dong: string;
   id_hang_tau: string;
@@ -62,7 +63,7 @@ export interface XnkRecord {
 
 export interface ContainerRecord {
   id_bl_container: string;
-  ma_bl: string;
+  id_xnk: string;
   ma_container: string;
 }
 
