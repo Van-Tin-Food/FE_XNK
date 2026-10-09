@@ -66,6 +66,22 @@ function SortIcon({
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+function formatContractDate(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "—";
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const slash = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (slash) {
+    const first = Number(slash[1]);
+    const second = Number(slash[2]);
+    const day = first > 12 ? first : second;
+    const month = first > 12 ? second : first;
+    return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${slash[3]}`;
+  }
+  return raw;
+}
+
 function parseDateStart(value: string | undefined): number | null {
   if (!value) return null;
   const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -203,6 +219,12 @@ function ShipmentCard({
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("contractDate")}</p>
+          <p className="mt-0.5 truncate text-xs font-medium text-gray-700 dark:text-gray-300">
+            {formatContractDate(shipment.database?.purchase?.ngay_hop_dong)}
+          </p>
+        </div>
         <div className="min-w-0">
           <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("supplier")}</p>
           <p className="mt-0.5 truncate text-xs font-medium text-gray-700 dark:text-gray-300" title={shipment.supplier}>
@@ -364,6 +386,9 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("orderCode")}>
                 <div className="flex items-center gap-1.5">{t("orderNumber")} <SortIcon col="orderCode" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`}>
+                {t("contractDate")}
+              </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[19%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
                 <div className="flex items-center gap-1.5">{t("productName")} <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
@@ -388,7 +413,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
             {paged.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-16 text-center text-sm text-gray-400">
+                <td colSpan={10} className="py-16 text-center text-sm text-gray-400">
                   <div className="flex flex-col items-center gap-2">
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
                       <circle cx="11" cy="11" r="8"/>
@@ -422,6 +447,13 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                           {shipment.orderCode}
                         </span>
                       </div>
+                    </td>
+
+                    {/* Contract date */}
+                    <td className="py-3.5 px-4">
+                      <span className="block truncate text-xs font-medium text-gray-700 dark:text-gray-300">
+                        {formatContractDate(shipment.database?.purchase?.ngay_hop_dong)}
+                      </span>
                     </td>
 
                     {/* Ship name */}
