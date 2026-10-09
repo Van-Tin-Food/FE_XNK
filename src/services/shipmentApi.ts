@@ -6,7 +6,7 @@ import type {
   ShipmentDocument,
   ShipmentMetricsSummary,
 } from "@/types/shipment";
-import { getStoredUser } from "@/services/authApi";
+import { getStoredUser, GOOGLE_DRIVE_AUTH_REQUIRED_EVENT } from "@/services/authApi";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import {
   fetchDriveDocumentRows,
@@ -27,6 +27,10 @@ const DOCUMENT_CODES = [
   "AN", "EDO", "CPN", "INSPECTION",
 ] as const;
 const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 const FLOW_DOCUMENT_GROUPS: Array<{ key: Shipment["flowStageKey"]; docs: string[] }> = [
   // Đơn đã xuất hiện trong bảng nghĩa là PI đã được tạo. Hành trình bắt đầu từ INV/PKL.
@@ -180,6 +184,10 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
       window.dispatchEvent(new Event("xnk:auth-expired"));
     }
     if (!response.ok || json.success === false) {
+      if (typeof window !== "undefined" && isRecord(parsed)
+        && (parsed.code === "GOOGLE_DRIVE_AUTH_REQUIRED" || parsed.errorCode === "GOOGLE_DRIVE_AUTH_REQUIRED")) {
+        window.dispatchEvent(new Event(GOOGLE_DRIVE_AUTH_REQUIRED_EVENT));
+      }
       throw createHttpApiError(scope, method, apiPath, response, parsed, nonJsonPreview);
     }
     if (parsed === null) throw createInvalidResponseError(scope, method, apiPath, nonJsonPreview);

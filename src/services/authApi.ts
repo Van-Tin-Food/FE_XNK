@@ -6,6 +6,7 @@ const AUTH_STORAGE_KEY = "dashboard_auth_user";
 export const AUTH_TOKEN_COOKIE_KEY = "xnk_auth_token";
 /** sessionStorage giữ state giữa luồng Google trực tiếp hoặc bước MFA Google. */
 export const GOOGLE_MFA_STORAGE_KEY = "xnk_google_mfa_pending";
+export const GOOGLE_DRIVE_AUTH_REQUIRED_EVENT = "xnk:google-drive-auth-required";
 
 export async function startGoogleSignIn(): Promise<{ googleAuthUrl: string; state: string }> {
   const apiPath = "/api/auth/google/start";

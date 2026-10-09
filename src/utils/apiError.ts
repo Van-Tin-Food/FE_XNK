@@ -107,7 +107,9 @@ export function createHttpApiError(
   const detail = message
     || (nonJsonPreview ? `Backend trả dữ liệu không phải JSON: ${nonJsonPreview}` : response.statusText)
     || "Không có nội dung lỗi từ backend";
-  const code = isRecord(payload) && typeof payload.code === "string" ? payload.code : "";
+  const code = isRecord(payload)
+    ? String(payload.code ?? payload.errorCode ?? "")
+    : "";
   const technicalMessage = `[${scope}] ${method} ${path} thất bại (HTTP ${response.status}): ${detail}`;
   console.error("[Backend API]", {
     scope,
@@ -121,6 +123,7 @@ export function createHttpApiError(
   error.technicalMessage = technicalMessage;
   if (isRecord(payload)) {
     if (typeof payload.code === "string") error.code = payload.code;
+    else if (typeof payload.errorCode === "string") error.code = payload.errorCode;
     if (payload.google_drive !== undefined) error.detail = payload.google_drive;
   }
   return error;

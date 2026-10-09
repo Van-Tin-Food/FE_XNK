@@ -1,4 +1,4 @@
-import { getStoredUser } from "@/services/authApi";
+import { getStoredUser, GOOGLE_DRIVE_AUTH_REQUIRED_EVENT } from "@/services/authApi";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import type {
   CarrierRecord,
@@ -71,6 +71,10 @@ async function databaseRequest<T>(path: string, init: RequestInit = {}): Promise
       window.dispatchEvent(new Event("xnk:auth-expired"));
     }
     if (!response.ok || (isRecord(result) && result.success === false)) {
+      if (typeof window !== "undefined" && isRecord(result)
+        && (result.code === "GOOGLE_DRIVE_AUTH_REQUIRED" || result.errorCode === "GOOGLE_DRIVE_AUTH_REQUIRED")) {
+        window.dispatchEvent(new Event(GOOGLE_DRIVE_AUTH_REQUIRED_EVENT));
+      }
       throw createHttpApiError("PostgreSQL", method, apiPath, response, result, nonJsonPreview);
     }
     if (result === null) throw createInvalidResponseError("PostgreSQL", method, apiPath, nonJsonPreview);

@@ -560,7 +560,7 @@ function readFileAsBase64(file: File): Promise<string> {
 type OcrDocumentType = "PI" | "INV" | "PKL" | "BL";
 
 const OCR_REQUIRED_FIELDS: Record<OcrDocumentType, string[]> = {
-  PI: ["Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng", "Đơn giá"],
+  PI: ["Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng"],
   INV: ["INV", "Ngày INV", "Tên hàng", "Giá tổng", "Đơn giá"],
   PKL: ["Số kiện", "Trọng lượng NET"],
   BL: ["BL NO.", "Mã Container", "Hãng tàu", "Cảng đi", "Cảng đến", "ETD"],

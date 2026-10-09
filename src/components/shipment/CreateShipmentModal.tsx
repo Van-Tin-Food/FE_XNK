@@ -26,6 +26,7 @@ interface ReviewFields {
   supplier: string;
   supplierId: string;
   origin: string;
+  productName: string;
 }
 
 const REQUIRED_REVIEW_FIELDS: Array<{ key: keyof ReviewFields; labelKey: string }> = [
@@ -33,6 +34,7 @@ const REQUIRED_REVIEW_FIELDS: Array<{ key: keyof ReviewFields; labelKey: string 
   { key: "orderDate", labelKey: "piDate" },
   { key: "supplier", labelKey: "supplier" },
   { key: "origin", labelKey: "origin" },
+  { key: "productName", labelKey: "productName" },
 ];
 
 const EMPTY_FIELDS: ReviewFields = {
@@ -41,6 +43,7 @@ const EMPTY_FIELDS: ReviewFields = {
   supplier: "",
   supplierId: "",
   origin: "",
+  productName: "",
 };
 
 function normalizeKey(value: string): string {
@@ -64,12 +67,14 @@ function readField(data: Record<string, string>, names: string[]): string {
 }
 
 function mapOcrFields(data: Record<string, string>): ReviewFields {
+  const productName = readField(data, ["Product", "Product Name", "Description", "Tên hàng"]);
   return {
     orderCode: readField(data, ["Số HĐ", "Order_code", "Order code"]),
     orderDate: readField(data, ["Ngày HĐ PI", "Ngày HĐ", "Order date"]),
     supplier: readField(data, ["Nhà cung cấp", "Nha_cung_cap"]),
     supplierId: readField(data, ["id_ncc", "ID NCC"]),
     origin: readField(data, ["XUẤT XỨ", "Xuat_xu"]),
+    productName,
   };
 }
 
@@ -185,8 +190,8 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       const supplier = suppliers.find((item) => item.id_ncc === mapped.supplierId)
         || findBestCatalogMatch(mapped.supplier, suppliers, "ten_ncc");
       setFields(supplier
-        ? { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: supplier.ten_ncc, supplierId: supplier.id_ncc, origin: String(supplier.quoc_gia || "") }
-        : { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: mapped.supplier, supplierId: mapped.supplierId, origin: mapped.origin });
+        ? { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: supplier.ten_ncc, supplierId: supplier.id_ncc, origin: String(supplier.quoc_gia || ""), productName: mapped.productName }
+        : { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: mapped.supplier, supplierId: mapped.supplierId, origin: mapped.origin, productName: mapped.productName });
     } catch (err) {
       setFile(null);
       setFileData("");
@@ -254,6 +259,10 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         id_ncc: supplier.id_ncc,
         is_deleted: false,
       });
+      await createDatabaseRow(databaseEndpoints.purchaseDetails, {
+        ma_hop_dong: normalizedOrderCode,
+        ten_hang: fields.productName.trim(),
+      });
       await uploadDocument({
         action: "uploadDocument",
         orderCode: normalizedOrderCode,
@@ -283,6 +292,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     ["orderDate", "piDate"],
     ["supplier", "supplier"],
     ["origin", "origin"],
+    ["productName", "productName"],
   ];
 
   return (
@@ -307,7 +317,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         {duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{t("duplicateOrder", { orderCode: fields.orderCode.trim() })}</p>}
         {error && !duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{error}</p>}
 
-        {file && !isAnalyzing && !error && (
+        {file && !isAnalyzing && (
           <>
             <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">
               {t("reviewOcrBeforeCreate")}
