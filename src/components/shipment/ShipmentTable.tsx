@@ -26,6 +26,28 @@ const STATUS_CONFIG: Record<string, { labelKey: string; color: string; bg: strin
 type SortKey = "orderCode" | "shipName" | "supplier" | "eta" | "status" | "receivedDocs";
 type SortDir = "asc" | "desc";
 
+type ColumnFilters = {
+  orderCode: string;
+  contractDate: string;
+  shipName: string;
+  supplier: string;
+  factory: string;
+  eta: string;
+  status: string;
+  documents: "all" | "complete" | "missing";
+};
+
+const EMPTY_COLUMN_FILTERS: ColumnFilters = {
+  orderCode: "",
+  contractDate: "",
+  shipName: "",
+  supplier: "",
+  factory: "",
+  eta: "",
+  status: "",
+  documents: "all",
+};
+
 const SORT_OPTIONS: { value: SortKey; labelKey: string }[] = [
   { value: "orderCode", labelKey: "orderNumber" },
   { value: "shipName", labelKey: "productName" },
@@ -80,6 +102,10 @@ function formatContractDate(value: unknown): string {
     return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${slash[3]}`;
   }
   return raw;
+}
+
+function includesFilter(value: unknown, filter: string): boolean {
+  return String(value ?? "").toLocaleLowerCase("vi").includes(filter.trim().toLocaleLowerCase("vi"));
 }
 
 function parseDateStart(value: string | undefined): number | null {
@@ -263,6 +289,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(EMPTY_COLUMN_FILTERS);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -274,8 +301,34 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
     setPage(1);
   };
 
+  const updateColumnFilter = <K extends keyof ColumnFilters>(key: K, value: ColumnFilters[K]) => {
+    setColumnFilters((current) => ({ ...current, [key]: value }));
+    setPage(1);
+  };
+
+  const filteredShipments = useMemo(() => shipments.filter((shipment) => {
+    const contractDate = shipment.database?.purchase?.ngay_hop_dong;
+    const factory = shipment.summaryFields?.["TÃªn nhÃ  mÃ¡y"] || shipment.factoryCode || "";
+    const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
+    const hasDocuments = shipment.receivedDocs >= shipment.totalDocs;
+
+    return (
+      includesFilter(shipment.orderCode, columnFilters.orderCode)
+      && (!columnFilters.contractDate || parseDateStart(String(contractDate || "")) === parseDateStart(columnFilters.contractDate))
+      && includesFilter(shipment.shipName, columnFilters.shipName)
+      && includesFilter(shipment.supplier, columnFilters.supplier)
+      && includesFilter(factory, columnFilters.factory)
+      && (!columnFilters.eta || parseDateStart(shipment.eta) === parseDateStart(columnFilters.eta))
+      && (!columnFilters.status || statusKey === columnFilters.status)
+      && (columnFilters.documents === "all"
+        || (columnFilters.documents === "complete" && hasDocuments)
+        || (columnFilters.documents === "missing" && !hasDocuments))
+    );
+  }), [shipments, columnFilters]);
+  const hasColumnFilters = Object.entries(columnFilters).some(([key, value]) => key === "documents" ? value !== "all" : Boolean(value));
+
   const sorted = useMemo(() => {
-    return [...shipments].sort((a, b) => {
+    return [...filteredShipments].sort((a, b) => {
       let va: string | number | undefined;
       let vb: string | number | undefined;
       if (sortKey === "receivedDocs") {
@@ -304,12 +357,13 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
       const cmp = String(va).localeCompare(String(vb), "vi");
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [shipments, sortKey, sortDir]);
+  }, [filteredShipments, sortKey, sortDir]);
 
   const { items: paged, totalPages, safePage, from, to } = paginateItems(sorted, page, pageSize);
 
   const headerCls =
     "py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition-colors";
+  const filterInputCls = "w-full min-w-0 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs font-normal normal-case text-gray-700 outline-none placeholder:text-gray-400 focus:border-brand-400 focus:ring-1 focus:ring-brand-200 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:focus:border-brand-500";
 
   return (
     <div className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
@@ -318,11 +372,24 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         <div className="min-w-0">
           <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">{t("shipmentList")}</h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            {t("shipmentCount", { count: shipments.length })}
+            {t("shipmentCount", { count: filteredShipments.length })}
             {shipments.length > 0 && ` • ${t("pageOf", { page: safePage, total: totalPages })}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {hasColumnFilters && (
+            <button
+              type="button"
+              onClick={() => { setColumnFilters(EMPTY_COLUMN_FILTERS); setPage(1); }}
+              title={t("clearFilters")}
+              aria-label={t("clearFilters")}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-700 dark:text-gray-400 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="m19 6-1 14H6L5 6" /><path d="M10 11v5M14 11v5" />
+              </svg>
+            </button>
+          )}
           <span className="text-xs text-gray-400">{t("clickRowForDetails")}</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
             <circle cx="12" cy="12" r="10"/>
@@ -408,6 +475,89 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                 <div className="flex items-center gap-1.5">{t("documents")} <SortIcon col="receivedDocs" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className="sticky top-[65px] z-40 bg-gray-50/95 py-3 px-4 w-[5%] text-center text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("view")}</th>
+            </tr>
+            <tr className="border-t border-gray-100 bg-gray-50/70 dark:border-gray-800 dark:bg-gray-900/40">
+              <th className="px-2 py-2" />
+              <th className="px-2 py-2">
+                <input
+                  value={columnFilters.orderCode}
+                  onChange={(event) => updateColumnFilter("orderCode", event.target.value)}
+                  placeholder={t("filter")}
+                  aria-label={`${t("orderNumber")} ${t("filter")}`}
+                  className={filterInputCls}
+                />
+              </th>
+              <th className="px-2 py-2">
+                <input
+                  type="date"
+                  value={columnFilters.contractDate}
+                  onChange={(event) => updateColumnFilter("contractDate", event.target.value)}
+                  aria-label={`${t("contractDate")} ${t("filter")}`}
+                  className={filterInputCls}
+                />
+              </th>
+              <th className="px-2 py-2">
+                <input
+                  value={columnFilters.shipName}
+                  onChange={(event) => updateColumnFilter("shipName", event.target.value)}
+                  placeholder={t("filter")}
+                  aria-label={`${t("productName")} ${t("filter")}`}
+                  className={filterInputCls}
+                />
+              </th>
+              <th className="px-2 py-2">
+                <input
+                  value={columnFilters.supplier}
+                  onChange={(event) => updateColumnFilter("supplier", event.target.value)}
+                  placeholder={t("filter")}
+                  aria-label={`${t("supplier")} ${t("filter")}`}
+                  className={filterInputCls}
+                />
+              </th>
+              <th className="px-2 py-2">
+                <input
+                  value={columnFilters.factory}
+                  onChange={(event) => updateColumnFilter("factory", event.target.value)}
+                  placeholder={t("filter")}
+                  aria-label={`${t("factoryName")} ${t("filter")}`}
+                  className={filterInputCls}
+                />
+              </th>
+              <th className="px-2 py-2">
+                <input
+                  type="date"
+                  value={columnFilters.eta}
+                  onChange={(event) => updateColumnFilter("eta", event.target.value)}
+                  aria-label={`${t("estimatedArrivalShort")} ${t("filter")}`}
+                  className={filterInputCls}
+                />
+              </th>
+              <th className="px-2 py-2">
+                <select
+                  value={columnFilters.status}
+                  onChange={(event) => updateColumnFilter("status", event.target.value)}
+                  aria-label={`${t("status")} ${t("filter")}`}
+                  className={filterInputCls}
+                >
+                  <option value="">{t("all")}</option>
+                  {Object.entries(STATUS_CONFIG).map(([value, config]) => (
+                    <option key={value} value={value}>{t(config.labelKey)}</option>
+                  ))}
+                </select>
+              </th>
+              <th className="px-2 py-2">
+                <select
+                  value={columnFilters.documents}
+                  onChange={(event) => updateColumnFilter("documents", event.target.value as ColumnFilters["documents"])}
+                  aria-label={`${t("documents")} ${t("filter")}`}
+                  className={filterInputCls}
+                >
+                  <option value="all">{t("all")}</option>
+                  <option value="complete">{t("documentsComplete")}</option>
+                  <option value="missing">{t("missingDocumentsStatus")}</option>
+                </select>
+              </th>
+              <th className="px-2 py-2" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
