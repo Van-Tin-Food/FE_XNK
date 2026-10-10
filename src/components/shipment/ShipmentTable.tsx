@@ -23,35 +23,26 @@ const STATUS_CONFIG: Record<string, { labelKey: string; color: string; bg: strin
   delivered: { labelKey: "delivered", color: "text-success-600", bg: "bg-success-50 dark:bg-success-500/10", dot: "bg-success-500" },
 };
 
-type SortKey = "orderCode" | "shipName" | "supplier" | "eta" | "status" | "receivedDocs";
+const PROCESS_ORDER: Record<string, number> = {
+  buying: 1,
+  shipping: 2,
+  arrived: 3,
+  declared: 4,
+  fifteenb: 5,
+  customs: 6,
+  delivered: 7,
+  cancelled: 99,
+};
+
+type SortKey = "orderCode" | "contractDate" | "shipName" | "supplier" | "factory" | "eta" | "status" | "receivedDocs";
 type SortDir = "asc" | "desc";
-
-type ColumnFilters = {
-  orderCode: string;
-  contractDate: string;
-  shipName: string;
-  supplier: string;
-  factory: string;
-  eta: string;
-  status: string;
-  documents: "all" | "complete" | "missing";
-};
-
-const EMPTY_COLUMN_FILTERS: ColumnFilters = {
-  orderCode: "",
-  contractDate: "",
-  shipName: "",
-  supplier: "",
-  factory: "",
-  eta: "",
-  status: "",
-  documents: "all",
-};
 
 const SORT_OPTIONS: { value: SortKey; labelKey: string }[] = [
   { value: "orderCode", labelKey: "orderNumber" },
+  { value: "contractDate", labelKey: "contractDate" },
   { value: "shipName", labelKey: "productName" },
   { value: "supplier", labelKey: "supplier" },
+  { value: "factory", labelKey: "factoryName" },
   { value: "eta", labelKey: "estimatedArrivalShort" },
   { value: "status", labelKey: "status" },
   { value: "receivedDocs", labelKey: "documents" },
@@ -104,8 +95,8 @@ function formatContractDate(value: unknown): string {
   return raw;
 }
 
-function includesFilter(value: unknown, filter: string): boolean {
-  return String(value ?? "").toLocaleLowerCase("vi").includes(filter.trim().toLocaleLowerCase("vi"));
+function formatProductNames(value: string): string {
+  return value.split(/\s*,\s*/).filter(Boolean).join("\n");
 }
 
 function parseDateStart(value: string | undefined): number | null {
@@ -224,24 +215,10 @@ function ShipmentCard({
           <p className="truncate font-mono text-sm font-semibold text-brand-600 dark:text-brand-400" title={shipment.orderCode}>
             {shipment.orderCode}
           </p>
-          <p className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-white/90" title={shipment.shipName}>
-            {shipment.shipName}
+          <p className="mt-1 whitespace-pre-line break-words text-sm font-medium text-gray-800 dark:text-white/90" title={shipment.shipName}>
+            {formatProductNames(shipment.shipName)}
           </p>
         </div>
-        <button
-          type="button"
-          aria-label={t("viewShipmentDetails", { orderCode: shipment.orderCode })}
-          onClick={(event) => {
-            event.stopPropagation();
-            onClick();
-          }}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-400 transition-all hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-        </button>
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-100 pt-3 dark:border-gray-700">
@@ -289,7 +266,6 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(EMPTY_COLUMN_FILTERS);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -301,34 +277,8 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
     setPage(1);
   };
 
-  const updateColumnFilter = <K extends keyof ColumnFilters>(key: K, value: ColumnFilters[K]) => {
-    setColumnFilters((current) => ({ ...current, [key]: value }));
-    setPage(1);
-  };
-
-  const filteredShipments = useMemo(() => shipments.filter((shipment) => {
-    const contractDate = shipment.database?.purchase?.ngay_hop_dong;
-    const factory = shipment.summaryFields?.["TÃªn nhÃ  mÃ¡y"] || shipment.factoryCode || "";
-    const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
-    const hasDocuments = shipment.receivedDocs >= shipment.totalDocs;
-
-    return (
-      includesFilter(shipment.orderCode, columnFilters.orderCode)
-      && (!columnFilters.contractDate || parseDateStart(String(contractDate || "")) === parseDateStart(columnFilters.contractDate))
-      && includesFilter(shipment.shipName, columnFilters.shipName)
-      && includesFilter(shipment.supplier, columnFilters.supplier)
-      && includesFilter(factory, columnFilters.factory)
-      && (!columnFilters.eta || parseDateStart(shipment.eta) === parseDateStart(columnFilters.eta))
-      && (!columnFilters.status || statusKey === columnFilters.status)
-      && (columnFilters.documents === "all"
-        || (columnFilters.documents === "complete" && hasDocuments)
-        || (columnFilters.documents === "missing" && !hasDocuments))
-    );
-  }), [shipments, columnFilters]);
-  const hasColumnFilters = Object.entries(columnFilters).some(([key, value]) => key === "documents" ? value !== "all" : Boolean(value));
-
   const sorted = useMemo(() => {
-    return [...filteredShipments].sort((a, b) => {
+    return [...shipments].sort((a, b) => {
       let va: string | number | undefined;
       let vb: string | number | undefined;
       if (sortKey === "receivedDocs") {
@@ -336,6 +286,24 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         vb = b.receivedDocs;
         const cmp = (va ?? 0) < (vb ?? 0) ? -1 : (va ?? 0) > (vb ?? 0) ? 1 : 0;
         return sortDir === "asc" ? cmp : -cmp;
+      }
+      if (sortKey === "contractDate") {
+        const dateA = parseDateStart(String(a.database?.purchase?.ngay_hop_dong || ""));
+        const dateB = parseDateStart(String(b.database?.purchase?.ngay_hop_dong || ""));
+        if (dateA === null && dateB === null) return a.orderCode.localeCompare(b.orderCode, "vi");
+        if (dateA === null) return 1;
+        if (dateB === null) return -1;
+        const cmp = dateA < dateB ? -1 : dateA > dateB ? 1 : 0;
+        return sortDir === "asc" ? cmp : -cmp;
+      }
+      if (sortKey === "status") {
+        const statusA = a.status === "cancelled" ? "cancelled" : a.flowStageKey || "buying";
+        const statusB = b.status === "cancelled" ? "cancelled" : b.flowStageKey || "buying";
+        const orderA = PROCESS_ORDER[statusA] ?? 98;
+        const orderB = PROCESS_ORDER[statusB] ?? 98;
+        const cmp = orderA < orderB ? -1 : orderA > orderB ? 1 : 0;
+        if (cmp !== 0) return sortDir === "asc" ? cmp : -cmp;
+        return a.orderCode.localeCompare(b.orderCode, "vi");
       }
       if (sortKey === "eta") {
         const etaA = parseDateStart(a.eta);
@@ -350,20 +318,24 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         if (cmp !== 0) return sortDir === "asc" ? cmp : -cmp;
         return a.orderCode.localeCompare(b.orderCode, "vi");
       }
-      va = a[sortKey as keyof Shipment] as string | undefined;
-      vb = b[sortKey as keyof Shipment] as string | undefined;
+      if (sortKey === "factory") {
+        va = a.summaryFields?.["TÃªn nhÃ  mÃ¡y"] || a.factoryCode || "";
+        vb = b.summaryFields?.["TÃªn nhÃ  mÃ¡y"] || b.factoryCode || "";
+      } else {
+        va = a[sortKey as keyof Shipment] as string | undefined;
+        vb = b[sortKey as keyof Shipment] as string | undefined;
+      }
       if (!va) va = "";
       if (!vb) vb = "";
       const cmp = String(va).localeCompare(String(vb), "vi");
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [filteredShipments, sortKey, sortDir]);
+  }, [shipments, sortKey, sortDir]);
 
   const { items: paged, totalPages, safePage, from, to } = paginateItems(sorted, page, pageSize);
 
   const headerCls =
     "py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition-colors";
-  const filterInputCls = "w-full min-w-0 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs font-normal normal-case text-gray-700 outline-none placeholder:text-gray-400 focus:border-brand-400 focus:ring-1 focus:ring-brand-200 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:focus:border-brand-500";
 
   return (
     <div className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
@@ -372,24 +344,11 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         <div className="min-w-0">
           <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">{t("shipmentList")}</h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            {t("shipmentCount", { count: filteredShipments.length })}
+            {t("shipmentCount", { count: shipments.length })}
             {shipments.length > 0 && ` • ${t("pageOf", { page: safePage, total: totalPages })}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {hasColumnFilters && (
-            <button
-              type="button"
-              onClick={() => { setColumnFilters(EMPTY_COLUMN_FILTERS); setPage(1); }}
-              title={t("clearFilters")}
-              aria-label={t("clearFilters")}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-700 dark:text-gray-400 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="m19 6-1 14H6L5 6" /><path d="M10 11v5M14 11v5" />
-              </svg>
-            </button>
-          )}
           <span className="text-xs text-gray-400">{t("clickRowForDetails")}</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
             <circle cx="12" cy="12" r="10"/>
@@ -450,120 +409,36 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
             <thead className="border-b border-gray-100 dark:border-gray-800">
             <tr>
               <th className="sticky top-[65px] z-40 w-[4%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("sequence")}</th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("orderCode")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[8%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("orderCode")}>
                 <div className="flex items-center gap-1.5">{t("orderNumber")} <SortIcon col="orderCode" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`}>
-                {t("contractDate")}
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[8%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("contractDate")}>
+                <div className="flex items-center gap-1.5">{t("contractDate")} <SortIcon col="contractDate" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[19%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[26%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
                 <div className="flex items-center gap-1.5">{t("productName")} <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[15%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
                 <div className="flex items-center gap-1.5">{t("supplier")} <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[13%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`}>
-                {t("factoryName")}
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("factory")}>
+                <div className="flex items-center gap-1.5">{t("factoryName")} <SortIcon col="factory" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
                 <div className="flex items-center gap-1.5">{t("arrivalDuration")} <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[14%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[13%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
                 <div className="flex items-center gap-1.5">{t("status")} <SortIcon col="status" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[14%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
                 <div className="flex items-center gap-1.5">{t("documents")} <SortIcon col="receivedDocs" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className="sticky top-[65px] z-40 bg-gray-50/95 py-3 px-4 w-[5%] text-center text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("view")}</th>
-            </tr>
-            <tr className="border-t border-gray-100 bg-gray-50/70 dark:border-gray-800 dark:bg-gray-900/40">
-              <th className="px-2 py-2" />
-              <th className="px-2 py-2">
-                <input
-                  value={columnFilters.orderCode}
-                  onChange={(event) => updateColumnFilter("orderCode", event.target.value)}
-                  placeholder={t("filter")}
-                  aria-label={`${t("orderNumber")} ${t("filter")}`}
-                  className={filterInputCls}
-                />
-              </th>
-              <th className="px-2 py-2">
-                <input
-                  type="date"
-                  value={columnFilters.contractDate}
-                  onChange={(event) => updateColumnFilter("contractDate", event.target.value)}
-                  aria-label={`${t("contractDate")} ${t("filter")}`}
-                  className={filterInputCls}
-                />
-              </th>
-              <th className="px-2 py-2">
-                <input
-                  value={columnFilters.shipName}
-                  onChange={(event) => updateColumnFilter("shipName", event.target.value)}
-                  placeholder={t("filter")}
-                  aria-label={`${t("productName")} ${t("filter")}`}
-                  className={filterInputCls}
-                />
-              </th>
-              <th className="px-2 py-2">
-                <input
-                  value={columnFilters.supplier}
-                  onChange={(event) => updateColumnFilter("supplier", event.target.value)}
-                  placeholder={t("filter")}
-                  aria-label={`${t("supplier")} ${t("filter")}`}
-                  className={filterInputCls}
-                />
-              </th>
-              <th className="px-2 py-2">
-                <input
-                  value={columnFilters.factory}
-                  onChange={(event) => updateColumnFilter("factory", event.target.value)}
-                  placeholder={t("filter")}
-                  aria-label={`${t("factoryName")} ${t("filter")}`}
-                  className={filterInputCls}
-                />
-              </th>
-              <th className="px-2 py-2">
-                <input
-                  type="date"
-                  value={columnFilters.eta}
-                  onChange={(event) => updateColumnFilter("eta", event.target.value)}
-                  aria-label={`${t("estimatedArrivalShort")} ${t("filter")}`}
-                  className={filterInputCls}
-                />
-              </th>
-              <th className="px-2 py-2">
-                <select
-                  value={columnFilters.status}
-                  onChange={(event) => updateColumnFilter("status", event.target.value)}
-                  aria-label={`${t("status")} ${t("filter")}`}
-                  className={filterInputCls}
-                >
-                  <option value="">{t("all")}</option>
-                  {Object.entries(STATUS_CONFIG).map(([value, config]) => (
-                    <option key={value} value={value}>{t(config.labelKey)}</option>
-                  ))}
-                </select>
-              </th>
-              <th className="px-2 py-2">
-                <select
-                  value={columnFilters.documents}
-                  onChange={(event) => updateColumnFilter("documents", event.target.value as ColumnFilters["documents"])}
-                  aria-label={`${t("documents")} ${t("filter")}`}
-                  className={filterInputCls}
-                >
-                  <option value="all">{t("all")}</option>
-                  <option value="complete">{t("documentsComplete")}</option>
-                  <option value="missing">{t("missingDocumentsStatus")}</option>
-                </select>
-              </th>
-              <th className="px-2 py-2" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
             {paged.length === 0 ? (
               <tr>
-                <td colSpan={10} className="py-16 text-center text-sm text-gray-400">
+                <td colSpan={9} className="py-16 text-center text-sm text-gray-400">
                   <div className="flex flex-col items-center gap-2">
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
                       <circle cx="11" cy="11" r="8"/>
@@ -613,10 +488,10 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                           {shipment.shipName}
                         </p> */}
                         <p
-                          className="text-sm font-medium text-gray-800 dark:text-white/90 truncate w-full"
+                          className="w-full whitespace-pre-line break-words text-sm font-medium text-gray-800 dark:text-white/90"
                           title={shipment.shipName}
                         >
-                          {shipment.shipName}
+                          {formatProductNames(shipment.shipName)}
                         </p>
                       </div>
                     </td>
@@ -677,18 +552,6 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                       />
                     </td>
 
-                    {/* Detail button */}
-                    <td className="py-3.5 px-4 text-center">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onRowClick(shipment); }}
-                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-200 bg-white text-gray-400 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10 dark:hover:text-brand-400 transition-all"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="8"/>
-                          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                        </svg>
-                      </button>
-                    </td>
                   </tr>
                 );
               })
