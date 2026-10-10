@@ -1295,10 +1295,30 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       })
       .finally(() => setIsReturnLoading(false));
     const archiveStateRequest = getArchivedDocuments(shipment.orderCode)
-      .then((result) => setArchived(result.archived ? result : { success: true, archived: false }))
+      .then((result) => {
+        console.info("[Document metadata] Google Drive response", {
+          orderCode: shipment.orderCode,
+          archived: result.archived,
+          fileCount: result.files?.length || 0,
+          files: (result.files || []).map((file) => ({
+            fileId: file.fileId,
+            fileName: file.fileName,
+            createdTime: file.createdTime,
+            uploadedBy: file.uploadedBy,
+            uploadedByEmail: file.uploadedByEmail,
+          })),
+        });
+        setArchived(result);
+      })
       // Đơn chưa có thư mục lưu trữ có thể được backend trả về dưới dạng lỗi/not found.
       // Đánh dấu là chưa lưu trữ để quyền admin/xnk vẫn hoạt động bình thường.
-      .catch(() => setArchived({ success: true, archived: false }));
+      .catch((error) => {
+        console.error("[Document metadata] Google Drive request failed", {
+          orderCode: shipment.orderCode,
+          error: error instanceof Error ? error.message : error,
+        });
+        setArchived({ success: true, archived: false });
+      });
     const documentProgressRequest = checkDocumentProgress(shipment.orderCode)
       .then(setDocumentProgress)
       .catch((progressError) => {
@@ -1418,10 +1438,18 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     return (orderA < 0 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB < 0 ? Number.MAX_SAFE_INTEGER : orderB);
   });
   const documentFileGroups = documentsSorted.map((document) => {
-    const archivedFiles = archived?.archived
-      ? (archived.files || []).filter((file) => (file.fileName || "").toUpperCase().startsWith(`${shipment.orderCode}_${document.id}`.toUpperCase()))
-      : [];
+    const driveFiles = (archived?.files || []).filter((file) => (
+      (file.fileName || "").toUpperCase().startsWith(`${shipment.orderCode}_${document.id}`.toUpperCase())
+    ));
     const files = [
+      // Metadata từ Google Drive đứng trước dữ liệu cũ trong DB để luôn được ưu tiên.
+      ...driveFiles.map((file) => ({
+        url: file.fileUrl,
+        fileName: file.fileName || "",
+        uploadedAt: file.createdTime || "",
+        uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
+        label: file.fileName || "",
+      })),
       ...(document.files?.length ? document.files : (document.urls?.length ? document.urls : document.url ? [document.url] : []).map((url) => ({
         fileUrl: url,
         referenceCode: undefined,
@@ -1440,13 +1468,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             || shipment.database?.details.find((detail) => detail.id_chi_tiet === file.idChiTiet)?.ten_hang,
           file.fileName?.trim() || t("documentFileIndex", { index: index + 1 }),
         ].filter(Boolean).join(" — "),
-      })),
-      ...archivedFiles.map((file) => ({
-        url: file.fileUrl,
-        fileName: file.fileName || "",
-        uploadedAt: file.createdTime || "",
-        uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
-        label: file.fileName || "",
       })),
       ...(localUploads[document.id] && !document.url
         ? [{ url: localUploads[document.id], fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
