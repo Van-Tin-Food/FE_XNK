@@ -18,7 +18,7 @@ import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMa
 import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCatalogOptions";
 import { toDocumentPreviewUrl } from "@/utils/documentPreview";
 import { shouldValidateContainerPackages } from "@/utils/containerPackageValidation";
-import { canPerformShipmentAction, canUploadDocumentType } from "@/config/shipmentActionPermissions";
+import { canUploadDocumentType } from "@/config/shipmentActionPermissions";
 import {
   formatInternationalNumber,
   formatMoneyAmount,
@@ -1115,7 +1115,7 @@ function getOcrDocumentType(documentCode: string): OcrDocumentType | null {
 
 export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefresh }: ShipmentDetailModalProps) {
   const { user, permissions } = useAuth();
-  const canUseTracking = canPerformShipmentAction(user, "editReturnItem");
+  const canUseTracking = permissions.viewTracking;
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
   const { language, t } = useLanguage();
