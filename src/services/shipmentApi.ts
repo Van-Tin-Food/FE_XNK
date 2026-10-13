@@ -20,6 +20,11 @@ import type { DriveDocumentFileRecord, DriveDocumentRecord, DriveDocumentValue, 
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
 export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
+export type DriveFolderLinks = {
+  source?: string;
+  complete?: string;
+  documents?: Record<string, string>;
+};
 const DOCUMENT_CODES = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
   "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONG",
@@ -514,6 +519,18 @@ export async function uploadDocument(payload: UploadDocumentPayload): Promise<Dr
     window.dispatchEvent(new Event(NOTIFICATIONS_SYNC_EVENT));
   }
   return result;
+}
+
+export async function getDriveFolderLinks(): Promise<DriveFolderLinks> {
+  const response = await requestJson<Record<string, unknown>>("drive-folder-links");
+  const documents = Object.fromEntries(
+    Object.entries(response).filter(([key, value]) => key !== "source" && key !== "complete" && typeof value === "string"),
+  ) as Record<string, string>;
+  return {
+    source: typeof response.source === "string" ? response.source : "",
+    complete: typeof response.complete === "string" ? response.complete : "",
+    documents,
+  };
 }
 
 export type OcrDataRow = Record<string, string>;

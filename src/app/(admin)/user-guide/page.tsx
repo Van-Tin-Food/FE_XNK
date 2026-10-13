@@ -1,7 +1,10 @@
 "use client";
 
+import { getDriveFolderLinks, type DriveFolderLinks } from "@/services/shipmentApi";
 import { useLanguage } from "@/context/LanguageContext";
+import { useEffect, useState } from "react";
 
+// Dán URL thư mục Drive tương ứng vào đúng mã chứng từ. Có URL thì tên thư mục sẽ click được.
 const DOCUMENT_FOLDERS = [
   ["01. PI Hợp đồng mua", "PI", "guideDrivePi"],
   ["02. INV Hóa đơn", "INV", "guideDriveInv"],
@@ -35,6 +38,11 @@ const NAMING_EXAMPLES = [
 
 export default function UserGuidePage() {
   const { t } = useLanguage();
+  const [driveLinks, setDriveLinks] = useState<DriveFolderLinks>({ documents: {} });
+
+  useEffect(() => {
+    void getDriveFolderLinks().then(setDriveLinks).catch(() => setDriveLinks({ documents: {} }));
+  }, []);
 
   return (
     <div className="space-y-6 pb-8">
@@ -58,7 +66,7 @@ export default function UserGuidePage() {
           <div className="pl-12">├── 03. BL Vận đơn/</div>
           <div className="pl-12">├── ... các thư mục chứng từ ...</div>
           <div className="pl-12">└── 20. TRA_CONG Trả công rỗng cho cảng/</div>
-          <div className="mt-2 border-t border-blue-light-200 pt-2 dark:border-blue-light-500/20">└── DATA_COMPLETE/</div>
+          <div className="mt-2 border-t border-blue-light-200 pt-2 dark:border-blue-light-500/20">└── XNK_DATA_COMPALETE/</div>
           <div className="pl-8">└── mã hợp đồng/</div>
         </div>
         <p className="mt-4 text-sm leading-6 text-gray-600 dark:text-gray-300">{t("guideDriveArchiveDescription")}</p>
@@ -84,13 +92,27 @@ export default function UserGuidePage() {
 
       <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t("guideDriveFolderRulesTitle")}</h2>
+        <div className="mt-4 flex flex-wrap gap-3">
+          {driveLinks.source && <a href={driveLinks.source} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-lg border border-blue-light-200 bg-blue-light-50 px-3 py-2 text-sm font-semibold text-blue-light-700 transition hover:bg-blue-light-100 dark:border-blue-light-500/30 dark:bg-blue-light-500/10 dark:text-blue-light-300 dark:hover:bg-blue-light-500/20">
+            {t("guideDriveOpenSource")}
+          </a>}
+          {driveLinks.complete && <a href={driveLinks.complete} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20">
+            {t("guideDriveOpenComplete")}
+          </a>}
+        </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {DOCUMENT_FOLDERS.map(([folder, code, descriptionKey]) => (
             <div key={code} className="rounded-xl border border-gray-100 p-4 dark:border-gray-800">
               <div className="flex items-start gap-3">
                 <span className="rounded-lg bg-gray-100 px-2 py-1 text-xs font-bold text-gray-700 dark:bg-gray-800 dark:text-gray-300">{code}</span>
                 <div className="min-w-0">
-                  <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{folder}</p>
+                  {driveLinks.documents?.[code] ? (
+                    <a href={driveLinks.documents[code]} target="_blank" rel="noreferrer" className="break-words text-sm font-semibold text-brand-600 underline decoration-brand-300 underline-offset-2 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200">
+                      {folder}
+                    </a>
+                  ) : (
+                    <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{folder}</p>
+                  )}
                   <p className="mt-1 text-sm leading-5 text-gray-600 dark:text-gray-300">{t(descriptionKey)}</p>
                 </div>
               </div>
