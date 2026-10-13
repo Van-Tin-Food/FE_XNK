@@ -9,23 +9,23 @@ const DOCUMENT_FOLDERS = [
   ["01. PI Hợp đồng mua", "PI", "guideDrivePi"],
   ["02. INV Hóa đơn", "INV", "guideDriveInv"],
   ["03. BL Vận đơn", "BL", "guideDriveBl"],
-  ["04. PKL Đóng gói", "PKL", "guideDrivePkl"],
+  ["04. PKL Bảng kê hàng hóa", "PKL", "guideDrivePkl"],
   ["05. CO Giấy chứng nhận xuất xứ", "CO", "guideDriveCo"],
   ["06. HC Giấy kiểm dịch y tế", "HC", "guideDriveHc"],
-  ["07. DON_KD Đơn kiểm dịch động vật", "DON_KD", "guideDriveDonKd"],
+  ["07. DON_KD Đơn đăng kí kiểm dịch động vật", "DON_KD", "guideDriveDonKd"],
   ["08. AN Thông báo hàng đến", "AN", "guideDriveAn"],
   ["09. EDO Lệnh giao hàng điện tử", "EDO", "guideDriveEdo"],
   ["10. CPN Chứng từ CPN quốc tế", "CPN", "guideDriveCpn"],
-  ["11. TK Tờ khai", "TK", "guideDriveTk"],
+  ["11. TK Tờ khai hải quan", "TK", "guideDriveTk"],
   ["12. BB_LM Biên bản lấy mẫu", "BB_LM", "guideDriveBbLm"],
   ["13. INSPECTION Ảnh-video kiểm dịch", "INSPECTION", "guideDriveInspection"],
-  ["14. PHI_TK Phí tờ khai", "PHI_TK", "guideDrivePhiTk"],
+  ["14. PHI_TK Lệ phí tờ khai", "PHI_TK", "guideDrivePhiTk"],
   ["15. THUE_NK Nộp thuế nhập khẩu", "THUE_NK", "guideDriveThueNk"],
   ["16. CSHT Phí cơ sở hạ tầng", "CSHT", "guideDriveCSHT"],
-  ["17. 15B Kết quả kiểm dịch mẫu 15B", "15B", "guideDrive15b"],
-  ["18. QDTQ Quyết định thông quan", "QDTQ", "guideDriveQdtq"],
-  ["19. MV Mã vạch", "MV", "guideDriveMv"],
-  ["20. TRA_CONG Trả công rỗng cho cảng", "TRA_CONG", "guideDriveTraCong"],
+  ["17. 15B Giấy chứng nhận kiểm dịch", "15B", "guideDrive15b"],
+  ["18. QDTQ Tờ khai hải quan - thông quan", "QDTQ", "guideDriveQdtq"],
+  ["19. MV Mã vạch hải quan", "MV", "guideDriveMv"],
+  ["20. TRA_CONG Trả cont rỗng", "TRA_CONG", "guideDriveTraCong"],
 ] as const;
 
 const NAMING_EXAMPLES = [
@@ -66,7 +66,7 @@ export default function UserGuidePage() {
           <div className="pl-12">├── 03. BL Vận đơn/</div>
           <div className="pl-12">├── ... các thư mục chứng từ ...</div>
           <div className="pl-12">└── 20. TRA_CONG Trả công rỗng cho cảng/</div>
-          <div className="mt-2 border-t border-blue-light-200 pt-2 dark:border-blue-light-500/20">└── XNK_DATA_COMPALETE/</div>
+          <div className="mt-2 border-t border-blue-light-200 pt-2 dark:border-blue-light-500/20">└── XNK_DATA_COMPLETE/</div>
           <div className="pl-8">└── mã hợp đồng/</div>
         </div>
         <p className="mt-4 text-sm leading-6 text-gray-600 dark:text-gray-300">{t("guideDriveArchiveDescription")}</p>

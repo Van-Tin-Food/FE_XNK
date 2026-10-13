@@ -1296,18 +1296,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       .finally(() => setIsReturnLoading(false));
     const archiveStateRequest = getArchivedDocuments(shipment.orderCode)
       .then((result) => {
-        console.info("[Document metadata] Google Drive response", {
-          orderCode: shipment.orderCode,
-          archived: result.archived,
-          fileCount: result.files?.length || 0,
-          files: (result.files || []).map((file) => ({
-            fileId: file.fileId,
-            fileName: file.fileName,
-            createdTime: file.createdTime,
-            uploadedBy: file.uploadedBy,
-            uploadedByEmail: file.uploadedByEmail,
-          })),
-        });
         setArchived(result);
       })
       // Đơn chưa có thư mục lưu trữ có thể được backend trả về dưới dạng lỗi/not found.
@@ -1438,9 +1426,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     return (orderA < 0 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB < 0 ? Number.MAX_SAFE_INTEGER : orderB);
   });
   const documentFileGroups = documentsSorted.map((document) => {
-    const driveFiles = (archived?.files || []).filter((file) => (
-      (file.fileName || "").toUpperCase().startsWith(`${shipment.orderCode}_${document.id}`.toUpperCase())
-    ));
     const databaseFiles = (document.files?.length ? document.files : (document.urls?.length ? document.urls : document.url ? [document.url] : []).map((url) => ({
       fileUrl: url,
       referenceCode: undefined,
@@ -1460,21 +1445,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         file.fileName?.trim() || t("documentFileIndex", { index: index + 1 }),
       ].filter(Boolean).join(" — "),
     }));
-    // Chỉ dùng một nguồn chính: hồ sơ lưu trữ lấy từ Drive, hồ sơ đang xử lý lấy từ DB.
-    const sourceFiles = archived?.archived
-      ? driveFiles.map((file) => ({
-        url: file.fileUrl,
-        fileName: file.fileName || "",
-        uploadedAt: file.createdTime || "",
-        uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
-        label: file.fileName || "",
-      }))
-      : [
-        ...databaseFiles,
-        ...(localUploads[document.id] && !document.url
-          ? [{ url: localUploads[document.id], fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
-          : []),
-      ];
+    // chung_tu_drive là nguồn duy nhất để hiển thị file và metadata trên FE.
+    const sourceFiles = [
+      ...databaseFiles,
+      ...(localUploads[document.id] && !document.url
+        ? [{ url: localUploads[document.id], fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
+        : []),
+    ];
     const files = sourceFiles.filter((file, index, allFiles) => file.url && allFiles.findIndex((other) => other.url === file.url) === index);
     return { document, files };
   });
@@ -2700,7 +2677,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         <button
                           key={doc.id}
                           type="button"
-                          onClick={() => handlePickUpload(doc.id)}
+                          onClick={() => handlePickUpload(doc.id, true)}
                           disabled={!canUploadDocuments || isArchived || isOcrAnalyzing || isOcrSaving}
                           aria-label={`Bổ sung ${doc.name}`}
                           className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors ${
@@ -2844,7 +2821,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         {isPassed ? t("passed") : t({ ok: "available", missing: "missing", pending: "pending", expired: "expired" }[doc.status] || "status")}
                       </span>
                       {!isArchived && canUploadDocuments && canUploadDocumentType(user, doc.id) && (
-                        <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={(event) => { event.stopPropagation(); handlePickUpload(doc.id); }} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                        <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={(event) => { event.stopPropagation(); handlePickUpload(doc.id, true); }} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
                           {isOcrAnalyzing && ocrUploadDocId === doc.id ? t("analyzingDocument") : doc.status === "ok" ? t("uploadAnother") : localUploads[doc.id] ? t("uploadAnother") : t("uploadDocument")}
                         </button>
                       )}
@@ -3456,33 +3433,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               ) : (
                 <div className="rounded-xl border border-dashed border-gray-200 p-5 text-center dark:border-gray-700 sm:p-6">
                   <p className="text-sm text-gray-400">{t("noDriveFolder")}</p>
-                </div>
-              )}
-
-              {archived?.files && archived.files.length > 0 && (
-                <div className="mt-4 flex flex-col gap-2">
-                  {archived.files.map((file, fileIndex) => (
-                    <div key={file.fileId || file.fileUrl || `${file.fileName || "file"}-${fileIndex}`} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
-                      <button type="button" onClick={() => { setPreviewUrl(toDocumentPreviewUrl(file.fileUrl)); setPreviewName(file.fileName || file.fileUrl); }} className="min-w-0 flex-1 truncate text-left text-xs text-gray-700 hover:text-brand-600 dark:text-gray-200 dark:hover:text-brand-300">
-                        {file.fileName || file.fileUrl}
-                      </button>
-                      <a
-                        href={toDocumentDownloadUrl(file.fileUrl)}
-                        download={file.fileName || undefined}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title={t("downloadDocument")}
-                        aria-label={`${t("downloadDocument")} ${file.fileName || file.fileUrl}`}
-                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M12 3v12" />
-                          <path d="m7 10 5 5 5-5" />
-                          <path d="M5 21h14" />
-                        </svg>
-                      </a>
-                    </div>
-                  ))}
                 </div>
               )}
 
