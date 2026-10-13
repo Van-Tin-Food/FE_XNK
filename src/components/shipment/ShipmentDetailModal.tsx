@@ -16,7 +16,7 @@ import { submitEvergreenTracking } from "@/utils/evergreenTracking";
 import { getMissingArchiveDetailFields, getMissingArchiveTransportFields } from "@/utils/shipmentArchiveValidation";
 import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
 import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCatalogOptions";
-import { toDocumentPreviewUrl } from "@/utils/documentPreview";
+import { toDocumentDownloadUrl, toDocumentPreviewUrl } from "@/utils/documentPreview";
 import { shouldValidateContainerPackages } from "@/utils/containerPackageValidation";
 import { canUploadDocumentType } from "@/config/shipmentActionPermissions";
 import {
@@ -1441,38 +1441,41 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const driveFiles = (archived?.files || []).filter((file) => (
       (file.fileName || "").toUpperCase().startsWith(`${shipment.orderCode}_${document.id}`.toUpperCase())
     ));
-    const files = [
-      // Metadata từ Google Drive đứng trước dữ liệu cũ trong DB để luôn được ưu tiên.
-      ...driveFiles.map((file) => ({
+    const databaseFiles = (document.files?.length ? document.files : (document.urls?.length ? document.urls : document.url ? [document.url] : []).map((url) => ({
+      fileUrl: url,
+      referenceCode: undefined,
+      idChiTiet: undefined,
+      fileName: undefined,
+      uploadedAt: undefined,
+      uploadedBy: undefined,
+      uploadedByEmail: undefined,
+    }))).map((file, index) => ({
+      url: file.fileUrl,
+      fileName: file.fileName?.trim() || "",
+      uploadedAt: file.uploadedAt || "",
+      uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
+      label: [
+        file.referenceCode?.trim()
+          || shipment.database?.details.find((detail) => detail.id_chi_tiet === file.idChiTiet)?.ten_hang,
+        file.fileName?.trim() || t("documentFileIndex", { index: index + 1 }),
+      ].filter(Boolean).join(" — "),
+    }));
+    // Chỉ dùng một nguồn chính: hồ sơ lưu trữ lấy từ Drive, hồ sơ đang xử lý lấy từ DB.
+    const sourceFiles = archived?.archived
+      ? driveFiles.map((file) => ({
         url: file.fileUrl,
         fileName: file.fileName || "",
         uploadedAt: file.createdTime || "",
         uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
         label: file.fileName || "",
-      })),
-      ...(document.files?.length ? document.files : (document.urls?.length ? document.urls : document.url ? [document.url] : []).map((url) => ({
-        fileUrl: url,
-        referenceCode: undefined,
-        idChiTiet: undefined,
-        fileName: undefined,
-        uploadedAt: undefined,
-        uploadedBy: undefined,
-        uploadedByEmail: undefined,
-      }))).map((file, index) => ({
-        url: file.fileUrl,
-        fileName: file.fileName?.trim() || "",
-        uploadedAt: file.uploadedAt || "",
-        uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
-        label: [
-          file.referenceCode?.trim()
-            || shipment.database?.details.find((detail) => detail.id_chi_tiet === file.idChiTiet)?.ten_hang,
-          file.fileName?.trim() || t("documentFileIndex", { index: index + 1 }),
-        ].filter(Boolean).join(" — "),
-      })),
-      ...(localUploads[document.id] && !document.url
-        ? [{ url: localUploads[document.id], fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
-        : []),
-    ].filter((file, index, allFiles) => file.url && allFiles.findIndex((other) => other.url === file.url) === index);
+      }))
+      : [
+        ...databaseFiles,
+        ...(localUploads[document.id] && !document.url
+          ? [{ url: localUploads[document.id], fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
+          : []),
+      ];
+    const files = sourceFiles.filter((file, index, allFiles) => file.url && allFiles.findIndex((other) => other.url === file.url) === index);
     return { document, files };
   });
   const requiredDocumentsSorted = documentsSorted.filter((document) => !OPTIONAL_DOCUMENT_CODES.has(document.id.toUpperCase()));
@@ -2804,6 +2807,24 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
+                      {documentFiles.length === 1 && documentFiles[0]?.url && (
+                        <a
+                          href={toDocumentDownloadUrl(documentFiles[0].url)}
+                          download={documentFiles[0].fileName || undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(event) => event.stopPropagation()}
+                          title={t("downloadDocument")}
+                          aria-label={`${t("downloadDocument")} ${documentFiles[0].fileName || doc.name}`}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400 dark:hover:border-brand-500/40 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M12 3v12" />
+                            <path d="m7 10 5 5 5-5" />
+                            <path d="M5 21h14" />
+                          </svg>
+                        </a>
+                      )}
                       {doc.id === "TRA_CONG" && transportCodes.length > 1 && !isArchived && canUploadDocuments && canUploadDocumentType(user, doc.id) && (
                         <select
                           value={selectedTransportCode}
@@ -2843,23 +2864,40 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         <p className="px-2 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400">{t("selectDocumentFile")}</p>
                         <div className="max-h-48 space-y-1 overflow-y-auto custom-scrollbar">
                           {documentFiles.map((file, index) => (
-                            <button
-                              key={`${file.url}-${index}`}
-                              type="button"
-                              onClick={() => {
-                                setPreviewUrl(toDocumentPreviewUrl(file.url));
-                                setPreviewName(`${doc.name} — ${file.label}`);
-                                setIsPreviewCollapsed(false);
-                                setOpenDocumentFileListId(null);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-                            >
-                              <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-400">{doc.id === "BL" ? "B/L" : doc.id} {index + 1}</span>
-                              <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">
-                                <span className="block truncate">{file.fileName || file.label}</span>
-                                <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
-                              </span>
-                            </button>
+                            <div key={`${file.url}-${index}`} className="flex items-center gap-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewUrl(toDocumentPreviewUrl(file.url));
+                                  setPreviewName(`${doc.name} — ${file.label}`);
+                                  setIsPreviewCollapsed(false);
+                                  setOpenDocumentFileListId(null);
+                                }}
+                                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-gray-700 dark:text-gray-200"
+                              >
+                                <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-400">{doc.id === "BL" ? "B/L" : doc.id} {index + 1}</span>
+                                <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">
+                                  <span className="block truncate">{file.fileName || file.label}</span>
+                                  <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
+                                </span>
+                              </button>
+                              <a
+                                href={toDocumentDownloadUrl(file.url)}
+                                download={file.fileName || undefined}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(event) => event.stopPropagation()}
+                                title={t("downloadDocument")}
+                                aria-label={`${t("downloadDocument")} ${file.fileName || file.label}`}
+                                className="mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                  <path d="M12 3v12" />
+                                  <path d="m7 10 5 5 5-5" />
+                                  <path d="M5 21h14" />
+                                </svg>
+                              </a>
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -2922,7 +2960,27 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         <span className={`flex h-8 min-w-12 items-center justify-center rounded-md px-2 text-[11px] font-bold ${color.badge}`}>
                           {document.id}
                         </span>
-                        {hasFile && <span className={`h-2 w-2 rounded-full ${color.dot}`} title="Đã có file" />}
+                        <div className="flex items-center gap-2">
+                          {hasFile && files.length === 1 && files[0]?.url && (
+                            <a
+                              href={toDocumentDownloadUrl(files[0].url)}
+                              download={files[0].fileName || undefined}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(event) => event.stopPropagation()}
+                              title={t("downloadDocument")}
+                              aria-label={`${t("downloadDocument")} ${files[0].fileName || document.name}`}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M12 3v12" />
+                                <path d="m7 10 5 5 5-5" />
+                                <path d="M5 21h14" />
+                              </svg>
+                            </a>
+                          )}
+                          {hasFile && <span className={`h-2 w-2 rounded-full ${color.dot}`} title="Đã có file" />}
+                        </div>
                       </div>
                       <div className="min-w-0 w-full">
                         <p className="truncate text-xs font-semibold text-gray-700 dark:text-gray-200">{option?.label.split(" - ").slice(1).join(" - ") || document.name}</p>
@@ -2934,24 +2992,41 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       {openDocumentFileListId === document.id && files.length > 1 && (
                         <div className="w-full space-y-1 border-t border-gray-100 pt-2 dark:border-gray-800">
                           {files.map((file, index) => (
-                            <button
-                              key={`${file.url}-${index}`}
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setPreviewUrl(toDocumentPreviewUrl(file.url));
-                                setPreviewName(`${document.name} — ${file.label}`);
-                                setIsPreviewCollapsed(false);
-                                setOpenDocumentFileListId(null);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
-                            >
-                              <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-300">{document.id} {index + 1}</span>
-                              <span className="min-w-0 truncate">
-                                <span className="block truncate">{file.fileName || file.label}</span>
-                                <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
-                              </span>
-                            </button>
+                            <div key={`${file.url}-${index}`} className="flex items-center gap-1 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setPreviewUrl(toDocumentPreviewUrl(file.url));
+                                  setPreviewName(`${document.name} — ${file.label}`);
+                                  setIsPreviewCollapsed(false);
+                                  setOpenDocumentFileListId(null);
+                                }}
+                                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-gray-600 dark:text-gray-300"
+                              >
+                                <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-300">{document.id} {index + 1}</span>
+                                <span className="min-w-0 truncate">
+                                  <span className="block truncate">{file.fileName || file.label}</span>
+                                  <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
+                                </span>
+                              </button>
+                              <a
+                                href={toDocumentDownloadUrl(file.url)}
+                                download={file.fileName || undefined}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(event) => event.stopPropagation()}
+                                title={t("downloadDocument")}
+                                aria-label={`${t("downloadDocument")} ${file.fileName || file.label}`}
+                                className="mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                  <path d="M12 3v12" />
+                                  <path d="m7 10 5 5 5-5" />
+                                  <path d="M5 21h14" />
+                                </svg>
+                              </a>
+                            </div>
                           ))}
                         </div>
                       )}
@@ -3387,9 +3462,26 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               {archived?.files && archived.files.length > 0 && (
                 <div className="mt-4 flex flex-col gap-2">
                   {archived.files.map((file, fileIndex) => (
-                    <button key={file.fileId || file.fileUrl || `${file.fileName || "file"}-${fileIndex}`} type="button" onClick={() => { setPreviewUrl(toDocumentPreviewUrl(file.fileUrl)); setPreviewName(file.fileName || file.fileUrl); }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-                      {file.fileName || file.fileUrl}
-                    </button>
+                    <div key={file.fileId || file.fileUrl || `${file.fileName || "file"}-${fileIndex}`} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+                      <button type="button" onClick={() => { setPreviewUrl(toDocumentPreviewUrl(file.fileUrl)); setPreviewName(file.fileName || file.fileUrl); }} className="min-w-0 flex-1 truncate text-left text-xs text-gray-700 hover:text-brand-600 dark:text-gray-200 dark:hover:text-brand-300">
+                        {file.fileName || file.fileUrl}
+                      </button>
+                      <a
+                        href={toDocumentDownloadUrl(file.fileUrl)}
+                        download={file.fileName || undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={t("downloadDocument")}
+                        aria-label={`${t("downloadDocument")} ${file.fileName || file.fileUrl}`}
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 3v12" />
+                          <path d="m7 10 5 5 5-5" />
+                          <path d="M5 21h14" />
+                        </svg>
+                      </a>
+                    </div>
                   ))}
                 </div>
               )}

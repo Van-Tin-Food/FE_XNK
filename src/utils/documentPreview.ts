@@ -24,3 +24,20 @@ export function toDocumentPreviewUrl(value: string): string {
     return raw;
   }
 }
+
+/** Chuyển link Drive thành endpoint tải file trực tiếp. */
+export function toDocumentDownloadUrl(value: string): string {
+  const raw = value.trim();
+  if (!raw || raw.startsWith("blob:") || raw.startsWith("data:")) return raw;
+
+  try {
+    const url = new URL(raw);
+    if (!GOOGLE_DRIVE_HOSTS.has(url.hostname.toLowerCase())) return raw;
+    const fileId = getGoogleDriveFileId(url);
+    return fileId
+      ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`
+      : raw;
+  } catch {
+    return raw;
+  }
+}
