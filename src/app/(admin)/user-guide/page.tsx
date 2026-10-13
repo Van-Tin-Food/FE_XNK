@@ -2,52 +2,35 @@
 
 import { useLanguage } from "@/context/LanguageContext";
 
-const GUIDE_PHASES = [
-  {
-    titleKey: "guidePurchasePhaseTitle",
-    descriptionKey: "guidePurchasePhaseDescription",
-    resultKey: "guidePurchasePhaseResult",
-    startNumber: 1,
-    steps: [
-      ["guidePreparePiTitle", "guidePreparePiBody"],
-      ["guideCreateOrderTitle", "guideCreateOrderBody"],
-      ["guideConfirmOrderTitle", "guideConfirmOrderBody"],
-    ],
-  },
-  {
-    titleKey: "guideImportPhaseTitle",
-    descriptionKey: "guideImportPhaseDescription",
-    resultKey: "guideImportPhaseResult",
-    startNumber: 4,
-    steps: [
-      ["guideInvoicePackingTitle", "guideInvoicePackingBody"],
-      ["guideBillTitle", "guideBillBody"],
-      ["guideAllocateCargoTitle", "guideAllocateCargoBody"],
-      ["guideOtherDocumentsTitle", "guideOtherDocumentsBody"],
-      ["guideTrackTitle", "guideTrackBody"],
-    ],
-  },
-  {
-    titleKey: "guideWarehousePhaseTitle",
-    descriptionKey: "guideWarehousePhaseDescription",
-    resultKey: "guideWarehousePhaseResult",
-    startNumber: 9,
-    steps: [
-      ["guideTransportTitle", "guideTransportBody"],
-      ["guideFinishTitle", "guideFinishBody"],
-    ],
-  },
+const DOCUMENT_FOLDERS = [
+  ["01. PI Hợp đồng mua", "PI", "guideDrivePi"],
+  ["02. INV Hóa đơn", "INV", "guideDriveInv"],
+  ["03. BL Vận đơn", "BL", "guideDriveBl"],
+  ["04. PKL Đóng gói", "PKL", "guideDrivePkl"],
+  ["05. CO Giấy chứng nhận xuất xứ", "CO", "guideDriveCo"],
+  ["06. HC Giấy kiểm dịch y tế", "HC", "guideDriveHc"],
+  ["07. DON_KD Đơn kiểm dịch động vật", "DON_KD", "guideDriveDonKd"],
+  ["08. AN Thông báo hàng đến", "AN", "guideDriveAn"],
+  ["09. EDO Lệnh giao hàng điện tử", "EDO", "guideDriveEdo"],
+  ["10. CPN Chứng từ CPN quốc tế", "CPN", "guideDriveCpn"],
+  ["11. TK Tờ khai", "TK", "guideDriveTk"],
+  ["12. BB_LM Biên bản lấy mẫu", "BB_LM", "guideDriveBbLm"],
+  ["13. INSPECTION Ảnh-video kiểm dịch", "INSPECTION", "guideDriveInspection"],
+  ["14. PHI_TK Phí tờ khai", "PHI_TK", "guideDrivePhiTk"],
+  ["15. THUE_NK Nộp thuế nhập khẩu", "THUE_NK", "guideDriveThueNk"],
+  ["16. CSHT Phí cơ sở hạ tầng", "CSHT", "guideDriveCSHT"],
+  ["17. 15B Kết quả kiểm dịch mẫu 15B", "15B", "guideDrive15b"],
+  ["18. QDTQ Quyết định thông quan", "QDTQ", "guideDriveQdtq"],
+  ["19. MV Mã vạch", "MV", "guideDriveMv"],
+  ["20. TRA_CONG Trả công rỗng cho cảng", "TRA_CONG", "guideDriveTraCong"],
 ] as const;
 
-const GUIDE_TERMS = [
-  ["guideTermPi", "guideTermPiMeaning"],
-  ["guideTermInv", "guideTermInvMeaning"],
-  ["guideTermPkl", "guideTermPklMeaning"],
-  ["guideTermBl", "guideTermBlMeaning"],
-  ["guideTermOcr", "guideTermOcrMeaning"],
-  ["guideTermItemCode", "guideTermItemCodeMeaning"],
-  ["guideTermShippingDates", "guideTermShippingDatesMeaning"],
-  ["guideTermCoHc", "guideTermCoHcMeaning"],
+const NAMING_EXAMPLES = [
+  ["PI", "26009_PI.pdf", "guideNamePi"],
+  ["INV", "26009_INV.pdf", "guideNameInv"],
+  ["BL", "26009_BL.pdf", "guideNameBl"],
+  ["PKL", "26009_PKL.pdf", "guideNamePkl"],
+  ["TRA_CONG", "26009_TRA_CONG_CONTAINER001.pdf", "guideNameTraCong"],
 ] as const;
 
 export default function UserGuidePage() {
@@ -55,59 +38,87 @@ export default function UserGuidePage() {
 
   return (
     <div className="space-y-6 pb-8">
-      <header className="rounded-2xl border border-brand-100 bg-gradient-to-r from-brand-50 to-white p-5 dark:border-brand-500/20 dark:from-brand-500/10 dark:to-white/[0.02] sm:p-7">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t("userGuideTitle")}</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600 dark:text-gray-300">{t("userGuideSubtitle")}</p>
-        <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300">{t("guideProcessLine")}</p>
+      <header className="rounded-2xl border border-brand-100 bg-brand-50 p-5 dark:border-brand-500/20 dark:bg-brand-500/10 sm:p-7">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand-600 dark:text-brand-300">{t("guideDriveLabel")}</p>
+        <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{t("guideDriveTitle")}</h1>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-gray-600 dark:text-gray-300">{t("guideDriveSubtitle")}</p>
       </header>
 
+      
+
       <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6">
-        <h2 className="text-base font-bold text-gray-900 dark:text-white">{t("guideTermsTitle")}</h2>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("guideTermsDescription")}</p>
-        <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {GUIDE_TERMS.map(([termKey, meaningKey]) => (
-            <div key={termKey} className="rounded-xl bg-gray-50 p-3 dark:bg-gray-800/60">
-              <dt className="text-sm font-bold text-brand-600 dark:text-brand-300">{t(termKey)}</dt>
-              <dd className="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-300">{t(meaningKey)}</dd>
-            </div>
-          ))}
-        </dl>
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t("guideDriveTreeTitle")}</h2>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("guideDriveTreeDescription")}</p>
+        <div className="mt-5 rounded-xl border border-blue-light-200 bg-blue-light-50 p-4 text-sm leading-7 text-gray-800 dark:border-blue-light-500/20 dark:bg-blue-light-500/10 dark:text-gray-200">
+          <div>Shared Drive/</div>
+          <div className="pl-4">└── 01.XNK_Documents (Tai Lieu XNK)/</div>
+          <div className="pl-8">├── XNK_DATA_GOC/</div>
+          <div className="pl-12">├── 01. PI Hợp đồng mua/</div>
+          <div className="pl-12">├── 02. INV Hóa đơn/</div>
+          <div className="pl-12">├── 03. BL Vận đơn/</div>
+          <div className="pl-12">├── ... các thư mục chứng từ ...</div>
+          <div className="pl-12">└── 20. TRA_CONG Trả công rỗng cho cảng/</div>
+          <div className="mt-2 border-t border-blue-light-200 pt-2 dark:border-blue-light-500/20">└── DATA_COMPLETE/</div>
+          <div className="pl-8">└── mã hợp đồng/</div>
+        </div>
+        <p className="mt-4 text-sm leading-6 text-gray-600 dark:text-gray-300">{t("guideDriveArchiveDescription")}</p>
       </section>
 
-      {GUIDE_PHASES.map((phase, phaseIndex) => (
-        <section key={phase.titleKey} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="flex flex-wrap items-start gap-4 border-b border-gray-100 bg-gray-50/70 p-5 dark:border-gray-800 dark:bg-gray-800/40 sm:p-6">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-sm font-bold text-white">
-              {String(phaseIndex + 1).padStart(2, "0")}
-            </span>
-            <div className="min-w-0">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t(phase.titleKey)}</h2>
-              <p className="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-300">{t(phase.descriptionKey)}</p>
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t("guideDriveNameTitle")}</h2>
+        <p className="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-300">{t("guideDriveNameRule")}</p>
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+          <span className="text-sm font-bold text-emerald-800 dark:text-emerald-300">mã_hợp_đồng_mã_chứng_từ</span>
+          <p className="mt-2 text-sm leading-6 text-emerald-800 dark:text-emerald-200">{t("guideDriveNameParts")}</p>
+        </div>
+        <div className="mt-5 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+          {NAMING_EXAMPLES.map(([code, fileName, descriptionKey]) => (
+            <div key={code} className="grid gap-2 border-b border-gray-100 px-4 py-3 last:border-b-0 dark:border-gray-800 sm:grid-cols-[100px_250px_1fr] sm:items-center sm:gap-4">
+              <span className="text-sm font-bold text-gray-800 dark:text-gray-200">{code}</span>
+              <span className="break-all text-xs font-semibold text-brand-700 dark:text-brand-300">{fileName}</span>
+              <p className="text-sm leading-5 text-gray-600 dark:text-gray-300">{t(descriptionKey)}</p>
             </div>
-          </div>
+          ))}
+        </div>
+      </section>
 
-          <ol className="grid gap-4 p-5 sm:p-6 lg:grid-cols-2">
-            {phase.steps.map(([titleKey, bodyKey], stepIndex) => (
-                <li key={titleKey} className="flex gap-3 rounded-xl border border-gray-100 p-4 dark:border-gray-800">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-xs font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">
-                    {String(phase.startNumber + stepIndex).padStart(2, "0")}
-                  </span>
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{t(titleKey)}</h3>
-                    <p className="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300">{t(bodyKey)}</p>
-                  </div>
-                </li>
-              ))}
-          </ol>
-          <p className="mx-5 mb-5 rounded-xl border border-success-100 bg-success-50 px-4 py-3 text-sm leading-6 text-success-800 dark:border-success-500/20 dark:bg-success-500/10 dark:text-success-300 sm:mx-6 sm:mb-6">
-            <span className="font-semibold">{t("guidePhaseResultLabel")}: </span>{t(phase.resultKey)}
-          </p>
-        </section>
-      ))}
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t("guideDriveFolderRulesTitle")}</h2>
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {DOCUMENT_FOLDERS.map(([folder, code, descriptionKey]) => (
+            <div key={code} className="rounded-xl border border-gray-100 p-4 dark:border-gray-800">
+              <div className="flex items-start gap-3">
+                <span className="rounded-lg bg-gray-100 px-2 py-1 text-xs font-bold text-gray-700 dark:bg-gray-800 dark:text-gray-300">{code}</span>
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{folder}</p>
+                  <p className="mt-1 text-sm leading-5 text-gray-600 dark:text-gray-300">{t(descriptionKey)}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
-      <section className="rounded-2xl border border-warning-200 bg-warning-50 p-5 dark:border-warning-500/20 dark:bg-warning-500/10 sm:p-6">
-        <h2 className="font-semibold text-warning-800 dark:text-warning-300">{t("guideImportantTitle")}</h2>
-        <p className="mt-2 text-sm leading-6 text-warning-800/90 dark:text-warning-200/90">{t("guideImportantBody")}</p>
+      <section className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 dark:border-indigo-500/20 dark:bg-indigo-500/10 sm:p-6">
+        <h2 className="text-lg font-bold text-indigo-900 dark:text-indigo-300">{t("guideDriveSyncTitle")}</h2>
+        <ol className="mt-4 grid gap-3 md:grid-cols-4">
+          {["guideDriveSyncOne", "guideDriveSyncTwo", "guideDriveSyncThree", "guideDriveSyncFour"].map((stepKey, index) => (
+            <li key={stepKey} className="rounded-xl border border-indigo-200 bg-white/70 p-4 dark:border-indigo-500/20 dark:bg-white/[0.04]">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-xs font-bold text-white">{index + 1}</span>
+              <p className="mt-3 text-sm leading-6 text-indigo-900 dark:text-indigo-200">{t(stepKey)}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-500/20 dark:bg-amber-500/10 sm:p-6">
+        <h2 className="font-semibold text-amber-900 dark:text-amber-300">{t("guideDriveImportantTitle")}</h2>
+        <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-amber-800 dark:text-amber-200">
+          <li>{t("guideDriveImportantOne")}</li>
+          <li>{t("guideDriveImportantTwo")}</li>
+          <li>{t("guideDriveImportantThree")}</li>
+          <li>{t("guideDriveImportantFour")}</li>
+        </ul>
       </section>
     </div>
   );
