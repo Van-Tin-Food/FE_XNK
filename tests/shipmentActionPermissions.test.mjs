@@ -10,11 +10,11 @@ const user = (role, session) => ({ username: role, name: role, role, session });
 
 // Ma trận quyền giao diện mong đợi. Sửa quyền trong shipmentActionPermissions.ts thì cập nhật bảng này.
 const EXPECTED = {
-  "it/manage": ["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs", "viewEmailTools", "viewDocumentSync", "viewTracking"],
-  "logistic/manage": ["viewTracking", "exportShipments", "viewPurchaseAmounts", "createShipment", "uploadDocument", "passDocument", "editShipmentDetails", "cancelShipment", "syncDocuments", "manageMasterData"],
-  "logistic/view": ["viewTracking", "exportShipments", "viewPurchaseAmounts"],
-  "van_chuyen/manage": ["viewTracking", "exportShipments", "uploadDocument", "passDocument", "archiveDocuments", "editReturnItem", "syncDocuments", "manageMasterData"],
-  "van_chuyen/view": ["viewTracking", "exportShipments"],
+  "it/manage": ["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs", "viewEmailTools", "viewDocumentSync", "viewTracking", "useAiChat"],
+  "logistic/manage": ["viewTracking", "exportShipments", "viewPurchaseAmounts", "useAiChat", "createShipment", "uploadDocument", "passDocument", "editShipmentDetails", "cancelShipment", "syncDocuments", "manageMasterData"],
+  "logistic/view": ["viewTracking", "exportShipments", "viewPurchaseAmounts", "useAiChat"],
+  "van_chuyen/manage": ["viewTracking", "exportShipments", "useAiChat", "uploadDocument", "passDocument", "archiveDocuments", "editReturnItem", "syncDocuments", "manageMasterData"],
+  "van_chuyen/view": ["viewTracking", "exportShipments", "useAiChat"],
 };
 EXPECTED["it/view"] = EXPECTED["it/manage"];
 

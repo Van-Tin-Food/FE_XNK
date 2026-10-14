@@ -56,6 +56,11 @@ tài liệu đã cũ (ví dụ `purchase-process/`, `transport-process/` không 
   `returnItemsFromRelations`. Danh mục NCC/hãng tàu/kho dùng `listCatalogRows` (cache 5 phút theo token,
   tự xoá khi tạo/sửa); màn danh mục vẫn dùng `listDatabaseRows` để luôn mới.
 
+## Chatbox AI
+
+- `src/components/ai/AiChatBox.tsx` (nút nổi trong layout admin, quyền `useAiChat`) gọi `src/services/aiChatApi.ts`.
+  Bảng kết quả lấy từ `results` do BE trả (dữ liệu DB), không lấy từ chữ AI viết. Không gọi OpenRouter từ trình duyệt.
+
 ## Quy trình khi sửa
 
 1. Đọc trang/component gần nhất đang làm việc tương tự, và route/controller BE của API liên quan

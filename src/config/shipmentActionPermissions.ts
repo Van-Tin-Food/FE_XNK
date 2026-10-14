@@ -28,6 +28,7 @@ export type ShipmentActionPermissionKey =
   | "viewDocumentSync"
   | "syncDocuments"
   | "exportShipments"
+  | "useAiChat"            // chatbox AI tra cứu đơn hàng (chỉ đọc)
   // Dữ liệu nhạy cảm (đồng bộ với SENSITIVE_DATA_VIEWERS trong be/src/config/rbac.js):
   | "viewPurchaseAmounts"   // đơn giá, tổng tiền hàng
   | "viewSupplierContact";  // email, SĐT, địa chỉ nhà cung cấp
@@ -44,19 +45,19 @@ type ActionAccess = {
 const ROLE_ACCESS: Record<Exclude<RbacRole, "admin">, ActionAccess> = {
   it: {
     // IT chỉ được xem dữ liệu. Session view/manage không làm thay đổi quyền IT.
-    view: ["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs", "viewEmailTools", "viewDocumentSync", "viewTracking"],
+    view: ["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs", "viewEmailTools", "viewDocumentSync", "viewTracking", "useAiChat"],
     manage: [],
   },
   logistic: {
     // Xuất Excel chỉ đọc dữ liệu nên có ở cả session view và manage.
-    view: ["viewTracking", "exportShipments", "viewPurchaseAmounts"],
+    view: ["viewTracking", "exportShipments", "viewPurchaseAmounts", "useAiChat"],
     manage: [
       "createShipment", "uploadDocument", "passDocument", "editShipmentDetails",
       "cancelShipment", "syncDocuments", "manageMasterData",
     ],
   },
   van_chuyen: {
-    view: ["viewTracking", "exportShipments"],
+    view: ["viewTracking", "exportShipments", "useAiChat"],
     manage: ["uploadDocument", "passDocument", "archiveDocuments", "editReturnItem", "syncDocuments", "manageMasterData"],
   },
 };
@@ -100,7 +101,7 @@ const ALL_SHIPMENT_ACTIONS: Record<ShipmentActionPermissionKey, true> = {
   viewUsers: true, manageUsers: true, viewMasterData: true, viewEmailLogs: true,
   manageMasterData: true, registerUser: true, updateUserPassword: true, viewEmailTools: true,
   viewTracking: true, sendEmail: true, viewDocumentSync: true, syncDocuments: true,
-  exportShipments: true, viewPurchaseAmounts: true, viewSupplierContact: true,
+  exportShipments: true, useAiChat: true, viewPurchaseAmounts: true, viewSupplierContact: true,
 };
 
 export const SHIPMENT_ACTION_PERMISSIONS = Object.fromEntries(

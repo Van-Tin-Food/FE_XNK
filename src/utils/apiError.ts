@@ -85,6 +85,19 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
     case "INVALID_CONTAINER_FOLDER":
     case "CONTAINER_FOLDER_RENAME_REQUIRED":
       return backendMessage || "Thư mục container không đúng định dạng. Vui lòng kiểm tra lại.";
+    case "AI_CHAT_NOT_CONFIGURED":
+      return "Chatbox AI chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
+    case "AI_CHAT_TIMEOUT":
+      return "Chatbox AI phản hồi quá lâu. Vui lòng thử lại.";
+    case "AI_CHAT_RATE_LIMITED":
+      return "Bạn hỏi quá nhanh hoặc dịch vụ AI đang quá tải. Vui lòng chờ một chút rồi thử lại.";
+    case "AI_CHAT_UPSTREAM_ERROR":
+    case "AI_CHAT_INVALID_RESPONSE":
+    case "AI_CHAT_FAILED":
+      return "Chatbox AI tạm thời gặp lỗi. Vui lòng thử lại sau.";
+    case "AI_CHAT_QUESTION_REQUIRED":
+    case "AI_CHAT_QUESTION_TOO_LONG":
+      return backendMessage || "Câu hỏi chưa hợp lệ.";
     case "EMAIL_CONFIG_MISSING":
       return "Chức năng gửi email chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
     default:

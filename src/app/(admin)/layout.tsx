@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { useSidebar } from "@/context/SidebarContext";
+import AiChatBox from "@/components/ai/AiChatBox";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar from "@/layout/AppSidebar";
 import Backdrop from "@/layout/Backdrop";
@@ -52,7 +53,8 @@ export default function AdminLayout({
         {/* Page Content */}
         <div className="mx-auto min-w-0 max-w-(--breakpoint-2xl) p-4 md:p-6">{children}</div>
       </div>
-      {/* Nút gửi email nổi góc phải dưới */}
+      {/* Chatbox AI tra cứu đơn hàng: nút nổi góc phải dưới */}
+      <AiChatBox />
     </div>
   );
 }

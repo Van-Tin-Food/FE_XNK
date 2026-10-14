@@ -3,7 +3,7 @@ import React from "react";
 import ShipmentDashboard from "@/components/shipment/ShipmentDashboard";
 
 export const metadata: Metadata = {
-  title: "Dashboard Xuất Nhập Khẩu | Quản lý Shipment",
+  title: "Dashboard",
   description: "Hệ thống theo dõi và quản lý lô hàng xuất nhập khẩu, hải quan và vận chuyển.",
 };
 

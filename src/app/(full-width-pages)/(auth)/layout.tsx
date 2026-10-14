@@ -19,7 +19,7 @@ export default function AuthLayout({
               <div className="flex flex-col items-center max-w-xs">
                 <Link href="/" className="mb-5 flex items-center gap-3 text-2xl font-semibold text-white">
                   <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-500 text-sm font-bold">XNK</span>
-                  Quản lý xuất nhập khẩu
+                Operation Dashboard 
                 </Link>
                 <p className="text-center text-gray-400 dark:text-white/60">
                   Theo dõi chứng từ, hành trình và tiến độ đơn hàng tập trung.
