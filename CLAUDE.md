@@ -6,7 +6,8 @@ nhập khẩu. Backend ở repo riêng `../be` (Express + PostgreSQL).
 Quy tắc bắt buộc (RBAC UI, dịch, API, trạng thái, phân trang, responsive, kiểm tra): @.claude/docs/frontend-rules.md
 
 Tài liệu tham khảo: `FUNCTIONS_AND_OPERATIONS.md` (kiến trúc), `README.md`. Một số đường dẫn trong
-tài liệu đã cũ (ví dụ `purchase-process/`, `transport-process/` không còn) — luôn đối chiếu code.
+tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. Hệ thống chỉ có một quy trình đơn hàng (không còn màn
+`purchase-process` / `transport-process` / `logistics-process`, không còn role `mua_hang`).
 
 ## Lệnh
 

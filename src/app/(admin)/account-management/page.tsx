@@ -161,7 +161,7 @@ export default function AccountManagementPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-800 dark:bg-white/[0.03]">
+      <div className="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-800 dark:bg-gray-900">
         <TabButton active={activeTab === "users"} onClick={() => setActiveTab("users")}>{t("accountList")}</TabButton>
         {canEditUsers && <TabButton active={activeTab === "register"} onClick={() => setActiveTab("register")}>{t("registerAccount")}</TabButton>}
         {canEditUsers && <TabButton active={activeTab === "password"} onClick={() => setActiveTab("password")}>{t("resetPassword")}</TabButton>}
@@ -218,7 +218,7 @@ function UserList({ users, total, loading, error, query, page, totalPages, pageS
 }) {
   const { t } = useLanguage();
   return (
-    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
       <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
         <div><h2 className="font-semibold text-gray-800 dark:text-white/90">{t("systemUsers")}</h2><p className="text-xs text-gray-400">{t("accountCount", { count: total })}</p></div>
         <div className="flex w-full gap-2 sm:w-auto">

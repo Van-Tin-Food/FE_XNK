@@ -171,7 +171,7 @@ function SupplierList({ suppliers, suggestionSuppliers, query, selectedIds, allS
 }) {
   const { t } = useLanguage();
   return (
-    <div className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white xl:min-h-[520px] dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white xl:min-h-[520px] dark:border-gray-800 dark:bg-gray-900">
       <div className="border-b border-gray-100 p-4 dark:border-gray-800">
         <h2 className="font-semibold text-gray-800 dark:text-white/90">{t("suppliers")}</h2>
         <SearchSuggestions value={query} onChange={onQuery} suggestions={suggestionSuppliers.flatMap((supplier) => [supplier.ten_ncc, supplier.email]).filter((value): value is string => Boolean(value))} placeholder={t("emailSearchSupplier")} ariaLabel={t("emailSearchSupplier")} className="mt-3 h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
@@ -213,7 +213,7 @@ function Compose({ selectedSuppliers, message, sending, canSend, canSubmit, subj
 }) {
   const { t } = useLanguage();
   return (
-    <div className="flex min-w-0 flex-col rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 xl:min-h-[520px] dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="flex min-w-0 flex-col rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 xl:min-h-[520px] dark:border-gray-800 dark:bg-gray-900">
       <div className="border-b border-gray-100 pb-4 dark:border-gray-800">
         <h2 className="font-semibold text-gray-800 dark:text-white/90">{t("emailComposeTitle")}</h2>
         <p className="mt-1 text-xs text-gray-500">{t("emailPerSupplier")}</p>

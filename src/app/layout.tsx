@@ -13,7 +13,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi">
-      <body className="dark:bg-gray-900">
+      <body>
         <LanguageProvider>
           <ThemeProvider>
             <AuthProvider>

@@ -323,7 +323,7 @@ export default function ShipmentDashboard() {
 
       {/* Table */}
       {isLoading ? (
-        <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03] p-12 flex items-center justify-center">
+        <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 p-12 flex items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-gray-400">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="animate-spin text-brand-400">
               <polyline points="23 4 23 10 17 10"/>

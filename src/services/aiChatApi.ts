@@ -36,7 +36,8 @@ export interface AiChatTurn {
 export const AI_CHAT_MAX_QUESTION_LENGTH = 500;
 
 /** Hỏi chatbox AI qua gateway Next → BE; trình duyệt không bao giờ gọi OpenRouter trực tiếp. */
-export async function askAiChat(question: string, history: AiChatTurn[], signal?: AbortSignal): Promise<AiChatAnswer> {
+/** language: ngôn ngữ giao diện, BE trả nhãn bảng và câu trả lời theo ngôn ngữ này. */
+export async function askAiChat(question: string, history: AiChatTurn[], language: "vi" | "en", signal?: AbortSignal): Promise<AiChatAnswer> {
   const apiPath = "/api/ai-chat/ask";
   const token = getStoredUser()?.token?.trim();
   let response: Response;
@@ -50,7 +51,7 @@ export async function askAiChat(question: string, history: AiChatTurn[], signal?
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ question, history }),
+      body: JSON.stringify({ question, history, language }),
     });
   } catch (error) {
     if (error instanceof TypeError) throw createNetworkApiError("Chatbox AI", "POST", apiPath, error);

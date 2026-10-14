@@ -232,14 +232,14 @@ export default function MasterDataPage() {
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("masterDataDescription")}</p>
       </div>
       {!hasDedicatedCatalogRoute && (
-        <div className="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-800 dark:bg-white/[0.03]">
+        <div className="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-800 dark:bg-gray-900">
           {(Object.keys(ENTITY_CONFIG) as EntityKey[]).map((key) => (
             <button key={key} type="button" onClick={() => setActive(key)} className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-semibold sm:flex-none sm:px-4 ${active === key ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}>{t(ENTITY_CONFIG[key].titleKey)}</button>
           ))}
         </div>
       )}
       <div className="grid gap-5 2xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
-        <div className="min-w-0 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+        <div className="min-w-0 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
             <div><h2 className="font-semibold text-gray-800 dark:text-white">{t("catalogList", { catalog: t(config.titleKey) })}</h2><p className="text-xs text-gray-400">{t("dataCount", { count: filteredRows.length })}</p></div>
             <div className="flex w-full min-w-0 gap-2 sm:w-auto"><SearchSuggestions value={query} onChange={(value) => { setQuery(value); setPage(1); }} suggestions={rows.flatMap((row) => listFields.map((field) => String(row[field.key] ?? "")))} placeholder={t("searchPlaceholderShort")} ariaLabel={t("searchPlaceholderShort")} className="h-10 min-w-0 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /><button type="button" onClick={() => void loadRows()} className="shrink-0 whitespace-nowrap rounded-xl border border-gray-200 px-3 text-sm font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300">{t("refreshData")}</button></div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@/context/AuthContext";
-import { completeGoogleSignIn, GOOGLE_MFA_STORAGE_KEY } from "@/services/authApi";
+import { completeGoogleSignIn, GOOGLE_MFA_STORAGE_KEY, GoogleConsentRequiredError } from "@/services/authApi";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -10,6 +10,8 @@ interface PendingMfa {
   pendingToken?: string;
   state: string;
   mode?: "mfa" | "direct";
+  /** Đã chuyển sang màn hình cấp quyền lại một lần, không lặp lại nữa. */
+  consentRetried?: boolean;
   createdAt: number;
 }
 
@@ -78,6 +80,17 @@ function GoogleCallback() {
         window.location.replace("/");
       })
       .catch((err) => {
+        // Quyền Google đã lưu hết hạn/lỗi: chuyển sang màn hình cấp quyền lại (chỉ một lần).
+        if (err instanceof GoogleConsentRequiredError && !pending.consentRetried) {
+          window.sessionStorage.setItem(GOOGLE_MFA_STORAGE_KEY, JSON.stringify({
+            ...pending,
+            state: err.state,
+            consentRetried: true,
+            createdAt: Date.now(),
+          } satisfies PendingMfa));
+          window.location.href = err.googleAuthUrl;
+          return;
+        }
         fail(err instanceof Error ? err.message : "Không thể xác thực đăng nhập Google.");
       });
   }, [searchParams, setUser]);

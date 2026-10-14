@@ -55,7 +55,7 @@ export default function UserGuidePage() {
 
       
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6">
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900 sm:p-6">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t("guideDriveTreeTitle")}</h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("guideDriveTreeDescription")}</p>
         <div className="mt-5 rounded-xl border border-blue-light-200 bg-blue-light-50 p-4 text-sm leading-7 text-gray-800 dark:border-blue-light-500/20 dark:bg-blue-light-500/10 dark:text-gray-200">
@@ -73,7 +73,7 @@ export default function UserGuidePage() {
         <p className="mt-4 text-sm leading-6 text-gray-600 dark:text-gray-300">{t("guideDriveArchiveDescription")}</p>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6">
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900 sm:p-6">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t("guideDriveNameTitle")}</h2>
         <p className="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-300">{t("guideDriveNameRule")}</p>
         <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/10">
@@ -91,7 +91,7 @@ export default function UserGuidePage() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6">
+      <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900 sm:p-6">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t("guideDriveFolderRulesTitle")}</h2>
         <div className="mt-4 flex flex-wrap gap-3">
           {driveLinks.source && <a href={driveLinks.source} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-lg border border-blue-light-200 bg-blue-light-50 px-3 py-2 text-sm font-semibold text-blue-light-700 transition hover:bg-blue-light-100 dark:border-blue-light-500/30 dark:bg-blue-light-500/10 dark:text-blue-light-300 dark:hover:bg-blue-light-500/20">

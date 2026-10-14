@@ -26,13 +26,14 @@ Frontend là giao diện người dùng của phần mềm quản lý xuất nh�
 
 | Nhóm chức năng | Nội dung | Màn hình chính |
 |---|---|---|
-| **Quy trình mua hàng** | Hợp đồng mua hàng, chi tiết hàng hoá, item code nhà máy | `purchase-process` |
-| **Quy trình vận chuyển** | Lô hàng XNK (B/L, cảng đi/đến, ETD/ETA/ATA), container, chi tiết container, vận chuyển container | `transport-process` |
+| **Quản lý đơn hàng (một quy trình)** | Mỗi đơn đi một luồng: mua hàng (hợp đồng, hàng hoá, item code nhà máy) → XNK (B/L, cảng, ETD/ETA/ATA, container) → vận chuyển về kho / trả cont | Dashboard (trang chủ) + cửa sổ chi tiết đơn |
 | **Dữ liệu gốc (master data)** | Nhà cung cấp, hãng tàu, kho | `master-data` |
 | **Chứng từ** | Bộ chứng từ trên Google Drive (PI, INV, B/L, PKL, CO…), theo dõi tiến độ | `ShipmentDashboard` |
 | **OCR chứng từ** | Tải lên PDF/ảnh → tự bóc tách dữ liệu bằng OCR + AI | dùng trong form chứng từ |
 | **Email** | Gửi email liên hệ nhà cung cấp, lưu lịch sử gửi | `email` |
-| **Tra cứu hãng tàu** | Tra cứu vị trí container theo số B/L với 9 hãng tàu | `transport-process` |
+| **Tra cứu hãng tàu** | Tra cứu vị trí container theo số B/L với 9 hãng tàu | Tab "Hành trình" trong chi tiết đơn |
+| **Chatbox AI** | Hỏi đáp tiếng Việt / tiếng Anh về đơn hàng (chỉ đọc dữ liệu) | Nút nổi góc phải dưới |
+| **Đồng bộ chứng từ** | Quét Google Drive, tiếp nhận file chưa có trong DB | `document-sync` |
 | **Quản trị** | Tài khoản & phân quyền, nhật ký hoạt động, hướng dẫn sử dụng | `account-management`, `activity-logs`, `user-guide` |
 
 ---
@@ -86,8 +87,7 @@ fe/src/
 ├── app/
 │   ├── (admin)/                 # Các trang trong layout quản trị (có sidebar)
 │   │   ├── page.tsx             #   Trang chủ — Dashboard lô hàng
-│   │   ├── purchase-process/    #   Quy trình mua hàng
-│   │   ├── transport-process/   #   Quy trình vận chuyển
+│   │   ├── document-sync/       #   Đồng bộ chứng từ Google Drive ↔ DB
 │   │   ├── master-data/         #   Dữ liệu gốc (NCC, hãng tàu, kho)
 │   │   ├── email/               #   Gửi email + lịch sử
 │   │   ├── account-management/  #   Quản lý tài khoản

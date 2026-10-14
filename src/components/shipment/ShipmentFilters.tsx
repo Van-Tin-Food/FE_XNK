@@ -95,7 +95,7 @@ export default function ShipmentFilters({
     filter.vessel;
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900">
       {/* Row 1: Search + Status */}
       <div className="order-2 flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap">
         {/* Search: mã đơn + tên hàng */}

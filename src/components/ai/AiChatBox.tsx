@@ -3,6 +3,7 @@
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
+import type { ApiError } from "@/utils/apiError";
 import { AI_CHAT_MAX_QUESTION_LENGTH, askAiChat, type AiChatResult, type AiChatSection, type AiChatTurn } from "@/services/aiChatApi";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
@@ -16,8 +17,43 @@ interface ChatMessage {
   retryQuestion?: string;
 }
 
+// Mã lỗi BE -> câu thông báo theo ngôn ngữ giao diện (getFriendlyMessage chỉ có tiếng Việt).
+const ERROR_KEYS: Record<string, string> = {
+  AI_CHAT_NOT_CONFIGURED: "aiChatErrorNotConfigured",
+  AI_CHAT_TIMEOUT: "aiChatErrorTimeout",
+  AI_CHAT_RATE_LIMITED: "aiChatErrorRateLimited",
+  AI_CHAT_QUESTION_REQUIRED: "aiChatErrorQuestion",
+  AI_CHAT_QUESTION_TOO_LONG: "aiChatErrorQuestion",
+};
+
+function chatErrorMessage(error: unknown, t: (key: string) => string): string {
+  const apiError = error as ApiError | undefined;
+  const key = apiError?.code ? ERROR_KEYS[apiError.code] : undefined;
+  if (key) return t(key);
+  if (apiError?.status === 401) return t("aiChatErrorSession");
+  if (apiError?.status === 403) return t("aiChatErrorForbidden");
+  return t("aiChatError");
+}
+
 const SUGGESTION_KEYS = ["aiChatSuggestUpcoming", "aiChatSuggestInDays", "aiChatSuggestOrder", "aiChatSuggestStats", "aiChatSuggestMissing"];
 const HISTORY_TURNS = 6;
+
+/** Icon chatbox AI: đầu robot kèm tia sáng ✦. */
+function AiBotIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 3.5V6" />
+      <circle cx="10" cy="2.6" r="0.9" fill="currentColor" stroke="none" />
+      <rect x="3" y="6" width="14" height="11" rx="3.5" />
+      <path d="M1.5 10.5v3M18.5 10.5v3" />
+      <circle cx="7.5" cy="11" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="12.5" cy="11" r="1.1" fill="currentColor" stroke="none" />
+      <path d="M8 14.2c.6.5 1.2.7 2 .7s1.4-.2 2-.7" />
+      <path d="M19.5 15.5l.6 1.5 1.4.6-1.4.6-.6 1.5-.6-1.5-1.4-.6 1.4-.6z" fill="currentColor" strokeWidth="1" />
+      <path d="M21 2.5l.4 1 1 .4-1 .4-.4 1-.4-1-1-.4 1-.4z" fill="currentColor" strokeWidth="0.8" />
+    </svg>
+  );
+}
 
 /** Một bảng kết quả do backend mô tả. Màn hẹp: mỗi dòng thành thẻ "nhãn: giá trị"; rộng hơn là bảng. */
 function SectionTable({ section }: { section: AiChatSection }) {
@@ -116,7 +152,7 @@ function ResultBlock({ result }: { result: AiChatResult }) {
 /** Chatbox AI tra cứu đơn hàng (thử nghiệm, chỉ đọc). Gọi BE; BE gọi OpenRouter và truy vấn PostgreSQL. */
 export default function AiChatBox() {
   const { user } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -157,14 +193,14 @@ export default function AiChatBox() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const response = await askAiChat(question, history, controller.signal);
+      const response = await askAiChat(question, history, language, controller.signal);
       setMessages((current) => [...current, { id: nextId.current++, role: "assistant", content: response.answer, results: response.results }]);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setMessages((current) => [...current, {
         id: nextId.current++,
         role: "assistant",
-        content: error instanceof Error ? error.message : t("aiChatError"),
+        content: chatErrorMessage(error, t),
         error: true,
         retryQuestion: question,
       }]);
@@ -172,7 +208,7 @@ export default function AiChatBox() {
       setIsSending(false);
       abortRef.current = null;
     }
-  }, [isSending, messages, t]);
+  }, [isSending, language, messages, t]);
 
   if (!canUse) return null;
 
@@ -191,12 +227,9 @@ export default function AiChatBox() {
           onClick={() => setIsOpen(true)}
           aria-label={t("aiChatOpen")}
           title={t("aiChatOpen")}
-          className="fixed bottom-4 right-4 z-[9990] inline-flex h-14 w-14 items-center justify-center rounded-full bg-brand-500 text-white shadow-theme-lg transition hover:bg-brand-600 focus:outline-none focus:ring-4 focus:ring-brand-500/30 sm:bottom-6 sm:right-6"
+          className="fixed bottom-4 right-4 z-[9990] inline-flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-violet-600 text-white shadow-theme-lg ring-4 ring-white/70 transition hover:scale-105 hover:from-brand-600 hover:to-violet-700 focus:outline-none focus:ring-brand-500/30 sm:bottom-6 sm:right-6 dark:ring-gray-900/70"
         >
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            <path d="M8 9h8M8 13h5" />
-          </svg>
+          <AiBotIcon size={28} />
         </button>
       )}
 
@@ -208,8 +241,8 @@ export default function AiChatBox() {
           className="fixed inset-0 z-[100000] flex flex-col bg-white dark:bg-gray-900 sm:inset-auto sm:z-[9990] sm:bottom-6 sm:right-6 sm:h-[min(680px,calc(100dvh-6rem))] sm:w-[480px] sm:rounded-2xl sm:border sm:border-gray-200 sm:shadow-theme-lg xl:w-[600px] dark:sm:border-gray-800"
         >
           <div className="flex shrink-0 items-center gap-3 border-b border-gray-100 px-4 py-3 dark:border-gray-800">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-6a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z" /><circle cx="9" cy="13" r="1" /><circle cx="15" cy="13" r="1" /></svg>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-violet-600 text-white">
+              <AiBotIcon size={20} />
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-gray-800 dark:text-white/90">{t("aiChatTitle")}</p>

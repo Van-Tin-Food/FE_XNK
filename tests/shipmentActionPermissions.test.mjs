@@ -32,7 +32,8 @@ test("admin can perform every action", () => {
   for (const action of ALL_ACTIONS) assert.equal(canPerformShipmentAction(user("admin", "view"), action), true, action);
 });
 
-test("unknown roles get nothing", () => {
+// mua_hang là role đã bỏ (không còn tách quy trình mua hàng / logistics); nhap_kho là alias cũ không còn chuẩn hoá.
+test("removed or unknown roles get nothing", () => {
   for (const role of ["mua_hang", "nhap_kho", ""]) {
     assert.deepEqual(ALL_ACTIONS.filter((action) => canPerformShipmentAction(user(role, "manage"), action)), [], role);
   }

@@ -72,11 +72,16 @@
   --color-gray-400: #98a2b3;
   --color-gray-500: #667085;
   --color-gray-600: #475467;
-  --color-gray-700: #344054;
-  --color-gray-800: #1d2939;
-  --color-gray-900: #101828;
-  --color-gray-950: #0c111d;
-  --color-gray-dark: #1a2231;
+  --color-gray-700: #3a3f4a;
+  --color-gray-800: #2a2e37;
+  --color-gray-900: #1e2129;
+  --color-gray-950: #121419;
+  --color-gray-dark: #23272f;
+
+  /* Nền trang (canvas): sáng là xám lạnh nhạt để thẻ trắng nổi lên; tối là bậc tối nhất, bề mặt dùng gray-900. */
+  --color-canvas: #f3f5f8;
+  /* Tối: nền xám than dịu (không đen tuyền); thẻ, sidebar, header, modal là bề mặt đặc gray-900 sáng hơn một bậc. */
+  --color-canvas-dark: #16181d;
 
   --color-orange-25: #fffaf5;
   --color-orange-50: #fff6ed;
@@ -188,7 +193,7 @@
     cursor: pointer;
   }
   body {
-    @apply relative font-normal font-outfit z-1 bg-gray-50;
+    @apply relative font-normal font-outfit z-1 bg-canvas dark:bg-canvas-dark;
   }
 }
 
@@ -276,7 +281,7 @@
 }
 
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #344054;
+  background-color: #3a3f4a;
 }
 
 
@@ -341,7 +346,7 @@
   border-radius: 0.5rem;
 }
 .dark .shipment-skeleton {
-  background: linear-gradient(90deg, #1d2939 25%, #344054 50%, #1d2939 75%);
+  background: linear-gradient(90deg, #2a2e37 25%, #3a3f4a 50%, #2a2e37 75%);
   background-size: 200% 100%;
 }
 

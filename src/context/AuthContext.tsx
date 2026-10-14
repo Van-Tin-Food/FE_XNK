@@ -53,7 +53,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const handleGoogleDriveAuthRequired = () => {
       if (googleReauthStarted.current) return;
       googleReauthStarted.current = true;
-      void startGoogleSignIn()
+      // Token Drive đã bị BE xoá vì hết hạn/lỗi: phải qua màn hình cấp quyền để lấy token mới.
+      void startGoogleSignIn(true)
         .then(({ googleAuthUrl, state }) => {
           sessionStorage.setItem(GOOGLE_MFA_STORAGE_KEY, JSON.stringify({
             state,

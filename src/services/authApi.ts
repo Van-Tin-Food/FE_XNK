@@ -8,9 +8,13 @@ export const AUTH_TOKEN_COOKIE_KEY = "xnk_auth_token";
 export const GOOGLE_MFA_STORAGE_KEY = "xnk_google_mfa_pending";
 export const GOOGLE_DRIVE_AUTH_REQUIRED_EVENT = "xnk:google-drive-auth-required";
 
-export async function startGoogleSignIn(): Promise<{ googleAuthUrl: string; state: string }> {
+/**
+ * Lấy URL đăng nhập Google. consent=true ép màn hình cấp quyền (khi quyền Drive đã mất);
+ * mặc định tài khoản đã cấp quyền chỉ cần chọn tài khoản.
+ */
+export async function startGoogleSignIn(consent = false): Promise<{ googleAuthUrl: string; state: string }> {
   const apiPath = "/api/auth/google/start";
-  const res = await fetch(backendApiUrl(apiPath), { method: "GET" });
+  const res = await fetch(backendApiUrl(consent ? `${apiPath}?consent=1` : apiPath), { method: "GET" });
   const { data, nonJsonPreview } = await parseApiResponse(res);
   const json = (data || {}) as { googleAuthUrl?: string; state?: string };
   if (!res.ok) throw createHttpApiError("Đăng nhập Google", "GET", apiPath, res, data, nonJsonPreview);
@@ -277,6 +281,19 @@ export async function updateUser(
   }) as AuthActionResponse;
 }
 
+/** Quyền Google đã lưu hết hạn/lỗi: BE trả sẵn URL cấp quyền lại để FE chuyển hướng. */
+export class GoogleConsentRequiredError extends Error {
+  readonly googleAuthUrl: string;
+  readonly state: string;
+
+  constructor(message: string, googleAuthUrl: string, state: string) {
+    super(message);
+    this.name = "GoogleConsentRequiredError";
+    this.googleAuthUrl = googleAuthUrl;
+    this.state = state;
+  }
+}
+
 /**
  * Gửi authorization code + state, kèm pendingToken nếu đây là bước MFA.
  * Backend đối chiếu email Google với tài khoản rồi cấp token phiên.
@@ -295,6 +312,9 @@ export async function completeGoogleSignIn(params: {
     });
     const { data, nonJsonPreview } = await parseApiResponse(res);
     const json = (data || {}) as LoginResponse;
+    if (!res.ok && json.code === "GOOGLE_CONSENT_REQUIRED" && json.googleAuthUrl && json.state) {
+      throw new GoogleConsentRequiredError(String(json.message || ""), json.googleAuthUrl, json.state);
+    }
     if (!res.ok) {
       throw createHttpApiError("Xác thực Google", "POST", apiPath, res, data, nonJsonPreview);
     }

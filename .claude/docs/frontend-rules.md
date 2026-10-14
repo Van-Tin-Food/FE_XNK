@@ -8,7 +8,6 @@
 >   `src/config/shipmentActionPermissions.ts`, không phải `ROLE_ACTIONS`/`MANAGE_ACTIONS` như mục 3.
 >   Mọi thay đổi quyền phải cập nhật bảng `EXPECTED` trong `tests/shipmentActionPermissions.test.mjs`.
 > - Session chỉ còn `manage`/`view`; alias cũ không còn được chuẩn hoá (role lạ = không có quyền).
-> - Mục "Current role model" bên dưới có thể đã cũ; ma trận đúng nằm trong `ROLE_ACCESS` và bảng `EXPECTED` của test.
 > - Backend hiện không kiểm tra quyền (xem `be/src/config/rbac.js`), nên ẩn nút ở FE đang là lớp chặn duy nhất.
 
 # XNK Frontend Skill
@@ -50,15 +49,17 @@ Use normalized values:
 
 - `admin`: all actions.
 - `it`: can view all modules, users, master data, and logs; cannot edit.
-- `logistic`: can create/edit shipments and related details/documents; email sending is admin-only.
-- `van_chuyen`: can handle transport and document actions; cannot create shipments.
+- `logistic`: create/edit/cancel shipments, upload every document, edit details, export Excel, see purchase amounts.
+- `van_chuyen`: transport/return and document actions (no PI upload); cannot create shipments; no purchase amounts.
 
-Sessions are `all`, `manage`, and `view`; legacy aliases are normalized by the permission helper.
+One shipment process only (the former `mua_hang` role and purchasing/logistics screens were removed). One role per
+user (`user.role`). Sessions are `manage` and `view`; unknown roles get no permissions. The exact matrix is
+`ROLE_ACCESS` in `src/config/shipmentActionPermissions.ts`, mirrored by `EXPECTED` in `tests/shipmentActionPermissions.test.mjs`.
 
 ### Rules for every new capability
 
 - Add a named action to `ShipmentActionPermissionKey`.
-- Add it to the correct `ROLE_ACTIONS` set and, if it mutates, to `MANAGE_ACTIONS`.
+- Add it to `ROLE_ACCESS` (`view` or `manage` list of each role) and update `EXPECTED` in the permission test.
 - Use `canPerformShipmentAction(user, action)` before rendering the page control, menu item, button, modal action, or destructive shortcut.
 - Hide controls users cannot use; disabled controls are appropriate when context should remain visible but action must be unavailable.
 - Do not use frontend hiding as backend security. The backend must authorize every mutation.

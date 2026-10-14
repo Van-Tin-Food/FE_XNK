@@ -24,6 +24,8 @@ export interface LoginMfaInfo {
 export interface LoginResponse {
   success?: boolean;
   message?: string;
+  /** Mã lỗi BE, ví dụ GOOGLE_CONSENT_REQUIRED (kèm googleAuthUrl + state để cấp quyền lại). */
+  code?: string;
   data?: unknown;
   user?: unknown;
   token?: string;

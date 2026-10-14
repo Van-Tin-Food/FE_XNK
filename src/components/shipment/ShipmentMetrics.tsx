@@ -21,7 +21,7 @@ function MetricCard({ label, value, icon, colorClass, bgClass, borderClass, isAc
       className={`group relative flex flex-col gap-3 rounded-2xl border p-4 md:p-5 text-left transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 cursor-pointer w-full ${
         isActive
           ? `${borderClass} ${bgClass} shadow-md -translate-y-0.5`
-          : "border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03] hover:border-gray-300 dark:hover:border-gray-700"
+          : "border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 hover:border-gray-300 dark:hover:border-gray-700"
       }`}
     >
       {/* Active indicator */}

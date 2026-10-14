@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Script hook của Claude Code (CommonJS chạy bằng node), không phải code ứng dụng.
+    ".claude/**",
   ]),
 ]);
 
