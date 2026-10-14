@@ -138,6 +138,8 @@ export interface DriveDataResponse {
   fileId?: string;
   files?: DriveDocumentFileRecord[];
   updatedAt?: string;
+  /** Thư mục container vừa upload vào (TRA_CONT, INSPECTION). */
+  containerFolderName?: string;
 }
 
 export interface ReturnItem {

@@ -1,7 +1,8 @@
 "use client";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import type { Shipment, ShipmentFilter, ShipmentStatus, ShipmentFilterStatus } from "@/types/shipment";
-import { fetchShipments, computeMetrics, fetchReturnItems, exportEtaRows } from "@/services/shipmentApi";
+import { fetchShipments, computeMetrics, exportEtaRows } from "@/services/shipmentApi";
+import { returnItemsFromRelations } from "@/services/postgresShipmentApi";
 import { buildEtaRows, getEtaHeaders } from "@/services/shipmentExcelExport";
 import ShipmentMetrics from "./ShipmentMetrics";
 import DashboardInfoBar from "./DashboardInfoBar";
@@ -50,12 +51,29 @@ function matchesStatusFilter(shipment: Shipment, filter: ShipmentFilter): boolea
     || (selectedStatus === "cancelled" ? shipment.status === "cancelled" : shipment.status === selectedStatus);
 }
 
+// Ô tìm kiếm khớp mã đơn, tên hàng, mã B/L và số container của đơn.
+function shipmentSearchValues(shipment: Shipment): string[] {
+  const bills = shipment.database?.bills || [];
+  return [
+    shipment.orderCode,
+    shipment.shipName,
+    shipment.bill,
+    ...bills.map((bill) => bill.ma_bl),
+    ...bills.flatMap((bill) => bill.containers.map((container) => container.ma_container)),
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+// Mã B/L, số container hay bị gõ thiếu/thừa khoảng trắng nên so sánh cả dạng bỏ khoảng trắng.
+function matchesSearchText(value: string, query: string): boolean {
+  const text = value.toLowerCase();
+  return text.includes(query) || text.replace(/\s+/g, "").includes(query.replace(/\s+/g, ""));
+}
+
 // Phạm vi chung của dashboard (chưa lọc trạng thái): ETA + tìm kiếm.
 // Dùng cho cả thẻ số liệu lẫn table, nên thẻ và table luôn cùng phạm vi.
 function matchesSearchAndEta(shipment: Shipment, filter: ShipmentFilter): boolean {
   const query = (filter.search || "").toLowerCase().trim();
-  const searchOk = !query || [shipment.orderCode, shipment.shipName]
-    .some((value) => value?.toLowerCase().includes(query));
+  const searchOk = !query || shipmentSearchValues(shipment).some((value) => matchesSearchText(value, query));
   return searchOk && matchesEtaRange(shipment, filter.dateFrom, filter.dateTo);
 }
 
@@ -69,6 +87,7 @@ export default function ShipmentDashboard() {
   const { notify } = useSystemNotification();
   const canCreateShipment = canPerformShipmentAction(user, "createShipment");
   const canExportShipments = canPerformShipmentAction(user, "exportShipments");
+  const canViewPurchaseAmounts = canPerformShipmentAction(user, "viewPurchaseAmounts");
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
   const [updatedBy, setUpdatedBy] = useState<string>("");
@@ -157,14 +176,17 @@ export default function ShipmentDashboard() {
     }
     setIsExporting(true);
     try {
-      const orderCodes = [...new Set(filteredShipments.map((shipment) => shipment.orderCode).filter(Boolean))];
-      const returnEntries = await Promise.all(orderCodes.map(async (orderCode) => [orderCode, await fetchReturnItems(orderCode)] as const));
-      const returnItemsByOrder = Object.fromEntries(returnEntries);
-      const rows = buildEtaRows(filteredShipments, returnItemsByOrder);
+      // Dữ liệu vận chuyển đã có trong danh sách vừa tải; không gọi API cho từng đơn
+      // (trước đây mỗi đơn tải lại 4 bảng, xuất 500 đơn = 2000 request).
+      const returnItemsByOrder = Object.fromEntries(filteredShipments
+        .filter((shipment) => shipment.orderCode)
+        .map((shipment) => [shipment.orderCode, shipment.database ? returnItemsFromRelations(shipment.database, shipment.orderCode) : []]));
+      const includeAmounts = canViewPurchaseAmounts;
+      const rows = buildEtaRows(filteredShipments, returnItemsByOrder, { includeAmounts });
       const exportedAt = new Date();
       const pad = (value: number) => String(value).padStart(2, "0");
       const version = `${pad(exportedAt.getHours())}:${pad(exportedAt.getMinutes())} ${pad(exportedAt.getDate())}/${pad(exportedAt.getMonth() + 1)}/${exportedAt.getFullYear()}`;
-      await exportEtaRows({ title: `Bảng ETA được xuất vào ${version}`, rows, headers: getEtaHeaders() });
+      await exportEtaRows({ title: `Bảng ETA được xuất vào ${version}`, rows, headers: getEtaHeaders({ includeAmounts }) });
       notify(t("exportExcelSucceeded"), "success");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -172,7 +194,7 @@ export default function ShipmentDashboard() {
     } finally {
       setIsExporting(false);
     }
-  }, [filteredShipments, notify, t]);
+  }, [canViewPurchaseAmounts, filteredShipments, notify, t]);
 
   // Build filter dropdown choices from the rows eligible for the table:
   // ETA lọc trước → các dòng trong table mới là nguồn sinh options của
@@ -202,9 +224,7 @@ export default function ShipmentDashboard() {
   )].sort((left, right) => left.localeCompare(right, "vi")), [filterOptionShipments, filter.port]);
 
   const searchSuggestions = useMemo(() => [...new Set(
-    shipments.flatMap((shipment) => [shipment.orderCode, shipment.shipName])
-      .map((value) => String(value || "").trim())
-      .filter(Boolean),
+    shipments.flatMap(shipmentSearchValues),
   )].sort((left, right) => left.localeCompare(right, "vi")), [shipments]);
 
   // Thẻ số liệu đếm theo phạm vi table sau lọc ETA + tìm kiếm (chưa lọc trạng thái

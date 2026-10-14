@@ -2,8 +2,8 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/modal";
-import { analyzeDocument, uploadDocument } from "@/services/shipmentApi";
-import { createDatabaseRow, databaseEndpoints, listDatabaseRows } from "@/services/postgresShipmentApi";
+import { analyzeDocument, checkDocumentFileNames, uploadDocument } from "@/services/shipmentApi";
+import { createDatabaseRow, databaseEndpoints, listCatalogRows } from "@/services/postgresShipmentApi";
 import type { PurchaseRecord, SupplierRecord } from "@/types/postgresShipment";
 import { useAuth } from "@/context/AuthContext";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
@@ -117,7 +117,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
 
   useEffect(() => {
     if (!isOpen) return;
-    void listDatabaseRows<SupplierRecord>(databaseEndpoints.suppliers)
+    void listCatalogRows<SupplierRecord>(databaseEndpoints.suppliers)
       .then(setSuppliers)
       .catch((loadError) => setError(loadError instanceof Error ? loadError.message : t("supplierLoadError")));
   }, [isOpen, t]);
@@ -251,6 +251,14 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     setIsSaving(true);
     setError("");
     try {
+      // Kiểm tra trùng tên file PI trước khi ghi DB để không tạo đơn rỗng khi upload bị từ chối.
+      const nameCheck = await checkDocumentFileNames({ orderCode: normalizedOrderCode, documentCode: "PI", fileNames: [file.name] });
+      if (nameCheck.hasDuplicates) {
+        setError(t("duplicateDocumentFileNames", {
+          files: `${nameCheck.files[0]?.targetName || file.name} (${t("duplicateReasonExists", { folder: nameCheck.folderName })})`,
+        }));
+        return;
+      }
       await createDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, {
         ma_hop_dong: normalizedOrderCode,
         ngay_hop_dong: normalizeDatabaseDate(fields.orderDate),

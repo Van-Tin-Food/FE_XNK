@@ -17,7 +17,7 @@ import type {
   XnkRecord,
 } from "@/types/postgresShipment";
 import type { ReturnItem } from "@/types/shipment";
-import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
+import { type ApiError, createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 import { toDatabaseNumber, toDatabasePackageCount } from "@/utils/internationalNumber";
 
 
@@ -94,16 +94,89 @@ export async function getDatabaseRow<T>(path: string, id: string): Promise<T> {
 }
 
 export async function createDatabaseRow<T = unknown>(path: string, data: object): Promise<T> {
-  return unwrapRecord<T>(await databaseRequest(path, { method: "POST", body: JSON.stringify(data) }));
+  const created = unwrapRecord<T>(await databaseRequest(path, { method: "POST", body: JSON.stringify(data) }));
+  invalidateCatalog(path);
+  return created;
 }
 
 export async function updateDatabaseRow<T extends object>(path: string, id: string, data: Partial<T>): Promise<unknown> {
-  return databaseRequest(`${path}/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(data) });
+  const updated = await databaseRequest(`${path}/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(data) });
+  invalidateCatalog(path);
+  return updated;
 }
 
-/** Chỉ tải những bảng cần để dựng danh sách và modal đơn hàng ban đầu. */
+// Danh mục ít thay đổi (nhà cung cấp, hãng tàu, kho) được dùng lại trong vài phút thay vì tải lại
+// mỗi lần mở modal / lưu OCR. Khoá theo token để đổi tài khoản không dùng nhầm dữ liệu đã ẩn/hiện
+// theo quyền của người trước. Tạo/sửa qua createDatabaseRow/updateDatabaseRow thì xoá cache.
+const CATALOG_TTL_MS = 5 * 60 * 1000;
+const CATALOG_PATHS = new Set<string>(["nha-cung-cap", "hang-tau", "kho"]);
+const catalogCache = new Map<string, { expiresAt: number; rows: Promise<unknown[]> }>();
+
+function catalogName(path: string): string {
+  return path.replace(/^\//, "").split("/")[0];
+}
+
+function catalogKey(path: string): string {
+  return `${getStoredUser()?.token || ""}|${catalogName(path)}`;
+}
+
+function invalidateCatalog(path: string): void {
+  const name = catalogName(path);
+  if (!CATALOG_PATHS.has(name)) return;
+  for (const key of [...catalogCache.keys()]) if (key.endsWith(`|${name}`)) catalogCache.delete(key);
+}
+
+function primeCatalog(path: string, rows: unknown[]): void {
+  catalogCache.set(catalogKey(path), { expiresAt: Date.now() + CATALOG_TTL_MS, rows: Promise.resolve(rows) });
+}
+
+/** Đọc danh mục nhà cung cấp / hãng tàu / kho, có cache ngắn hạn. Màn danh mục vẫn dùng listDatabaseRows để luôn mới. */
+export function listCatalogRows<T>(path: "nha-cung-cap" | "hang-tau" | "kho"): Promise<T[]> {
+  const key = catalogKey(path);
+  const cached = catalogCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.rows as Promise<T[]>;
+  const rows = listDatabaseRows<T>(path);
+  catalogCache.set(key, { expiresAt: Date.now() + CATALOG_TTL_MS, rows });
+  rows.catch(() => catalogCache.delete(key));
+  return rows;
+}
+
+/** Tìm trong danh mục đã cache; không thấy thì tải lại một lần (có thể vừa được thêm ở tab khác). */
+async function findCatalogRow<T>(path: "nha-cung-cap" | "hang-tau" | "kho", match: (row: T) => boolean): Promise<T | undefined> {
+  const cached = (await listCatalogRows<T>(path)).find(match);
+  if (cached) return cached;
+  invalidateCatalog(path);
+  return (await listCatalogRows<T>(path)).find(match);
+}
+
+const SNAPSHOT_KEYS = [
+  "suppliers", "carriers", "warehouses", "purchases", "purchaseDetails", "itemCodes",
+  "bills", "containers", "containerDetails", "transports", "driveDocuments",
+] as const;
+
+/**
+ * Tải mọi bảng của danh sách đơn hàng trong một request (/shipment-snapshot) thay vì 11 request
+ * song song. BE cũ chưa có API này (404) thì quay về cách tải từng bảng.
+ */
 export async function fetchPostgresShipmentListSnapshot(): Promise<PostgresShipmentSnapshot> {
-  const [suppliers, carriers, purchases, purchaseDetails, itemCodes, bills, containers, containerDetails, transports, warehouses] = await Promise.all([
+  let snapshot: PostgresShipmentSnapshot;
+  try {
+    const data = unwrapRecord<Record<string, unknown>>(await databaseRequest<unknown>("shipment-snapshot"));
+    const missing = SNAPSHOT_KEYS.filter((key) => !Array.isArray(data?.[key]));
+    if (missing.length > 0) throw new Error(`Dữ liệu danh sách đơn hàng thiếu: ${missing.join(", ")}`);
+    snapshot = data as unknown as PostgresShipmentSnapshot;
+  } catch (error) {
+    if ((error as ApiError).status !== 404) throw error;
+    snapshot = await fetchSnapshotTableByTable();
+  }
+  primeCatalog(databaseEndpoints.suppliers, snapshot.suppliers);
+  primeCatalog(databaseEndpoints.carriers, snapshot.carriers);
+  primeCatalog(databaseEndpoints.warehouses, snapshot.warehouses);
+  return snapshot;
+}
+
+async function fetchSnapshotTableByTable(): Promise<PostgresShipmentSnapshot> {
+  const [suppliers, carriers, purchases, purchaseDetails, itemCodes, bills, containers, containerDetails, transports, warehouses, driveDocuments] = await Promise.all([
     listDatabaseRows<SupplierRecord>("nha-cung-cap"),
     listDatabaseRows<CarrierRecord>("hang-tau"),
     listDatabaseRows<PurchaseRecord>("mua-hang"),
@@ -114,8 +187,10 @@ export async function fetchPostgresShipmentListSnapshot(): Promise<PostgresShipm
     listDatabaseRows<ContainerDetailRecord>("chi-tiet-container"),
     listDatabaseRows<ContainerTransportRecord>(databaseEndpoints.transports),
     listDatabaseRows<WarehouseRecord>(databaseEndpoints.warehouses),
+    listDatabaseRows<DriveDocumentRecord>("chung-tu-drive"),
   ]);
   return {
+    driveDocuments,
     suppliers,
     carriers,
     purchases,
@@ -167,7 +242,8 @@ const DRIVE_DOCUMENT_FIELD_MAP = {
   "15B": "15b",
   QDTQ: "qdtq",
   MV: "mv",
-  TRA_CONG: "tra_cong",
+  // Mã chứng từ là TRA_CONT nhưng cột PostgreSQL vẫn là tra_cong.
+  TRA_CONT: "tra_cong",
 } as const satisfies Record<string, keyof DriveDocumentRecord>;
 
 export async function passDriveDocument(orderCode: string, documentCode: string): Promise<void> {
@@ -232,8 +308,7 @@ export async function updatePostgresShipmentFields(
   if (invoiceDate !== undefined) purchasePatch.ngay_inv = nullableDate(invoiceDate);
   if (contractDate !== undefined) purchasePatch.ngay_hop_dong = nullableDate(contractDate);
   if (supplierName !== undefined && supplierName !== relations.supplier?.ten_ncc) {
-    const suppliers = await listDatabaseRows<SupplierRecord>(databaseEndpoints.suppliers);
-    const supplier = suppliers.find((item) => normalizeField(item.ten_ncc) === normalizeField(supplierName));
+    const supplier = await findCatalogRow<SupplierRecord>(databaseEndpoints.suppliers, (item) => normalizeField(item.ten_ncc) === normalizeField(supplierName));
     if (!supplier) throw new Error(`Nhà cung cấp ${supplierName} chưa có trong danh mục PostgreSQL`);
     purchasePatch.id_ncc = supplier.id_ncc;
   }
@@ -292,8 +367,7 @@ export async function updatePostgresShipmentFields(
   if (eta !== undefined) billPatch.eta = nullableDate(eta);
   if (ata !== undefined) billPatch.ata = nullableDate(ata);
   if (carrierName !== undefined) {
-    const carriers = await listDatabaseRows<CarrierRecord>(databaseEndpoints.carriers);
-    const carrier = carriers.find((item) => normalizeField(item.ten_hang_tau) === normalizeField(carrierName));
+    const carrier = await findCatalogRow<CarrierRecord>(databaseEndpoints.carriers, (item) => normalizeField(item.ten_hang_tau) === normalizeField(carrierName));
     if (!carrier) throw new Error(`Hãng tàu ${carrierName} chưa có trong danh mục PostgreSQL`);
     billPatch.id_hang_tau = carrier.id_hang_tau;
   }
@@ -348,9 +422,8 @@ export async function savePostgresBlOcrRows(
 
   const carrierIdFromOcr = fieldValue(first, ["id_hang_tau", "ID hãng tàu"]);
   const carrierName = fieldValue(first, ["Hãng tàu"]);
-  const carriers = await listDatabaseRows<CarrierRecord>(databaseEndpoints.carriers);
-  const carrier = carriers.find((item) => item.id_hang_tau === carrierIdFromOcr)
-    || carriers.find((item) => normalizeField(item.ten_hang_tau) === normalizeField(carrierName || ""));
+  const carrier = (carrierIdFromOcr ? await findCatalogRow<CarrierRecord>(databaseEndpoints.carriers, (item) => item.id_hang_tau === carrierIdFromOcr) : undefined)
+    || await findCatalogRow<CarrierRecord>(databaseEndpoints.carriers, (item) => normalizeField(item.ten_hang_tau) === normalizeField(carrierName || ""));
   if (!carrier) throw new Error("Hãng tàu OCR chưa khớp danh mục PostgreSQL");
 
   const billPayload: Omit<XnkRecord, "id_xnk"> = {
@@ -405,9 +478,8 @@ export async function savePostgresPiOcrRows(
 
   const supplierIdFromOcr = fieldValue(first, ["id_ncc", "ID NCC"]);
   const supplierName = fieldValue(first, ["Nhà cung cấp"]);
-  const suppliers = await listDatabaseRows<SupplierRecord>(databaseEndpoints.suppliers);
-  const supplier = suppliers.find((item) => item.id_ncc === supplierIdFromOcr)
-    || suppliers.find((item) => normalizeField(item.ten_ncc) === normalizeField(supplierName || ""));
+  const supplier = (supplierIdFromOcr ? await findCatalogRow<SupplierRecord>(databaseEndpoints.suppliers, (item) => item.id_ncc === supplierIdFromOcr) : undefined)
+    || await findCatalogRow<SupplierRecord>(databaseEndpoints.suppliers, (item) => normalizeField(item.ten_ncc) === normalizeField(supplierName || ""));
   if (!supplier) throw new Error("Nhà cung cấp OCR chưa khớp danh mục PostgreSQL");
 
   await updateDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, relations.purchase.ma_hop_dong, {
@@ -524,6 +596,28 @@ export async function savePostgresPklOcrRow(
 
 export function cancelPostgresShipment(contractCode: string): Promise<unknown> {
   return updateDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, contractCode, { is_deleted: true });
+}
+
+/** Dòng vận chuyển / trả cont của một hợp đồng, dựng từ dữ liệu đã tải sẵn (không gọi API). */
+export function returnItemsFromRelations(relations: PostgresShipmentRelations, displayOrderCode = relations.purchase.ma_hop_dong): ReturnItem[] {
+  return relations.bills.flatMap((bill) => bill.containers.map((container) => {
+    const transport = container.transports[0];
+    return {
+      idVanChuyen: transport?.id_van_chuyen || "",
+      idBlContainer: container.id_bl_container,
+      ngay: dateOnly(transport?.ngay_van_chuyen),
+      soCont: container.ma_container,
+      soHd: displayOrderCode,
+      nhaXe: transport?.nha_xe || "",
+      tenTaiXe: transport?.ten_tai_xe || "",
+      bienSoXe: transport?.bien_so_xe || "",
+      noiDi: transport?.noi_di || "",
+      noiTraContainer: transport?.noi_tra_container || "",
+      idKho: transport?.id_kho || "",
+      tenKho: transport?.warehouse?.ten_kho || "",
+      ghiChu: transport?.ghi_chu || "",
+    };
+  }));
 }
 
 export async function fetchPostgresReturnItems(contractCode: string): Promise<ReturnItem[]> {

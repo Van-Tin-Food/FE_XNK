@@ -53,8 +53,8 @@ export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh, on
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-white/[0.03] sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-2">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500">
             <circle cx="12" cy="12" r="10" />
             <polyline points="12 6 12 12 16 14" />
@@ -66,7 +66,7 @@ export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh, on
         </p>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         {showRefreshSuccess && <span className="text-xs font-medium text-success-600">✓ {t("refreshSucceeded")}</span>}
         {onExport && (
           <button
@@ -74,7 +74,7 @@ export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh, on
             onClick={() => void onExport()}
             disabled={isExporting || isRefreshing}
             title={t("exportExcel")}
-            className="inline-flex items-center gap-2 rounded-xl border border-success-200 bg-success-50 px-4 py-2 text-xs font-semibold text-success-700 transition-all hover:border-success-300 hover:bg-success-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-400 dark:hover:bg-success-500/20"
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-success-200 bg-success-50 px-4 py-2 text-xs font-semibold text-success-700 transition-all hover:border-success-300 hover:bg-success-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-400 dark:hover:bg-success-500/20"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={isExporting ? "animate-spin" : ""} aria-hidden="true">
               {isExporting ? <><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></> : <><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></>}
@@ -87,7 +87,7 @@ export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh, on
           onClick={handleRefresh}
           disabled={isRefreshing}
           title={t("refreshSystemData")}
-          className="inline-flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2 text-xs font-semibold text-brand-600 transition-all hover:border-brand-300 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/20"
+          className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-brand-200 bg-brand-50 px-4 py-2 text-xs font-semibold text-brand-600 transition-all hover:border-brand-300 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/20"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={isRefreshing ? "animate-spin" : ""}>
             <polyline points="23 4 23 10 17 10" />

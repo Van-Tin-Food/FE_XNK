@@ -99,6 +99,9 @@ export interface DriveDocumentFileRecord {
   uploadedAt?: string | null;
   uploadedBy?: string | null;
   uploadedByEmail?: string | null;
+  /** Thư mục container chứa file (TRA_CONT, INSPECTION). */
+  folderId?: string | null;
+  folderName?: string | null;
 }
 
 export type DriveDocumentValue = string | Array<DriveDocumentFileRecord | string> | null;
@@ -163,4 +166,6 @@ export interface PostgresShipmentSnapshot {
   containers: ContainerRecord[];
   containerDetails: ContainerDetailRecord[];
   transports: ContainerTransportRecord[];
+  /** Có khi tải qua API gộp /shipment-snapshot (cùng request với các bảng trên). */
+  driveDocuments?: DriveDocumentRecord[];
 }

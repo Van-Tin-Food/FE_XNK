@@ -1,6 +1,8 @@
 type ApiPayload = Record<string, unknown>;
 
 export type ApiError = Error & {
+  /** HTTP status khi lỗi đến từ response của backend. */
+  status?: number;
   code?: string;
   detail?: unknown;
   technicalMessage?: string;
@@ -75,6 +77,14 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Chưa nhập đủ thông tin đổi tên file.";
     case "ORDER_ARCHIVED":
       return "Đơn hàng đã hoàn thành và được lưu trữ, không thể bổ sung thêm file.";
+    // Thông báo backend đã kèm tên file/thư mục cụ thể nên giữ nguyên để người dùng biết cần đổi tên gì.
+    case "DUPLICATE_FILE_NAME":
+      return backendMessage || "Tên file đã tồn tại trong thư mục chứng từ. Vui lòng đổi tên file rồi thử lại.";
+    case "MISSING_TRANSPORT_CODE":
+      return backendMessage || "Vui lòng chọn số container trước khi upload.";
+    case "INVALID_CONTAINER_FOLDER":
+    case "CONTAINER_FOLDER_RENAME_REQUIRED":
+      return backendMessage || "Thư mục container không đúng định dạng. Vui lòng kiểm tra lại.";
     case "EMAIL_CONFIG_MISSING":
       return "Chức năng gửi email chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
     default:
@@ -121,6 +131,7 @@ export function createHttpApiError(
   });
   const error = new Error(getFriendlyMessage(scope, response.status, code, message)) as ApiError;
   error.technicalMessage = technicalMessage;
+  error.status = response.status;
   if (isRecord(payload)) {
     if (typeof payload.code === "string") error.code = payload.code;
     else if (typeof payload.errorCode === "string") error.code = payload.errorCode;

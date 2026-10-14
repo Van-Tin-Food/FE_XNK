@@ -4,8 +4,8 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentProgress, fetchReturnItems, getArchivedDocuments, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentProgressResponse } from "@/services/shipmentApi";
-import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listDatabaseRows, passDriveDocument, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
+import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, fetchReturnItems, getArchivedDocuments, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
+import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listCatalogRows, passDriveDocument, returnItemsFromRelations, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
 import { recordActivity } from "@/services/activityLogApi";
@@ -152,7 +152,7 @@ const FLOW_STAGES: ShipmentFlowStage[] = [
   { key: "declared", label: "Khai báo hải quan", shortLabel: "BB_LM / PHI_TK / THUE_NK / TK" },
   { key: "fifteenb", label: "Mẫu 15B", shortLabel: "15B" },
   { key: "customs", label: "Thông quan", shortLabel: "QDTQ / MV" },
-  { key: "delivered", label: "Giao hàng / Trả công", shortLabel: "TRA_CONG" },
+  { key: "delivered", label: "Giao hàng / Trả công", shortLabel: "TRA_CONT" },
 ];
 
 const STAGE_DOC_GROUPS: Record<Exclude<ShipmentFlowStage["key"], "delivered">, string[]> = {
@@ -166,11 +166,19 @@ const STAGE_DOC_GROUPS: Record<Exclude<ShipmentFlowStage["key"], "delivered">, s
 
 const DOCUMENT_DISPLAY_ORDER = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
-  "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONG",
+  "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONT",
   "AN", "EDO", "CPN", "INSPECTION",
 ];
 
 const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION"]);
+// Chứng từ lưu theo thư mục container trên Drive: phải chọn số cont trước khi upload.
+const CONTAINER_FOLDER_DOCUMENT_CODES = new Set(["TRA_CONT", "INSPECTION"]);
+
+function containerFolderLabel(folderName: string | null | undefined, orderCode: string, documentCode: string): string {
+  const name = folderName?.trim() || "";
+  const prefix = `${orderCode}_${documentCode}_`.toUpperCase();
+  return name.toUpperCase().startsWith(prefix) ? name.slice(prefix.length) : name;
+}
 const OPTIONAL_DOCUMENT_OPTIONS = [
   { code: "AN", label: "AN - Giấy chứng nhận kiểm dịch an toàn thực phẩm" },
   { code: "EDO", label: "EDO - Lệnh giao hàng điện tử" },
@@ -832,6 +840,14 @@ function databasePackageCountOrNull(value: unknown): number | null {
   return parsed;
 }
 
+// Bảng con trong modal: dưới 1024px mỗi dòng hiển thị thành thẻ (nhãn cột lấy từ data-label của ô)
+// để không phải cuộn ngang; từ lg trở lên là bảng bình thường.
+const STACK_TABLE = "max-lg:block";
+const STACK_HEAD = "max-lg:hidden";
+const STACK_BODY = "max-lg:block max-lg:space-y-3 max-lg:divide-y-0 max-lg:p-3";
+const STACK_ROW = "max-lg:block max-lg:rounded-xl max-lg:border max-lg:border-gray-200 max-lg:px-3 max-lg:py-1.5 dark:max-lg:border-gray-700";
+const STACK_CELL = "max-lg:grid max-lg:grid-cols-[6.5rem_minmax(0,1fr)] max-lg:items-center max-lg:gap-2 max-lg:px-0 max-lg:py-1.5 max-lg:before:text-[11px] max-lg:before:font-semibold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-gray-400 max-lg:before:content-[attr(data-label)]";
+
 function PurchaseDetailsTable({
   group,
   details,
@@ -842,6 +858,7 @@ function PurchaseDetailsTable({
   onAddItem,
   onAddRow,
   translate,
+  showAmounts,
 }: {
   group: Omit<DetailFieldGroup, "fields">;
   details: PurchaseDetailWithItems[];
@@ -852,6 +869,8 @@ function PurchaseDetailsTable({
   onAddItem: (detailId: string) => void;
   onAddRow: () => void;
   translate: (key: string) => string;
+  /** false: ẩn cột đơn giá với role không được xem tiền hàng. */
+  showAmounts: boolean;
 }) {
   const tableRows = details.flatMap<{ detail: PurchaseDetailWithItems; item: PurchaseItemCodeRecord | null; itemIndex: number }>((detail) => (
     detail.itemCodes.length > 0
@@ -870,7 +889,7 @@ function PurchaseDetailsTable({
 
   return (
     <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
-      <div className={`flex items-center gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-gray-800 sm:px-5 ${group.headerClass}`}>
+      <div className={`flex flex-wrap items-center gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-gray-800 sm:px-5 ${group.headerClass}`}>
         <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-xs font-bold shadow-sm ${group.badgeClass}`}>{group.number}</span>
         <div className="min-w-0">
           <h4 className="text-sm font-bold text-gray-900 dark:text-white">{translate(group.labelKey)}</h4>
@@ -878,33 +897,33 @@ function PurchaseDetailsTable({
         </div>
         {editing && <button type="button" onClick={onAddRow} className="ml-auto shrink-0 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 dark:border-brand-500/30 dark:bg-gray-900 dark:text-brand-300">{translate("addRow")}</button>}
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[780px] table-fixed text-left xl:min-w-0">
+      <div className="lg:overflow-x-auto">
+        <table className={`w-full table-fixed text-left lg:min-w-[780px] xl:min-w-0 ${STACK_TABLE}`}>
           <colgroup>
             <col className="w-[6%]" />
-            <col className="w-[32%]" />
-            <col className="w-[28%]" />
-            <col className="w-[18%]" />
-            <col className="w-[16%]" />
+            <col className={showAmounts ? "w-[32%]" : "w-[40%]"} />
+            <col className={showAmounts ? "w-[28%]" : "w-[36%]"} />
+            {showAmounts && <col className="w-[18%]" />}
+            <col className={showAmounts ? "w-[16%]" : "w-[18%]"} />
           </colgroup>
-          <thead className="bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
+          <thead className={`bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400 ${STACK_HEAD}`}>
             <tr>
               <th className="px-4 py-3">#</th>
               <th className="px-4 py-3">{translate("productName")}</th>
               <th className="px-4 py-3">{translate("itemCode")} / {translate("factoryCode")} / {translate("factoryName")}</th>
-              <th className="px-4 py-3">{translate("unitPrice")}</th>
+              {showAmounts && <th className="px-4 py-3">{translate("unitPrice")}</th>}
               <th className="px-4 py-3">{translate("itemPackageCount")}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+          <tbody className={`divide-y divide-gray-100 dark:divide-gray-800 ${STACK_BODY}`}>
             {tableRows.map(({ detail, item, itemIndex }, rowIndex) => (
-              <tr key={item?.id_item_code || `${detail.id_chi_tiet}-without-item-${rowIndex}`} className="align-top bg-white hover:bg-gray-50/60 dark:bg-transparent dark:hover:bg-white/[0.02]">
-                <td className="px-4 py-3 text-xs font-bold text-gray-500">{rowIndex + 1}</td>
-                <EditableTableCell value={detail.ten_hang} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet, "ten_hang", value)} />
-                <td className="px-4 py-3">
+              <tr key={item?.id_item_code || `${detail.id_chi_tiet}-without-item-${rowIndex}`} className={`align-top bg-white hover:bg-gray-50/60 dark:bg-transparent dark:hover:bg-white/[0.02] ${STACK_ROW}`}>
+                <td data-label="#" className={`px-4 py-3 text-xs font-bold text-gray-500 ${STACK_CELL}`}>{rowIndex + 1}</td>
+                <EditableTableCell label={translate("productName")} value={detail.ten_hang} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet, "ten_hang", value)} />
+                <td data-label={translate("itemCode")} className={`px-4 py-3 ${STACK_CELL}`}>
                   <div className="space-y-2">
                     {item && (editing ? (
-                      <div className="grid grid-cols-3 gap-1.5">
+                      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
                         <input value={item.item_code || ""} onChange={(event) => onItemChange(detail.id_chi_tiet, item.id_item_code, "item_code", event.target.value)} placeholder="Item code" className="h-8 min-w-0 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                         <input value={item.ma_nha_may || ""} onChange={(event) => onItemChange(detail.id_chi_tiet, item.id_item_code, "ma_nha_may", event.target.value)} placeholder={translate("factoryCode")} className="h-8 min-w-0 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                         <input value={item.ten_nha_may || ""} onChange={(event) => onItemChange(detail.id_chi_tiet, item.id_item_code, "ten_nha_may", event.target.value)} placeholder={translate("factoryName")} className="h-8 min-w-0 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
@@ -923,18 +942,21 @@ function PurchaseDetailsTable({
                     )}
                   </div>
                 </td>
-                <EditableTableCell
-                  value={detail.don_gia}
-                  editing={editing}
-                  onChange={(value) => onChange(detail.id_chi_tiet, "don_gia", value)}
-                  displayFormatter={formatMoney}
-                />
-                <td className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
+                {showAmounts && (
+                  <EditableTableCell
+                    label={translate("unitPrice")}
+                    value={detail.don_gia}
+                    editing={editing}
+                    onChange={(value) => onChange(detail.id_chi_tiet, "don_gia", value)}
+                    displayFormatter={formatMoney}
+                  />
+                )}
+                <td data-label={translate("itemPackageCount")} className={`px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300 ${STACK_CELL}`}>
                   {getItemPackageCount(detail, item) || ""}{getItemPackageCount(detail, item) && detail.don_vi_kien ? ` ${detail.don_vi_kien}` : ""}
                 </td>
               </tr>
             ))}
-            {tableRows.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400">{translate("noPurchaseDetails")}</td></tr>}
+            {tableRows.length === 0 && <tr className="max-lg:block"><td colSpan={showAmounts ? 5 : 4} className="px-4 py-8 text-center text-sm text-gray-400 max-lg:block">{translate("noPurchaseDetails")}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -942,11 +964,11 @@ function PurchaseDetailsTable({
   );
 }
 
-function EditableTableCell({ value, editing, onChange, suffix, displayFormatter }: { value: unknown; editing: boolean; onChange: (value: string) => void; suffix?: string | null; displayFormatter?: (value: unknown) => string }) {
+function EditableTableCell({ label, value, editing, onChange, suffix, displayFormatter }: { label?: string; value: unknown; editing: boolean; onChange: (value: string) => void; suffix?: string | null; displayFormatter?: (value: unknown) => string }) {
   const text = value == null ? "" : String(value);
   const displayText = displayFormatter ? displayFormatter(value) : text;
   return (
-    <td className="px-4 py-3">
+    <td data-label={label} className={`px-4 py-3 ${STACK_CELL}`}>
       {editing ? (
         <input
           value={text}
@@ -955,7 +977,7 @@ function EditableTableCell({ value, editing, onChange, suffix, displayFormatter 
           className="h-9 w-full min-w-24 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
         />
       ) : (
-        <span className="text-sm text-gray-700 dark:text-gray-300">{displayText || "—"}{displayText && suffix ? ` ${suffix}` : ""}</span>
+        <span className="break-words text-sm text-gray-700 dark:text-gray-300">{displayText || "—"}{displayText && suffix ? ` ${suffix}` : ""}</span>
       )}
     </td>
   );
@@ -989,7 +1011,7 @@ function ContainerCargoDetailsTable({
 
   return (
     <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
-      <div className="flex items-center gap-3 border-b border-gray-100 bg-cyan-50/70 px-4 py-3.5 dark:border-gray-800 dark:bg-cyan-500/[0.06] sm:px-5">
+      <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 bg-cyan-50/70 px-4 py-3.5 dark:border-gray-800 dark:bg-cyan-500/[0.06] sm:px-5">
         <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-cyan-600 text-xs font-bold text-white shadow-sm">04</span>
         <div className="min-w-0">
           <h4 className="text-sm font-bold text-gray-900 dark:text-white">{translate("containerCargoDetails")}</h4>
@@ -1001,9 +1023,9 @@ function ContainerCargoDetailsTable({
           </button>
         )}
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1100px] text-left">
-          <thead className="bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
+      <div className="lg:overflow-x-auto">
+        <table className={`w-full text-left lg:min-w-[900px] ${STACK_TABLE}`}>
+          <thead className={`bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400 ${STACK_HEAD}`}>
             <tr>
               <th className="px-4 py-3">#</th>
               <th className="px-4 py-3">{translate("billNumber")}</th>
@@ -1013,30 +1035,30 @@ function ContainerCargoDetailsTable({
               <th className="px-4 py-3">{translate("packageCount")}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+          <tbody className={`divide-y divide-gray-100 dark:divide-gray-800 ${STACK_BODY}`}>
             {details.map((detail, index) => {
               const selectedContainer = containers.find((container) => container.id_bl_container === detail.id_bl_container);
               const selectedOption = itemOptions.find(({ item }) => item.id_item_code === detail.id_item_code);
               return (
-                <tr key={detail.id_chi_tiet_container || `container-detail-${index}`} className="align-top hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
-                  <td className="px-4 py-3 text-xs font-semibold text-gray-400">{index + 1}</td>
-                  <td className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200">{selectedContainer?.billNumber || "—"}</td>
-                  <td className="px-4 py-3">
+                <tr key={detail.id_chi_tiet_container || `container-detail-${index}`} className={`align-top hover:bg-gray-50/60 dark:hover:bg-white/[0.02] ${STACK_ROW}`}>
+                  <td data-label="#" className={`px-4 py-3 text-xs font-semibold text-gray-400 ${STACK_CELL}`}>{index + 1}</td>
+                  <td data-label={translate("billNumber")} className={`break-all px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200 ${STACK_CELL}`}>{selectedContainer?.billNumber || "—"}</td>
+                  <td data-label={translate("containerCode")} className={`px-4 py-3 ${STACK_CELL}`}>
                     {editing ? (
-                      <select value={detail.id_bl_container} onChange={(event) => onChange(detail.id_chi_tiet_container, "id_bl_container", event.target.value)} className="h-9 min-w-40 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+                      <select value={detail.id_bl_container} onChange={(event) => onChange(detail.id_chi_tiet_container, "id_bl_container", event.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-sm lg:w-auto lg:min-w-40 text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
                         <option value="">{translate("selectContainer")}</option>
                         {containers.map((container) => <option key={container.id_bl_container} value={container.id_bl_container}>{container.ma_container}</option>)}
                       </select>
                     ) : <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">{selectedContainer?.ma_container || detail.id_bl_container || "—"}</span>}
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label={translate("productName")} className={`px-4 py-3 ${STACK_CELL}`}>
                     {editing ? (
                       <select
                         value={detail.id_item_code}
                         onChange={(event) => {
                           onChange(detail.id_chi_tiet_container, "id_item_code", event.target.value);
                         }}
-                        className="h-9 min-w-64 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                        className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-sm lg:w-auto lg:min-w-64 text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                       >
                         <option value="">{translate("selectProduct")} / {translate("selectItemCode")}</option>
                         {itemOptions.map(({ item, purchaseDetail }) => (
@@ -1047,21 +1069,21 @@ function ContainerCargoDetailsTable({
                       </select>
                     ) : <span className="text-sm text-gray-700 dark:text-gray-300">{selectedOption?.purchaseDetail.ten_hang || "—"}</span>}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-md bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+                  <td data-label={translate("itemCode")} className={`px-4 py-3 ${STACK_CELL}`}>
+                    <span className="w-fit break-all rounded-md bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
                       {selectedOption?.item.item_code || detail.id_item_code || "—"}
                     </span>
                   </td>
-                  <EditableTableCell value={detail.so_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "so_kien", value)} displayFormatter={formatPackageQuantity} />
+                  <EditableTableCell label={translate("packageCount")} value={detail.so_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet_container, "so_kien", value)} displayFormatter={formatPackageQuantity} />
                 </tr>
               );
             })}
-            {details.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">{translate("noContainerCargo")}</td></tr>}
+            {details.length === 0 && <tr className="max-lg:block"><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400 max-lg:block">{translate("noContainerCargo")}</td></tr>}
           </tbody>
-          <tfoot className="border-t border-gray-200 bg-gray-50/80 dark:border-gray-700 dark:bg-gray-900/60">
-            <tr>
-              <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400">{translate("containerPackageComparison")}</td>
-              <td className={`px-4 py-3 text-sm font-bold ${allocationPending ? "text-gray-500 dark:text-gray-400" : packagesMatch ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400"}`}>
+          <tfoot className="border-t border-gray-200 bg-gray-50/80 max-lg:block dark:border-gray-700 dark:bg-gray-900/60">
+            <tr className="max-lg:block">
+              <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 max-lg:block max-lg:pb-0 max-lg:text-left dark:text-gray-400">{translate("containerPackageComparison")}</td>
+              <td className={`px-4 py-3 text-sm font-bold max-lg:block ${allocationPending ? "text-gray-500 dark:text-gray-400" : packagesMatch ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400"}`}>
                 {formatPackageQuantity(allocatedPackages)} / {formatPackageQuantity(expectedPackages)} {allocationPending ? translate("quantityNotAllocated") : packagesMatch ? translate("quantityMatched") : translate("quantityNotMatched")}
               </td>
             </tr>
@@ -1124,6 +1146,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isArchiveLoading, setIsArchiveLoading] = useState(false);
   const [isArchiveStateLoading, setIsArchiveStateLoading] = useState(false);
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
+  const preferredReturnContainerRef = React.useRef<{ orderCode: string; idBlContainer: string } | null>(null);
   const [returnItem, setReturnItem] = useState<ReturnItem | null>(null);
   const [isReturnLoading, setIsReturnLoading] = useState(false);
   const [isReturnEditing, setIsReturnEditing] = useState(false);
@@ -1159,10 +1182,39 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [passingDocumentId, setPassingDocumentId] = useState<string | null>(null);
   const [locallyPassedDocumentIds, setLocallyPassedDocumentIds] = useState<string[]>([]);
   const [selectedMissingDocIds, setSelectedMissingDocIds] = useState<string[]>([]);
-  const [selectedTransportCode, setSelectedTransportCode] = useState("");
+  const [selectedContainerCodes, setSelectedContainerCodes] = useState<Record<string, string>>({});
+  const [inspectionFolderNote, setInspectionFolderNote] = useState("");
+  // "" = tạo thư mục mới; còn lại là tên thư mục ảnh đã có để upload tiếp.
+  const [inspectionFolderChoice, setInspectionFolderChoice] = useState("");
 
   const transportCodes = [...new Set(returnItems.map((item) => item.soCont).filter(Boolean))];
-  const activeTransportCode = selectedTransportCode || (transportCodes.length === 1 ? transportCodes[0] : "");
+  const getContainerCode = (docId: string) => {
+    const selected = selectedContainerCodes[docId];
+    if (selected && transportCodes.includes(selected)) return selected;
+    return transportCodes.length === 1 ? transportCodes[0] : "";
+  };
+  const containerRequiredMessage = (docId: string) => t(
+    transportCodes.length === 0 ? "noContainerForUpload" : "containerRequiredForUpload",
+    { document: docId },
+  );
+  const stopEvent = (event: React.SyntheticEvent) => event.stopPropagation();
+  const renderContainerSelect = (docId: string) => (
+    <select
+      value={getContainerCode(docId)}
+      onChange={(event) => setSelectedContainerCodes((current) => ({ ...current, [docId]: event.target.value }))}
+      onClick={stopEvent}
+      onKeyDown={stopEvent}
+      disabled={transportCodes.length === 0}
+      aria-label={t("selectContainerForDocument", { document: docId })}
+      title={transportCodes.length === 0 ? t("noContainerForUpload", { document: docId }) : t("selectContainerForDocument", { document: docId })}
+      className="max-w-[190px] rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800 outline-none focus:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+    >
+      <option value="">{t("selectContainer")}</option>
+      {transportCodes.map((code) => (
+        <option key={code} value={code}>{code}</option>
+      ))}
+    </select>
+  );
   const [isSendingEmail] = useState(false);
   const [emailSent] = useState(false);
   const [isOpeningTracking, setIsOpeningTracking] = useState(false);
@@ -1182,7 +1234,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setIsPreviewCollapsed(false);
     setLocalUploads({});
     setOpenDocumentFileListId(null);
-    setSelectedTransportCode("");
+    setSelectedContainerCodes({});
+    setInspectionFolderNote("");
+    setInspectionFolderChoice("");
   };
 
   const handleModalClose = () => {
@@ -1199,6 +1253,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setIsPreviewCollapsed(false);
     setLocalUploads({});
     setOpenDocumentFileListId(null);
+    setSelectedContainerCodes({});
+    setInspectionFolderNote("");
+    setInspectionFolderChoice("");
   }, [isOpen, shipment?.id]);
 
   useEffect(() => {
@@ -1265,9 +1322,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setContainerDetailForms(flattenContainerDetails(shipment.database));
     setIsDetailsEditing(false);
     setIsReturnLoading(true);
+    // Danh mục lấy từ cache (đã có sẵn khi tải danh sách đơn), không tải lại mỗi lần mở / làm mới modal.
     void Promise.all([
-      listDatabaseRows<SupplierRecord>(databaseEndpoints.suppliers),
-      listDatabaseRows<CarrierRecord>(databaseEndpoints.carriers),
+      listCatalogRows<SupplierRecord>(databaseEndpoints.suppliers),
+      listCatalogRows<CarrierRecord>(databaseEndpoints.carriers),
     ]).then(([suppliers, carriers]) => {
       setSupplierOptions(suppliers);
       setCarrierOptions(carriers);
@@ -1276,14 +1334,22 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setCarrierOptions([]);
     });
     setWarehouseOptions([]);
-    void listDatabaseRows<WarehouseRecord>(databaseEndpoints.warehouses)
+    void listCatalogRows<WarehouseRecord>(databaseEndpoints.warehouses)
       .then(setWarehouseOptions)
       .catch(() => setWarehouseOptions([]));
     const databaseOrderId = shipment.database?.purchase.ma_hop_dong || shipment.orderCode;
-    void fetchReturnItems(databaseOrderId)
+    // Đơn đã có quan hệ PostgreSQL thì dựng dòng vận chuyển từ dữ liệu sẵn có, không gọi API.
+    const returnItemsRequest = shipment.database
+      ? Promise.resolve(returnItemsFromRelations(shipment.database))
+      : fetchReturnItems(databaseOrderId);
+    void returnItemsRequest
       .then((results) => {
         const displayResults = results.map((result) => ({ ...result, soHd: shipment.orderCode }));
-        const firstResult = displayResults[0] || null;
+        // Giữ container đang chọn khi dữ liệu được làm mới (ví dụ vừa lưu thông tin vận chuyển).
+        const preferred = preferredReturnContainerRef.current;
+        const firstResult = (preferred?.orderCode === shipment.orderCode
+          ? displayResults.find((item) => item.idBlContainer === preferred.idBlContainer)
+          : undefined) || displayResults[0] || null;
         setReturnItems(displayResults);
         setReturnItem(firstResult);
         setReturnForm(firstResult);
@@ -1326,6 +1392,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const canEditReturnItem = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.editReturnItem;
   const canEditDetails = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.editShipmentDetails;
   const canCancelShipment = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.cancelShipment;
+  // Tiền hàng chỉ admin/logistic xem được; BE cũng không trả các cột này cho role khác.
+  const canViewPurchaseAmounts = permissions.viewPurchaseAmounts;
+  const purchaseDetailCompareFields = canViewPurchaseAmounts
+    ? ["ten_hang", "so_kien", "net_weight", "don_gia", "tong_gia"]
+    : ["ten_hang", "so_kien", "net_weight"];
   const shipmentContainers = flattenShipmentContainers(shipment.database);
   const billContainerRows = shipment.database?.bills.flatMap((bill) => (
     bill.containers.length > 0
@@ -1369,7 +1440,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     .filter((field) => !hiddenDetailFields.has(normalizeSheetField(field)));
   const groupedDetailFields = DETAIL_FIELD_GROUPS.map((group) => ({
     ...group,
-    fields: group.fields.map(({ sheetField, labelKey }) => ({
+    fields: group.fields.filter(({ sheetField }) => canViewPurchaseAmounts || !isMoneyDetailField(sheetField)).map(({ sheetField, labelKey }) => ({
       field: findActualSheetField(detailFields, sheetField),
       labelKey,
     })),
@@ -1434,17 +1505,23 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       uploadedAt: undefined,
       uploadedBy: undefined,
       uploadedByEmail: undefined,
+      folderName: undefined,
     }))).map((file, index) => ({
       url: file.fileUrl,
       fileName: file.fileName?.trim() || "",
       uploadedAt: file.uploadedAt || "",
       uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
       label: [
-        file.referenceCode?.trim()
+        containerFolderLabel(file.folderName, shipment.orderCode, document.id)
+          || file.referenceCode?.trim()
           || shipment.database?.details.find((detail) => detail.id_chi_tiet === file.idChiTiet)?.ten_hang,
         file.fileName?.trim() || t("documentFileIndex", { index: index + 1 }),
       ].filter(Boolean).join(" — "),
     }));
+    // TRA_CONT/INSPECTION: gom file cùng thư mục container đứng cạnh nhau.
+    if (CONTAINER_FOLDER_DOCUMENT_CODES.has(document.id)) {
+      databaseFiles.sort((a, b) => a.label.localeCompare(b.label, "vi", { numeric: true }));
+    }
     // chung_tu_drive là nguồn duy nhất để hiển thị file và metadata trên FE.
     const sourceFiles = [
       ...databaseFiles,
@@ -1454,6 +1531,46 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     ];
     const files = sourceFiles.filter((file, index, allFiles) => file.url && allFiles.findIndex((other) => other.url === file.url) === index);
     return { document, files };
+  });
+  // Thư mục ảnh kiểm dịch đã tạo (lấy từ metadata DB) để hôm sau chọn lại, không phải nhập tay.
+  const inspectionFolders = (() => {
+    const folders = new Map<string, { folderName: string; containerCode: string; label: string }>();
+    for (const file of documentsSorted.find((document) => document.id === "INSPECTION")?.files || []) {
+      const folderName = file.folderName?.trim();
+      if (!folderName) continue;
+      const current = folders.get(folderName.toLowerCase());
+      if (current) {
+        if (!current.containerCode && file.referenceCode?.trim()) current.containerCode = file.referenceCode.trim();
+        continue;
+      }
+      folders.set(folderName.toLowerCase(), {
+        folderName,
+        containerCode: file.referenceCode?.trim() || "",
+        label: containerFolderLabel(folderName, shipment.orderCode, "INSPECTION") || folderName,
+      });
+    }
+    return [...folders.values()].sort((a, b) => a.label.localeCompare(b.label, "vi", { numeric: true }));
+  })();
+  const selectedInspectionFolder = inspectionFolders.find((folder) => folder.folderName === inspectionFolderChoice) || null;
+  const isUploadTargetReady = (docId: string) => !CONTAINER_FOLDER_DOCUMENT_CODES.has(docId)
+    || Boolean(docId === "INSPECTION" && selectedInspectionFolder)
+    || Boolean(getContainerCode(docId));
+  const getUploadTargetParams = (docId: string): { transportCode?: string; folderNote?: string; containerFolderName?: string } => {
+    if (docId === "INSPECTION" && selectedInspectionFolder) {
+      return {
+        containerFolderName: selectedInspectionFolder.folderName,
+        ...(selectedInspectionFolder.containerCode ? { transportCode: selectedInspectionFolder.containerCode } : {}),
+      };
+    }
+    const containerCode = CONTAINER_FOLDER_DOCUMENT_CODES.has(docId) ? getContainerCode(docId) : "";
+    const folderNote = docId === "INSPECTION" ? inspectionFolderNote.trim() : "";
+    return { ...(containerCode ? { transportCode: containerCode } : {}), ...(folderNote ? { folderNote } : {}) };
+  };
+  const formatDuplicateFileNames = (check: DocumentFileNameCheckResponse) => t("duplicateDocumentFileNames", {
+    files: check.files
+      .filter((file) => file.duplicate)
+      .map((file) => `${file.targetName} (${file.reason === "exists" ? t("duplicateReasonExists", { folder: check.folderName }) : t("duplicateReasonSameBatch")})`)
+      .join("; "),
   });
   const requiredDocumentsSorted = documentsSorted.filter((document) => !OPTIONAL_DOCUMENT_CODES.has(document.id.toUpperCase()));
   const optionalDocuments = documentsSorted.filter((document) => OPTIONAL_DOCUMENT_CODES.has(document.id.toUpperCase()));
@@ -1610,8 +1727,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   const handlePickUpload = (docId: string, multiple = false) => {
     if (!canUploadDocuments || !canUploadDocumentType(user, docId) || isArchived) return;
-    if (docId === "TRA_CONG" && !activeTransportCode) {
-      notify("Vui lòng chọn mã công trước khi upload chứng từ trả công.", "error");
+    if (!isUploadTargetReady(docId)) {
+      notify(containerRequiredMessage(docId), "error");
       return;
     }
     setSelectedMissingDocIds([docId]);
@@ -1659,10 +1776,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const file = files[0];
     const docId = selectedMissingDocIds[0];
     if (!file || !docId || !canUploadDocuments || !canUploadDocumentType(user, docId) || isArchived || isOcrAnalyzing || isOcrSaving) return;
-    if (docId === "TRA_CONG" && !activeTransportCode) {
-      setOcrUploadError("Vui lòng chọn mã công trước khi upload chứng từ trả công.");
+    if (!isUploadTargetReady(docId)) {
+      setOcrUploadError(containerRequiredMessage(docId));
       return;
     }
+    const uploadTarget = getUploadTargetParams(docId);
     event.target.value = "";
     setAllowMultipleUpload(false);
     const documentType = getOcrDocumentType(docId);
@@ -1678,14 +1796,28 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         setOcrUploadError("Chứng từ có OCR chỉ xử lý từng file một để xác nhận kết quả.");
         return;
       }
+      // Báo trùng tên ngay khi chọn file, trước khi upload hoặc chạy OCR.
+      setIsOcrSaving(true);
+      const nameCheck = await checkDocumentFileNames({
+        orderCode: shipment.orderCode,
+        documentCode: docId,
+        fileNames: files.map((selectedFile) => selectedFile.name),
+        ...uploadTarget,
+      });
+      if (nameCheck.hasDuplicates) {
+        const message = formatDuplicateFileNames(nameCheck);
+        setOcrUploadError(message);
+        notify(message, "error");
+        return;
+      }
       if (!documentType) {
-        setIsOcrSaving(true);
+        let lastUpload: Awaited<ReturnType<typeof uploadDocument>> | null = null;
         for (const selectedFile of files) {
           const fingerprint = `${shipment.orderCode}:${docId}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`;
           const requestId = pendingUploadRequestIds.current.get(fingerprint) || crypto.randomUUID();
           pendingUploadRequestIds.current.set(fingerprint, requestId);
           const fileData = await readFileAsBase64(selectedFile);
-          await uploadDocument({
+          lastUpload = await uploadDocument({
             action: "uploadDocument",
             orderCode: shipment.orderCode,
             documentCode: docId,
@@ -1693,14 +1825,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             fileData,
             mimeType: getDocumentMimeType(selectedFile),
             requestId,
-            ...(docId === "TRA_CONG" ? { transportCode: activeTransportCode } : {}),
+            ...uploadTarget,
           });
         }
         recordActivity(user, {
           action: "UPLOAD_DOCUMENT",
           location: "ShipmentDetailModal/Documents",
-          detail: `Đã upload file chứng từ ${docId} cho đơn ${shipment.orderCode}; ${files.map((selectedFile) => selectedFile.name).join(", ")}${docId === "TRA_CONG" ? `; mã công ${activeTransportCode}` : ""}`,
+          detail: `Đã upload file chứng từ ${docId} cho đơn ${shipment.orderCode}; ${files.map((selectedFile) => selectedFile.name).join(", ")}${lastUpload?.containerFolderName ? `; thư mục ${lastUpload.containerFolderName}` : ""}`,
         });
+        // Lần upload sau mặc định vào thư mục ảnh vừa dùng.
+        if (docId === "INSPECTION" && lastUpload?.containerFolderName) setInspectionFolderChoice(lastUpload.containerFolderName);
         setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
         await onRefresh?.();
         try {
@@ -1715,6 +1849,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         });
         return;
       }
+      setIsOcrSaving(false);
       setOcrUploadFile(file);
       setOcrUploadDocId(docId);
       setOcrUploadRequestId(crypto.randomUUID());
@@ -1935,13 +2070,14 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     Object.entries(detailForm).forEach(([field, nextValue]) => {
       const normalizedField = field.trim().toLowerCase();
       if (normalizedField === "số hđ" || normalizedField === "stt" || normalizedField === "order_code" || normalizedField === "order code") return;
+      if (!canViewPurchaseAmounts && isMoneyDetailField(field)) return;
       if (nextValue !== (shipment.summaryFields?.[field] || "")) data[field] = nextValue;
     });
     const newPurchaseDetails = purchaseDetailForms.filter((draft) => draft.id_chi_tiet.startsWith("new-"));
     const changedPurchaseDetails = purchaseDetailForms.filter((draft) => {
       if (draft.id_chi_tiet.startsWith("new-")) return false;
       const original = shipment.database?.details.find((item) => item.id_chi_tiet === draft.id_chi_tiet);
-      return !original || ["ten_hang", "so_kien", "net_weight", "don_gia", "tong_gia"].some((field) => (
+      return !original || purchaseDetailCompareFields.some((field) => (
         String(draft[field as keyof PurchaseDetailRecord] ?? "") !== String(original[field as keyof PurchaseDetailRecord] ?? "")
       ));
     });
@@ -2040,8 +2176,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             ten_hang: detail.ten_hang,
             so_kien: databasePackageCountOrNull(detail.so_kien),
             net_weight: databaseNumberOrNull(detail.net_weight),
-            don_gia: databaseNumberOrNull(detail.don_gia),
-            tong_gia: databaseNumberOrNull(detail.tong_gia),
+            // Không gửi tiền hàng khi user không xem được, tránh ghi đè giá đang có.
+            ...(canViewPurchaseAmounts ? {
+              don_gia: databaseNumberOrNull(detail.don_gia),
+              tong_gia: databaseNumberOrNull(detail.tong_gia),
+            } : {}),
           },
         )),
         ...changedItemCodes.map((item) => updateDatabaseRow<PurchaseItemCodeRecord>(
@@ -2069,8 +2208,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           ten_hang: detail.ten_hang.trim(),
           so_kien: databasePackageCountOrNull(detail.so_kien),
           net_weight: databaseNumberOrNull(detail.net_weight),
-          don_gia: databaseNumberOrNull(detail.don_gia),
-          tong_gia: databaseNumberOrNull(detail.tong_gia),
+          ...(canViewPurchaseAmounts ? {
+            don_gia: databaseNumberOrNull(detail.don_gia),
+            tong_gia: databaseNumberOrNull(detail.tong_gia),
+          } : {}),
           don_vi_kien: detail.don_vi_kien || null,
         });
         for (const item of detail.itemCodes) {
@@ -2102,6 +2243,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       const logChanges = [
         ...Object.entries(data).map(([field, value]) => {
           const before = getOriginalSummaryValue(shipment.summaryFields, field).trim();
+          // Nhật ký xem được bởi role khác (IT), nên không ghi số tiền.
+          if (isMoneyDetailField(field)) return `${field}: (đã thay đổi)`;
           return `${field}: ${before || "(trống)"} → ${value.trim() || "(trống)"}`;
         }),
         ...newPurchaseDetails.map((detail) => `thêm hàng ${detail.ten_hang}`),
@@ -2112,8 +2255,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           `hàng ${detail.ten_hang}`,
           shipment.database?.details.find((item) => item.id_chi_tiet === detail.id_chi_tiet),
           detail,
-          { ten_hang: "Tên hàng", so_kien: "Số kiện", net_weight: "NET", don_gia: "Đơn giá", tong_gia: "Tổng tiền" },
+          { ten_hang: "Tên hàng", so_kien: "Số kiện", net_weight: "NET" },
         )),
+        ...changedPurchaseDetails.flatMap((detail) => {
+          const original = shipment.database?.details.find((item) => item.id_chi_tiet === detail.id_chi_tiet);
+          const amountChanged = canViewPurchaseAmounts && (["don_gia", "tong_gia"] as const).some((field) => (
+            String(detail[field] ?? "") !== String(original?.[field] ?? "")
+          ));
+          return amountChanged ? [`hàng ${detail.ten_hang}: Đơn giá/Tổng tiền (đã thay đổi)`] : [];
+        }),
         ...newItemCodes.map(({ item }) => `thêm Item Code ${item.item_code}${item.ma_nha_may ? ` (${item.ma_nha_may})` : ""}`),
         ...changedItemCodes.flatMap((item) => {
           const original = shipment.database?.details.flatMap((detail) => detail.itemCodes).find((candidate) => candidate.id_item_code === item.id_item_code);
@@ -2179,6 +2329,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setReturnItem(displayResult);
       setReturnForm(displayResult || returnForm);
       setIsReturnEditing(false);
+      preferredReturnContainerRef.current = { orderCode: shipment.orderCode, idBlContainer: returnForm.idBlContainer };
+      // Làm mới danh sách để lần mở sau / Xuất Excel dùng dữ liệu vận chuyển mới.
+      void onRefresh?.();
       notify("Đã cập nhật thông tin vận chuyển Container", "success");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Không thể cập nhật thông tin vận chuyển Container", "error");
@@ -2226,7 +2379,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       className={`mx-2 my-2 flex h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl flex-col overflow-hidden transition-[width,transform] duration-300 sm:mx-4 sm:my-4 sm:h-[94vh] sm:w-full ${previewUrl && !isPreviewCollapsed && !isPreviewMaximized ? "md:w-[calc(50vw-1.5rem)] md:max-w-none md:-translate-x-1/2" : ""}`}
     >
       {/* Header */}
-      <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-4 pb-4 pt-5 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pb-4 sm:pt-6">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-4 pb-3 pt-4 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pb-4 sm:pt-6">
         <div className="min-w-0 flex flex-col gap-1 pr-10 sm:pr-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
             <h2 className="min-w-0 break-all text-base font-bold tracking-wide text-gray-900 dark:text-white sm:text-lg font-mono">
@@ -2242,8 +2395,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               {t("piDate")}: <span className="font-semibold text-gray-700 dark:text-gray-200">{piDateDisplay}</span>
             </p>
           )}
-          <p className="break-words text-sm text-gray-500 dark:text-gray-400">{shipment.shipName}</p>
-          <p className="break-words text-xs text-gray-400">{t("supplierPrefix", { supplier: shipment.supplier })}</p>
+          {/* Màn nhỏ: rút gọn tên hàng/NCC để phần nội dung tab còn đủ chỗ; xem đầy đủ ở tab Tổng quan. */}
+          <p className="line-clamp-2 break-words text-sm text-gray-500 sm:line-clamp-none dark:text-gray-400" title={shipment.shipName}>{shipment.shipName}</p>
+          <p className="truncate text-xs text-gray-400 sm:whitespace-normal sm:break-words" title={shipment.supplier}>{t("supplierPrefix", { supplier: shipment.supplier })}</p>
         </div>
 
         {/* Missing docs badge */}
@@ -2255,7 +2409,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`inline-flex min-w-0 basis-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-2 text-xs font-medium transition-all duration-150 sm:basis-auto sm:flex-shrink-0 sm:flex-none sm:justify-start sm:px-3 sm:py-1.5 ${
+            className={`inline-flex min-w-0 basis-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-all duration-150 sm:basis-auto sm:flex-shrink-0 sm:flex-none sm:justify-start sm:px-3 sm:py-1.5 ${
               activeTab === tab.key
                 ? "bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"
                 : "text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200"
@@ -2422,8 +2576,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <InfoRow label={t("invoiceNumber")} value={overviewInfo.invoice || t("notAvailable")} mono />
                   <InfoRow label={t("packageCount")} value={overviewPackageDisplay || t("notAvailable")} />
                   <InfoRow label={t("netWeight")} value={overviewNetWeightDisplay || t("notAvailable")} />
-                  <InfoRow label={t("unitPrice")} value={overviewUnitPriceDisplay || t("notAvailable")} />
-                  <InfoRow label={t("goodsValue")} value={overviewGoodsValueDisplay || t("notAvailable")} />
+                  {canViewPurchaseAmounts && <InfoRow label={t("unitPrice")} value={overviewUnitPriceDisplay || t("notAvailable")} />}
+                  {canViewPurchaseAmounts && <InfoRow label={t("goodsValue")} value={overviewGoodsValueDisplay || t("notAvailable")} />}
                 </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
@@ -2780,7 +2934,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-800 dark:text-white/90 truncate">{language === "en" ? t("documentName", { code: doc.id }) : doc.name}</p>
                       <p className="text-xs text-gray-400">{doc.type.toUpperCase()}</p>
-                      {documentFiles[0] && <p className="mt-1 truncate text-[10px] text-gray-400">{[documentFiles[0].fileName || documentFiles[0].label, documentFiles[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(documentFiles[0].uploadedAt, language)].join(" · ")}</p>}
+                      {documentFiles[0] && <p className="mt-1 truncate text-[10px] text-gray-400">{[CONTAINER_FOLDER_DOCUMENT_CODES.has(doc.id) ? documentFiles[0].label : (documentFiles[0].fileName || documentFiles[0].label), documentFiles[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(documentFiles[0].uploadedAt, language)].join(" · ")}</p>}
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -2802,20 +2956,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           </svg>
                         </a>
                       )}
-                      {doc.id === "TRA_CONG" && transportCodes.length > 1 && !isArchived && canUploadDocuments && canUploadDocumentType(user, doc.id) && (
-                        <select
-                          value={selectedTransportCode}
-                          onChange={(event) => setSelectedTransportCode(event.target.value)}
-                          onClick={(event) => event.stopPropagation()}
-                          aria-label="Chọn mã công trả công"
-                          className="max-w-[190px] rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800 outline-none focus:border-amber-400 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
-                        >
-                          <option value="">Chọn mã công</option>
-                          {returnItems.map((item) => (
-                            <option key={item.idBlContainer} value={item.soCont}>{item.soCont}</option>
-                          ))}
-                        </select>
-                      )}
+                      {CONTAINER_FOLDER_DOCUMENT_CODES.has(doc.id) && !isArchived && canUploadDocuments && canUploadDocumentType(user, doc.id) && renderContainerSelect(doc.id)}
                       <span className={`flex items-center gap-1 text-xs font-semibold ${docStatus?.color}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${docStatus?.dot}`} />
                         {isPassed ? t("passed") : t({ ok: "available", missing: "missing", pending: "pending", expired: "expired" }[doc.status] || "status")}
@@ -2854,7 +2995,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               >
                                 <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-400">{doc.id === "BL" ? "B/L" : doc.id} {index + 1}</span>
                                 <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">
-                                  <span className="block truncate">{file.fileName || file.label}</span>
+                                  <span className="block truncate">{CONTAINER_FOLDER_DOCUMENT_CODES.has(doc.id) ? file.label : (file.fileName || file.label)}</span>
                                   <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
                                 </span>
                               </button>
@@ -2903,6 +3044,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   const color = OPTIONAL_DOCUMENT_COLORS[document.id] || OPTIONAL_DOCUMENT_COLORS.AN;
                   const hasFile = document.status === "ok" && files.length > 0;
                   const canUploadThisDocument = canUploadDocuments && canUploadDocumentType(user, document.id);
+                  const usesContainerFolder = CONTAINER_FOLDER_DOCUMENT_CODES.has(document.id);
                   return (
                     <div
                       key={document.id}
@@ -2964,8 +3106,65 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         <p className={`mt-1 text-[11px] ${hasFile ? "text-success-600 dark:text-success-400" : "text-gray-400"}`}>
                           {hasFile ? `${files.length} file đã đính kèm` : "Bấm để chọn file"}
                         </p>
-                        {hasFile && files[0] && <p className="mt-1 truncate text-[10px] text-gray-400">{[files[0].fileName || files[0].label, files[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(files[0].uploadedAt, language)].join(" · ")}</p>}
+                        {hasFile && files[0] && <p className="mt-1 truncate text-[10px] text-gray-400">{[usesContainerFolder ? files[0].label : (files[0].fileName || files[0].label), files[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(files[0].uploadedAt, language)].join(" · ")}</p>}
                       </div>
+                      {!isArchived && canUploadThisDocument && (usesContainerFolder || hasFile) && (
+                        <div className="flex w-full flex-col gap-2" onClick={stopEvent} onKeyDown={stopEvent}>
+                          {usesContainerFolder && (
+                            <>
+                              {document.id === "INSPECTION" && inspectionFolders.length > 0 && (
+                                <select
+                                  value={selectedInspectionFolder?.folderName || ""}
+                                  onChange={(event) => setInspectionFolderChoice(event.target.value)}
+                                  aria-label={t("inspectionFolderSelectLabel")}
+                                  title={t("inspectionFolderSelectLabel")}
+                                  className="w-full rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-semibold text-violet-800 outline-none focus:border-violet-400 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
+                                >
+                                  <option value="">{t("inspectionNewFolder")}</option>
+                                  {inspectionFolders.map((folder) => (
+                                    <option key={folder.folderName} value={folder.folderName}>{folder.label}</option>
+                                  ))}
+                                </select>
+                              )}
+                              {document.id === "INSPECTION" && selectedInspectionFolder ? (
+                                <p className="break-all text-[10px] text-gray-400">
+                                  {t("containerFolderPreview", { folder: selectedInspectionFolder.folderName })}
+                                </p>
+                              ) : (
+                                <>
+                                  {renderContainerSelect(document.id)}
+                                  {document.id === "INSPECTION" && (
+                                    <input
+                                      type="text"
+                                      value={inspectionFolderNote}
+                                      onChange={(event) => setInspectionFolderNote(event.target.value)}
+                                      maxLength={120}
+                                      placeholder={t("inspectionFolderNotePlaceholder")}
+                                      aria-label={t("inspectionFolderNoteLabel")}
+                                      className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] text-gray-700 outline-none focus:border-brand-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+                                    />
+                                  )}
+                                  {getContainerCode(document.id) && (
+                                    <p className="break-all text-[10px] text-gray-400">
+                                      {t("containerFolderPreview", {
+                                        folder: [shipment.orderCode, document.id, getContainerCode(document.id), document.id === "INSPECTION" ? inspectionFolderNote.trim() : ""].filter(Boolean).join("_"),
+                                      })}
+                                    </p>
+                                  )}
+                                </>
+                              )}
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            disabled={isOcrAnalyzing || isOcrSaving}
+                            onClick={() => handlePickUpload(document.id, true)}
+                            className="self-start rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300"
+                          >
+                            {hasFile ? t("uploadAnother") : t("uploadDocument")}
+                          </button>
+                        </div>
+                      )}
                       {openDocumentFileListId === document.id && files.length > 1 && (
                         <div className="w-full space-y-1 border-t border-gray-100 pt-2 dark:border-gray-800">
                           {files.map((file, index) => (
@@ -2983,7 +3182,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               >
                                 <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-300">{document.id} {index + 1}</span>
                                 <span className="min-w-0 truncate">
-                                  <span className="block truncate">{file.fileName || file.label}</span>
+                                  <span className="block truncate">{usesContainerFolder ? file.label : (file.fileName || file.label)}</span>
                                   <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
                                 </span>
                               </button>
@@ -3048,6 +3247,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         onClick={() => {
                           setReturnItem(item);
                           setReturnForm(item);
+                          preferredReturnContainerRef.current = { orderCode: shipment.orderCode, idBlContainer: item.idBlContainer };
                         }}
                         className={`rounded-lg border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${selected
                           ? "border-brand-400 bg-brand-50 text-brand-700 dark:border-brand-500 dark:bg-brand-500/10 dark:text-brand-300"
@@ -3190,6 +3390,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   containerDetails={containerDetailForms}
                   editing={canEditDetails && isDetailsEditing}
                   translate={t}
+                  showAmounts={canViewPurchaseAmounts}
                   onChange={(id, field, value) => setPurchaseDetailForms((current) => current.map((detail) => (
                     detail.id_chi_tiet === id ? { ...detail, [field]: value } : detail
                   )))}
@@ -3238,7 +3439,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   key={group.key}
                   className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]"
                 >
-                  <div className={`flex items-center gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-gray-800 sm:px-5 ${group.headerClass}`}>
+                  <div className={`flex flex-wrap items-center gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-gray-800 sm:px-5 ${group.headerClass}`}>
                     <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-xs font-bold shadow-sm ${group.badgeClass}`}>
                       {group.number}
                     </span>
@@ -3272,18 +3473,18 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               <table className="w-full table-fixed text-left">
                                 <thead className="bg-gray-100/80 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900 dark:text-gray-400">
                                   <tr>
-                                    <th className="w-1/2 border-r border-gray-200 px-4 py-2.5 dark:border-gray-700">{t("billNumber")}</th>
-                                    <th className="w-1/2 px-4 py-2.5">{t("containerCode")}</th>
+                                    <th className="w-1/2 border-r border-gray-200 px-3 py-2.5 sm:px-4 dark:border-gray-700">{t("billNumber")}</th>
+                                    <th className="w-1/2 px-3 py-2.5 sm:px-4">{t("containerCode")}</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100 bg-white dark:divide-gray-800 dark:bg-white/[0.02]">
                                   {billContainerRows.length > 0 ? billContainerRows.map((row) => (
                                     <tr key={row.key}>
-                                      <td className="border-r border-gray-100 px-4 py-3 dark:border-gray-800">
-                                        <span className="font-semibold text-gray-800 dark:text-gray-200">{row.billNumber}</span>
+                                      <td className="border-r border-gray-100 px-3 py-3 sm:px-4 dark:border-gray-800">
+                                        <span className="break-all font-semibold text-gray-800 dark:text-gray-200">{row.billNumber}</span>
                                       </td>
-                                      <td className="px-4 py-3">
-                                        {row.containerNumber ? <span className="font-semibold text-cyan-700 dark:text-cyan-300">{row.containerNumber}</span> : <span className="text-sm text-gray-400">{t("noContainersForBill")}</span>}
+                                      <td className="px-3 py-3 sm:px-4">
+                                        {row.containerNumber ? <span className="break-all font-semibold text-cyan-700 dark:text-cyan-300">{row.containerNumber}</span> : <span className="text-sm text-gray-400">{t("noContainersForBill")}</span>}
                                       </td>
                                     </tr>
                                   )) : (

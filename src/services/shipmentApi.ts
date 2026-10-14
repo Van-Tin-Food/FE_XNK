@@ -17,7 +17,7 @@ import {
   updateDatabaseRow,
 } from "@/services/postgresShipmentApi";
 import type { DriveDocumentFileRecord, DriveDocumentRecord, DriveDocumentValue, NotificationRecord, PostgresShipmentRelations, PostgresShipmentSnapshot, PurchaseRecord } from "@/types/postgresShipment";
-import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
+import { type ApiError, createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
 export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
 export type DriveFolderLinks = {
@@ -27,10 +27,10 @@ export type DriveFolderLinks = {
 };
 const DOCUMENT_CODES = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
-  "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONG",
+  "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONT",
   "AN", "EDO", "CPN", "INSPECTION",
 ] as const;
-const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION"]);
+export const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -44,7 +44,7 @@ const FLOW_DOCUMENT_GROUPS: Array<{ key: Shipment["flowStageKey"]; docs: string[
   { key: "declared", docs: ["BB_LM", "PHI_TK", "THUE_NK", "TK"] },
   { key: "fifteenb", docs: ["15B"] },
   { key: "customs", docs: ["QDTQ", "MV"] },
-  { key: "delivered", docs: ["TRA_CONG"] },
+  { key: "delivered", docs: ["TRA_CONT"] },
 ];
 
 const FLOW_STAGE_LABELS: Record<NonNullable<Shipment["flowStageKey"]>, string> = {
@@ -97,7 +97,7 @@ const DOCUMENT_FIELD_MAP = {
   PI: "pi", INV: "inv", PKL: "pkl", BL: "bl", CO: "co", HC: "hc",
   DON_KD: "don_kd", AN: "an", EDO: "edo", CPN: "cpn", INSPECTION: "inspection",
   BB_LM: "bb_lm", PHI_TK: "phi_tk", THUE_NK: "thue_nk",
-  TK: "tk", "15B": "15b", QDTQ: "qdtq", MV: "mv", TRA_CONG: "tra_cong",
+  TK: "tk", "15B": "15b", QDTQ: "qdtq", MV: "mv", TRA_CONT: "tra_cong",
 } as const satisfies Record<(typeof DOCUMENT_CODES)[number], keyof DriveDocumentRecord>;
 
 function buildDocuments(total: DriveDocumentRecord | undefined): ShipmentDocument[] {
@@ -155,6 +155,8 @@ function parseDocumentFiles(value: DriveDocumentValue | undefined): DriveDocumen
       uploadedAt: typeof file.uploadedAt === "string" ? file.uploadedAt : undefined,
       uploadedBy: typeof file.uploadedBy === "string" ? file.uploadedBy : undefined,
       uploadedByEmail: typeof file.uploadedByEmail === "string" ? file.uploadedByEmail : undefined,
+      folderId: typeof file.folderId === "string" ? file.folderId : undefined,
+      folderName: typeof file.folderName === "string" ? file.folderName : undefined,
     }];
   });
   return files.filter((file, index) => files.findIndex((other) => (
@@ -168,7 +170,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = `/api/${path.replace(/^\//, "")}`;
   const scope = path.startsWith("ocr/")
     ? "OCR"
-    : ["uploadDocument", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
+    : ["uploadDocument", "checkDocumentFileNames", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
       ? "Drive"
       : "Backend";
   try {
@@ -201,7 +203,50 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function fetchDriveDocumentMap(): Promise<Map<string, DriveDocumentRecord>> {
-  const rows = await fetchDriveDocumentRows();
+  return driveDocumentMap(await fetchDriveDocumentRows());
+}
+
+function groupBy<T>(rows: T[], key: (row: T) => unknown): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const value = String(key(row) ?? "");
+    const group = groups.get(value);
+    if (group) group.push(row);
+    else groups.set(value, [row]);
+  }
+  return groups;
+}
+
+function indexBy<T>(rows: T[], key: (row: T) => unknown): Map<string, T> {
+  const index = new Map<string, T>();
+  for (const row of rows) {
+    const value = String(key(row) ?? "");
+    if (!index.has(value)) index.set(value, row);
+  }
+  return index;
+}
+
+/**
+ * Chỉ mục quan hệ dựng một lần cho cả danh sách. Trước đây mỗi đơn lọc lại toàn bộ các bảng
+ * (số đơn × số dòng), dữ liệu càng nhiều càng chậm; giờ mỗi lần tra là O(1).
+ */
+function buildRelationIndex(database: PostgresShipmentSnapshot) {
+  return {
+    suppliers: indexBy(database.suppliers, (item) => item.id_ncc),
+    carriers: indexBy(database.carriers, (item) => item.id_hang_tau),
+    warehouses: indexBy(database.warehouses, (item) => item.id_kho),
+    detailsByContract: groupBy(database.purchaseDetails, (item) => item.ma_hop_dong),
+    itemCodesByDetail: groupBy(database.itemCodes, (item) => item.id_chi_tiet),
+    billsByContract: groupBy(database.bills, (item) => item.ma_hop_dong),
+    containersByBill: groupBy(database.containers, (item) => item.id_xnk),
+    containerDetailsByContainer: groupBy(database.containerDetails, (item) => item.id_bl_container),
+    transportsByContainer: groupBy(database.transports, (item) => item.id_bl_container),
+  };
+}
+
+type RelationIndex = ReturnType<typeof buildRelationIndex>;
+
+function driveDocumentMap(rows: DriveDocumentRecord[]): Map<string, DriveDocumentRecord> {
   const map = new Map<string, DriveDocumentRecord>();
   rows.forEach((row) => {
     const code = String(row.order_code ?? "").trim();
@@ -211,18 +256,17 @@ export async function fetchDriveDocumentMap(): Promise<Map<string, DriveDocument
 }
 
 export async function fetchShipments(): Promise<{ shipments: Shipment[]; lastUpdated: string; updatedBy: string }> {
-  const [database, totalMap] = await Promise.all([
-    fetchPostgresShipmentListSnapshot(),
-    fetchDriveDocumentMap(),
-  ]);
+  const database = await fetchPostgresShipmentListSnapshot();
+  const totalMap = database.driveDocuments ? driveDocumentMap(database.driveDocuments) : await fetchDriveDocumentMap();
+  const index = buildRelationIndex(database);
   const lastUpdated = new Date().toISOString();
   const shipments = database.purchases
     .filter((purchase) => String(purchase.ma_hop_dong || "").trim())
-    .map((purchase, index) => mapPostgresShipment(
+    .map((purchase, position) => mapPostgresShipment(
       purchase,
-      database,
-      totalMap.get(purchase.ma_hop_dong.trim().toUpperCase()),
       index,
+      totalMap.get(purchase.ma_hop_dong.trim().toUpperCase()),
+      position,
       lastUpdated,
     ));
   return {
@@ -239,33 +283,29 @@ function numberValue(value: string | number | null | undefined): number {
 
 function mapPostgresShipment(
   purchase: PurchaseRecord,
-  database: PostgresShipmentSnapshot,
+  database: RelationIndex,
   total: DriveDocumentRecord | undefined,
   index: number,
   updatedAt: string,
 ): Shipment {
-  const supplier = database.suppliers.find((item) => item.id_ncc === purchase.id_ncc);
-  const details = database.purchaseDetails
-    .filter((item) => item.ma_hop_dong === purchase.ma_hop_dong)
+  const supplier = database.suppliers.get(String(purchase.id_ncc ?? ""));
+  const details = (database.detailsByContract.get(String(purchase.ma_hop_dong)) || [])
     .map((detail) => ({
       ...detail,
-      itemCodes: database.itemCodes.filter((item) => item.id_chi_tiet === detail.id_chi_tiet),
+      itemCodes: database.itemCodesByDetail.get(String(detail.id_chi_tiet)) || [],
     }));
-  const bills = database.bills
-    .filter((item) => item.ma_hop_dong === purchase.ma_hop_dong)
+  const bills = (database.billsByContract.get(String(purchase.ma_hop_dong)) || [])
     .map((bill) => ({
       ...bill,
-      carrier: database.carriers.find((item) => item.id_hang_tau === bill.id_hang_tau),
-      containers: database.containers
-        .filter((item) => item.id_xnk === bill.id_xnk)
+      carrier: database.carriers.get(String(bill.id_hang_tau ?? "")),
+      containers: (database.containersByBill.get(String(bill.id_xnk)) || [])
         .map((container) => ({
           ...container,
-          details: database.containerDetails.filter((item) => item.id_bl_container === container.id_bl_container),
-          transports: database.transports
-            .filter((item) => item.id_bl_container === container.id_bl_container)
+          details: database.containerDetailsByContainer.get(String(container.id_bl_container)) || [],
+          transports: (database.transportsByContainer.get(String(container.id_bl_container)) || [])
             .map((transport) => ({
               ...transport,
-              warehouse: database.warehouses.find((item) => item.id_kho === transport.id_kho),
+              warehouse: transport.id_kho ? database.warehouses.get(String(transport.id_kho)) : undefined,
             })),
         })),
     }));
@@ -363,9 +403,21 @@ export function getNotifications(): Promise<NotificationRecord[]> {
 
 export async function markNotificationsRead(notificationIds: Array<string | number>): Promise<void> {
   const uniqueIds = [...new Set(notificationIds.map(String).filter(Boolean))];
-  await Promise.all(uniqueIds.map((id) =>
-    updateDatabaseRow<NotificationRecord>(databaseEndpoints.notifications, id, { status: 1 }),
-  ));
+  if (uniqueIds.length === 0) return;
+  try {
+    // Một request cho mọi thông báo thay vì một PATCH cho mỗi thông báo.
+    await requestJson("thong-bao/mark-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: uniqueIds }),
+    });
+  } catch (error) {
+    // BE cũ chưa có API gộp thì cập nhật từng thông báo như trước.
+    if ((error as ApiError).status !== 404) throw error;
+    await Promise.all(uniqueIds.map((id) =>
+      updateDatabaseRow<NotificationRecord>(databaseEndpoints.notifications, id, { status: 1 }),
+    ));
+  }
 }
 
 export interface DocumentProgressResponse {
@@ -405,6 +457,8 @@ export interface DocumentSyncCandidate {
   fileUrl: string;
   documentCode: string;
   folderName: string;
+  /** File nằm trong thư mục container (TRA_CONT, INSPECTION): mã đơn lấy theo tên thư mục. */
+  containerFolder?: boolean;
   orderCode: string;
   nameValid: boolean;
   expectedFileName: string;
@@ -493,7 +547,35 @@ export interface UploadDocumentPayload {
   referenceCode?: string;
   idChiTiet?: string;
   requestId: string;
+  /** Số container, bắt buộc với TRA_CONT và INSPECTION. */
   transportCode?: string;
+  /** Ghi chú nối vào tên thư mục container của INSPECTION. */
+  folderNote?: string;
+  /** Thư mục container đã có, dùng khi upload tiếp vào thư mục cũ. */
+  containerFolderName?: string;
+}
+
+export interface DocumentFileNameCheck {
+  fileName: string;
+  targetName: string;
+  duplicate: boolean;
+  reason: "exists" | "same_batch" | null;
+}
+
+export interface DocumentFileNameCheckResponse {
+  success: boolean;
+  folderName: string;
+  hasDuplicates: boolean;
+  files: DocumentFileNameCheck[];
+}
+
+/** Kiểm tra tên sẽ lưu trên Drive có trùng không trước khi upload (không ghi gì lên Drive). */
+export function checkDocumentFileNames(payload: Omit<UploadDocumentPayload, "action" | "fileName" | "fileData" | "mimeType" | "requestId"> & { fileNames: string[] }): Promise<DocumentFileNameCheckResponse> {
+  return requestJson<DocumentFileNameCheckResponse>("checkDocumentFileNames", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 export async function uploadDocument(payload: UploadDocumentPayload): Promise<DriveDataResponse> {
   let result: DriveDataResponse;

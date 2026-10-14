@@ -151,7 +151,7 @@ export default function DocumentSyncPage() {
   if (!canViewSync) return null;
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">{t("documentSync")}</h1>
@@ -178,20 +178,21 @@ export default function DocumentSyncPage() {
           {result?.candidates.map((candidate) => (
             <div key={candidate.candidateId} className="space-y-3 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="font-medium text-gray-900 dark:text-white">{candidate.fileName}</p>
+                <div className="min-w-0 flex-1 basis-64">
+                  <p className="break-all font-medium text-gray-900 dark:text-white">{candidate.fileName}</p>
                   <p className="text-xs text-gray-500">{candidate.orderCode || t("documentSyncNoOrderCode")} · {candidate.documentCode} · {candidate.folderName}</p>
                   {!candidate.nameValid && <p className="mt-1 text-xs font-semibold text-error-600">{t("documentSyncInvalidName", { fileName: candidate.expectedFileName })}</p>}
+                  {!candidate.nameValid && candidate.containerFolder && <p className="mt-1 text-xs text-gray-500">{t("documentSyncContainerFolderHint")}</p>}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <a href={candidate.fileUrl} target="_blank" rel="noreferrer" className="rounded-lg border px-3 py-2 text-xs font-semibold">{t("documentSyncOpenFile")}</a>
-                  {canSync && <><button type="button" onClick={() => { setRenameCandidate(candidate.candidateId); setRenameValue(candidate.fileName); setError(""); }} disabled={busyId === candidate.candidateId} className="rounded-lg border px-3 py-2 text-xs font-semibold">{t("documentSyncRename")}</button>
+                  {canSync && <>{!candidate.containerFolder && <button type="button" onClick={() => { setRenameCandidate(candidate.candidateId); setRenameValue(candidate.fileName); setError(""); }} disabled={busyId === candidate.candidateId} className="rounded-lg border px-3 py-2 text-xs font-semibold">{t("documentSyncRename")}</button>}
                   <button type="button" onClick={() => openAccept(candidate)} disabled={busyId === candidate.candidateId} className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white">{busyId === candidate.candidateId ? t("documentSyncSaving") : t("documentSyncAccept")}</button></>}
                 </div>
               </div>
 
               {renameCandidate === candidate.candidateId && <div className="flex flex-wrap gap-3 rounded-lg bg-gray-50 p-4 dark:bg-gray-950">
-                <input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} placeholder={t("documentSyncNewNamePlaceholder")} className="min-w-64 flex-1 rounded-lg border px-3 py-2 text-sm" />
+                <input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} placeholder={t("documentSyncNewNamePlaceholder")} className="w-full min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm sm:w-auto sm:min-w-64" />
                 <button type="button" onClick={() => void rename(candidate)} disabled={busyId === candidate.candidateId} className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-semibold text-white">{busyId === candidate.candidateId ? t("documentSyncRenaming") : t("documentSyncSaveName")}</button>
                 <button type="button" onClick={() => { setRenameCandidate(null); setRenameValue(""); }} disabled={busyId === candidate.candidateId} className="rounded-lg border px-3 py-2 text-sm font-semibold">{t("documentSyncCancel")}</button>
               </div>}
@@ -208,7 +209,7 @@ export default function DocumentSyncPage() {
         <div className="divide-y dark:divide-gray-800">
           {result?.trashedFiles.map((file) => (
             <div key={file.fileId} className="flex flex-wrap items-center justify-between gap-3 p-4">
-              <div><p className="font-medium text-gray-900 dark:text-white">{file.fileName || file.fileId}</p><p className="text-xs text-gray-500">{file.orderCode} · {file.documentCode}</p></div>
+              <div className="min-w-0 flex-1 basis-64"><p className="break-all font-medium text-gray-900 dark:text-white">{file.fileName || file.fileId}</p><p className="text-xs text-gray-500">{file.orderCode} · {file.documentCode}</p></div>
               {canSync && <button type="button" onClick={() => void restore(file.fileId, file.documentCode, file.fileName || file.fileId)} disabled={busyId === file.fileId} className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white">{busyId === file.fileId ? t("documentSyncRestoring") : t("documentSyncRestore")}</button>}
             </div>
           ))}

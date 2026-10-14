@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Claude Code: cấu hình cá nhân, không commit (settings.json dùng chung thì commit)
+.claude/settings.local.json

@@ -211,8 +211,15 @@ export const ETA_EXPORT_HEADERS = [
   "Thành tiền ($)", "Ngày vận chuyển", "Mã kho", "Nhà xe", "Nơi lấy công", "Nơi trả công",
 ];
 
+// Cột tiền hàng: chỉ xuất cho role được xem tiền hàng (viewPurchaseAmounts).
+const ETA_AMOUNT_HEADERS = new Set(["Giá bán($)", "Thành tiền ($)"]);
+
 /** Builds the contract-focused layout used by the ETA Google Sheet. */
-export function buildEtaRows(shipments: Shipment[], returnItemsByOrder: ReturnItemsByOrder): Array<Record<string, unknown>> {
+export function buildEtaRows(
+  shipments: Shipment[],
+  returnItemsByOrder: ReturnItemsByOrder,
+  { includeAmounts = true }: { includeAmounts?: boolean } = {},
+): Array<Record<string, unknown>> {
   let sequence = 1;
   const rows: Array<Record<string, unknown>> = sortByContractDate(shipments)
     .filter((shipment) => String(shipment.orderCode || "").trim() !== "")
@@ -277,11 +284,11 @@ export function buildEtaRows(shipments: Shipment[], returnItemsByOrder: ReturnIt
   // Giữ mọi dòng cùng một schema và cùng thứ tự cột trước khi gửi sang Apps Script.
   // Điều này tránh dữ liệu bị lệch cột khi một trường trong dòng bị rỗng.
   return rows.map((row) => Object.fromEntries(
-    ETA_EXPORT_HEADERS.map((header) => [header, row[header] ?? ""]),
+    getEtaHeaders({ includeAmounts }).map((header) => [header, row[header] ?? ""]),
   ));
 }
 
-export function getEtaHeaders(): string[] {
-  return [...ETA_EXPORT_HEADERS];
+export function getEtaHeaders({ includeAmounts = true }: { includeAmounts?: boolean } = {}): string[] {
+  return ETA_EXPORT_HEADERS.filter((header) => includeAmounts || !ETA_AMOUNT_HEADERS.has(header));
 }
 

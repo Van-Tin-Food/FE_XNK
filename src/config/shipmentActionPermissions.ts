@@ -27,7 +27,10 @@ export type ShipmentActionPermissionKey =
   | "sendEmail"
   | "viewDocumentSync"
   | "syncDocuments"
-  | "exportShipments";
+  | "exportShipments"
+  // Dữ liệu nhạy cảm (đồng bộ với SENSITIVE_DATA_VIEWERS trong be/src/config/rbac.js):
+  | "viewPurchaseAmounts"   // đơn giá, tổng tiền hàng
+  | "viewSupplierContact";  // email, SĐT, địa chỉ nhà cung cấp
 
 type ActionAccess = {
   view: ShipmentActionPermissionKey[];
@@ -45,14 +48,15 @@ const ROLE_ACCESS: Record<Exclude<RbacRole, "admin">, ActionAccess> = {
     manage: [],
   },
   logistic: {
-    view: ["viewTracking"],
+    // Xuất Excel chỉ đọc dữ liệu nên có ở cả session view và manage.
+    view: ["viewTracking", "exportShipments", "viewPurchaseAmounts"],
     manage: [
       "createShipment", "uploadDocument", "passDocument", "editShipmentDetails",
-      "syncDocuments", "manageMasterData",
+      "cancelShipment", "syncDocuments", "manageMasterData",
     ],
   },
   van_chuyen: {
-    view: ["viewTracking"],
+    view: ["viewTracking", "exportShipments"],
     manage: ["uploadDocument", "passDocument", "archiveDocuments", "editReturnItem", "syncDocuments", "manageMasterData"],
   },
 };
@@ -88,7 +92,17 @@ export function canUploadDocumentType(user: AuthUser | null, documentCode: strin
   return normalizeRole(user?.role) !== "van_chuyen" || documentCode.trim().toUpperCase() !== "PI";
 }
 
+// Đủ mọi action (TypeScript báo lỗi nếu thiếu key). Trước đây danh sách chỉ lấy action có trong
+// ROLE_ACCESS nên action chỉ-admin không có trong useAuth().permissions và admin bị ẩn nút.
+const ALL_SHIPMENT_ACTIONS: Record<ShipmentActionPermissionKey, true> = {
+  createShipment: true, uploadDocument: true, passDocument: true, archiveDocuments: true,
+  editReturnItem: true, editShipmentDetails: true, cancelShipment: true, viewActivityLogs: true,
+  viewUsers: true, manageUsers: true, viewMasterData: true, viewEmailLogs: true,
+  manageMasterData: true, registerUser: true, updateUserPassword: true, viewEmailTools: true,
+  viewTracking: true, sendEmail: true, viewDocumentSync: true, syncDocuments: true,
+  exportShipments: true, viewPurchaseAmounts: true, viewSupplierContact: true,
+};
+
 export const SHIPMENT_ACTION_PERMISSIONS = Object.fromEntries(
-  [...new Set(Object.values(ROLE_ACCESS).flatMap((access) => [...access.view, ...access.manage]))]
-    .map((action) => [action, []]),
+  Object.keys(ALL_SHIPMENT_ACTIONS).map((action) => [action, []]),
 ) as Record<ShipmentActionPermissionKey, never[]>;

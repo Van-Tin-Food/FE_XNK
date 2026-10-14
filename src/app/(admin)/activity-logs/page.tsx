@@ -218,7 +218,7 @@ export default function ActivityLogsPage() {
           </div>
           {activeTab === "email" && <div className="flex flex-col gap-2">
             <div className="flex flex-wrap gap-2">{(["all", "sent", "not sent"] as const).map((status) => <button key={status} type="button" onClick={() => { setEmailStatus(status); setPage(1); }} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${emailStatus === status ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 text-gray-500 dark:border-gray-700"}`}>{status === "all" ? t("allStatuses") : status === "sent" ? t("emailSentStatus") : t("emailNotSentStatus")}</button>)}</div>
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
               <select value={supplierFilter} onChange={(event) => { setSupplierFilter(event.target.value); setPage(1); }} aria-label={t("emailSupplierFilter")} className="h-10 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
                 <option value="all">{t("allSuppliers")}</option>
                 {suppliers.map((supplier) => <option key={supplier} value={supplier}>{supplier}</option>)}
@@ -228,7 +228,7 @@ export default function ActivityLogsPage() {
               <button type="button" onClick={clearEmailFilters} className="h-10 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("clearFilters")}</button>
             </div>
           </div>}
-          {activeTab === "activity" && <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto]">
+          {activeTab === "activity" && <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto]">
             <select value={activityAction} onChange={(event) => { setActivityAction(event.target.value); setPage(1); }} aria-label={t("activityActionFilter")} className="h-10 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
               <option value="all">{t("allActions")}</option>
               {activityActions.map((action) => <option key={action} value={action}>{actionLabel(action, t)}</option>)}

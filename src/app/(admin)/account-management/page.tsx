@@ -161,7 +161,7 @@ export default function AccountManagementPage() {
         </p>
       </div>
 
-      <div className="flex gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-800 dark:bg-white/[0.03]">
+      <div className="flex flex-wrap gap-1 rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-800 dark:bg-white/[0.03]">
         <TabButton active={activeTab === "users"} onClick={() => setActiveTab("users")}>{t("accountList")}</TabButton>
         {canEditUsers && <TabButton active={activeTab === "register"} onClick={() => setActiveTab("register")}>{t("registerAccount")}</TabButton>}
         {canEditUsers && <TabButton active={activeTab === "password"} onClick={() => setActiveTab("password")}>{t("resetPassword")}</TabButton>}
@@ -191,7 +191,7 @@ export default function AccountManagementPage() {
 
       {editing && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-gray-950/55 px-4" onMouseDown={() => !savingEdit && setEditing(null)}>
-          <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-900" onMouseDown={(event) => event.stopPropagation()}>
+          <div role="dialog" aria-modal="true" className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl sm:p-6 dark:border-gray-700 dark:bg-gray-900" onMouseDown={(event) => event.stopPropagation()}>
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("editAccountPermissions")}</h2>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{editing.name || editing.username} · @{editing.username}</p>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -201,7 +201,7 @@ export default function AccountManagementPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email Google (xác thực 2 bước)<input type="email" value={editEmail} onChange={(event) => setEditEmail(event.target.value)} placeholder="ten@vantinfood.vn" className="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></label>
               </div>
             </div>
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
               <button type="button" disabled={savingEdit} onClick={() => setEditing(null)} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
               <button type="button" disabled={savingEdit} onClick={() => void savePermission()} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60">{savingEdit ? t("saving") : t("savePermissions")}</button>
             </div>
@@ -230,21 +230,38 @@ function UserList({ users, total, loading, error, query, page, totalPages, pageS
             ariaLabel={t("searchAccounts")}
             className="h-10 min-w-0 w-full flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:w-72"
           />
-          <button type="button" onClick={onReload} disabled={loading} className="rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-300">{t("refreshData")}</button>
+          <button type="button" onClick={onReload} disabled={loading} className="shrink-0 whitespace-nowrap rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-300">{t("refreshData")}</button>
         </div>
       </div>
       {error ? <Feedback message={error} type="error" /> : loading ? <div className="flex min-h-64 items-center justify-center"><Spinner /></div> : users.length === 0 ? <div className="flex min-h-64 items-center justify-center text-sm text-gray-400">{t("noAccounts")}</div> : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px]">
+        <>
+        <div className="divide-y divide-gray-100 md:hidden dark:divide-gray-800">
+          {users.map((item) => {
+            const isAdmin = item.role.trim().toLowerCase() === "admin";
+            return (
+              <div key={item.id} className="flex items-start gap-3 p-4">
+                <div className="min-w-0 flex-1">
+                  <p className="break-all text-sm font-semibold text-gray-800 dark:text-white/90">{item.username || "—"} <span className="font-normal text-gray-400">#{item.id}</span></p>
+                  <p className="mt-0.5 break-words text-sm text-gray-600 dark:text-gray-300">{item.name || "—"}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5"><Badge>{item.role || "—"}</Badge><Badge>{item.session || "—"}</Badge></div>
+                </div>
+                {onEdit && <button type="button" disabled={isAdmin} title={isAdmin ? t("adminPermissionLocked") : t("editRoleSession")} onClick={() => onEdit(item)} className="shrink-0 rounded-lg border border-brand-200 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 dark:border-brand-500/30 dark:text-brand-400">{t("editPermissions")}</button>}
+              </div>
+            );
+          })}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[640px]">
             <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-900/50 dark:text-gray-400"><tr><th className="px-5 py-3">ID</th><th className="px-5 py-3">{t("username")}</th><th className="px-5 py-3">{t("displayName")}</th><th className="px-5 py-3">Role</th><th className="px-5 py-3">Session</th><th className="px-5 py-3 text-right">{t("actions")}</th></tr></thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {users.map((item) => {
                 const isAdmin = item.role.trim().toLowerCase() === "admin";
-                return <tr key={item.id} className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"><td className="px-5 py-4 text-sm text-gray-500">#{item.id}</td><td className="px-5 py-4 text-sm font-semibold text-gray-800 dark:text-white/90">{item.username || "—"}</td><td className="px-5 py-4 text-sm text-gray-600 dark:text-gray-300">{item.name || "—"}</td><td className="px-5 py-4"><Badge>{item.role || "—"}</Badge></td><td className="px-5 py-4"><Badge>{item.session || "—"}</Badge></td><td className="px-5 py-4 text-right">{onEdit && <button type="button" disabled={isAdmin} title={isAdmin ? t("adminPermissionLocked") : t("editRoleSession")} onClick={() => onEdit(item)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 dark:border-brand-500/30 dark:text-brand-400">{t("editPermissions")}</button>}</td></tr>;
+                return <tr key={item.id} className="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]"><td className="px-5 py-4 text-sm text-gray-500">#{item.id}</td><td className="break-all px-5 py-4 text-sm font-semibold text-gray-800 dark:text-white/90">{item.username || "—"}</td><td className="break-words px-5 py-4 text-sm text-gray-600 dark:text-gray-300">{item.name || "—"}</td><td className="px-5 py-4"><Badge>{item.role || "—"}</Badge></td><td className="px-5 py-4"><Badge>{item.session || "—"}</Badge></td><td className="px-5 py-4 text-right">{onEdit && <button type="button" disabled={isAdmin} title={isAdmin ? t("adminPermissionLocked") : t("editRoleSession")} onClick={() => onEdit(item)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 dark:border-brand-500/30 dark:text-brand-400">{t("editPermissions")}</button>}</td></tr>;
               })}
             </tbody>
           </table>
         </div>
+        </>
       )}
       {!loading && !error && users.length > 0 && <PaginationControls page={page} totalPages={totalPages} pageSize={pageSize} totalItems={total} from={from} to={to} onPageChange={onPageChange} onPageSizeChange={onPageSizeChange} />}
     </div>
@@ -309,7 +326,7 @@ function PasswordPanel({ currentUser }: { currentUser: ReturnType<typeof useAuth
   return <FormCard title={t("resetPassword")} description={t("resetPasswordDescription")}><form onSubmit={submit} autoComplete="off" className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2"><TextField label={t("username")} value={username} onChange={setUsername} /></div><TextField label={t("newPassword")} type="password" value={password} onChange={setPassword} /><TextField label={t("confirmPassword")} type="password" value={confirmation} onChange={setConfirmation} /><div className="sm:col-span-2 flex justify-end"><SubmitButton loading={submitting} text={t("updatePassword")} /></div></form></FormCard>;
 }
 
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" onClick={onClick} className={`shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${active ? "bg-brand-500 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}>{children}</button>; }
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" onClick={onClick} className={`flex-1 basis-[calc(50%-0.25rem)] rounded-lg px-3 py-2.5 text-sm font-semibold sm:flex-none sm:basis-auto sm:px-4 transition ${active ? "bg-brand-500 text-white shadow-sm" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}>{children}</button>; }
 function FormCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) { return <div className="sticky top-4 z-20 rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-6"><h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">{title}</h2><p className="mb-6 mt-1 text-sm text-gray-500 dark:text-gray-400">{description}</p><div className="max-w-2xl">{children}</div></div>; }
 function TextField({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) { return <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{label}<span className="text-error-500"> *</span><input type={type} value={value} onChange={(event) => onChange(event.target.value)} autoComplete={type === "password" ? "new-password" : "off"} className="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></label>; }
 function SelectField({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) { return <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{label}<span className="text-error-500"> *</span><select value={value} onChange={(event) => onChange(event.target.value)} className="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>; }

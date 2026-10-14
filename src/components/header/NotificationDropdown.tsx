@@ -106,6 +106,10 @@ function mapRows(rows: NotificationRow[], translate: (key: string, variables?: R
     });
 }
 
+function isUnreadRow(row: NotificationRow): boolean {
+  return String(row.status ?? "") === "0";
+}
+
 function isUnread(item: NotificationItem): boolean {
   return item.status === "0";
 }
@@ -136,42 +140,49 @@ export default function NotificationDropdown() {
   const { language, t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  // Giữ dữ liệu gốc từ API; đổi ngôn ngữ chỉ dựng lại nội dung, không gọi lại API.
+  const [rows, setRows] = useState<NotificationRow[]>([]);
+  const notifications = useMemo(() => mapRows(rows, t), [rows, t]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  // "" = không lỗi; null = lỗi không có nội dung, hiển thị câu mặc định theo ngôn ngữ.
+  const [errorMessage, setErrorMessage] = useState<string | null>("");
+  const error = errorMessage === null ? t("loadingNotifications") : errorMessage;
+  const rowsRef = useRef<NotificationRow[]>([]);
   const [hasNewNotification, setHasNewNotification] = useState(false);
   const [orderFilter, setOrderFilter] = useState("");
   const markingReadRef = useRef(false);
 
-  const applyRows = useCallback((rows: NotificationRow[], announce = false) => {
-    const mapped = mapRows(rows, t);
-    setNotifications(mapped);
-    setError("");
+  const applyRows = useCallback((nextRows: NotificationRow[], announce = false) => {
+    rowsRef.current = nextRows;
+    setRows(nextRows);
+    setErrorMessage("");
     setLoading(false);
-    if (announce && mapped.some(isUnread)) setHasNewNotification(true);
-  }, [t]);
+    if (announce && nextRows.some(isUnreadRow)) setHasNewNotification(true);
+  }, []);
 
-  const refreshNotifications = useCallback(async (announce = false) => {
+  const refreshNotifications = useCallback(async (announce = false): Promise<NotificationRow[] | null> => {
     try {
-      const rows = await getNotifications();
-      applyRows(rows as NotificationRow[], announce);
+      const nextRows = await getNotifications() as NotificationRow[];
+      applyRows(nextRows, announce);
+      return nextRows;
     } catch (refreshError) {
       setLoading(false);
-      setError(refreshError instanceof Error ? refreshError.message : t("loadingNotifications"));
+      setErrorMessage(refreshError instanceof Error ? refreshError.message : null);
+      return null;
     }
-  }, [applyRows, t]);
+  }, [applyRows]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refreshNotifications(), 0);
     return () => window.clearTimeout(timer);
-  }, [refreshNotifications, t]);
+  }, [refreshNotifications]);
 
   useEffect(() => {
     const handleUploadSync = () => void refreshNotifications(true);
 
     window.addEventListener(NOTIFICATIONS_SYNC_EVENT, handleUploadSync);
     return () => window.removeEventListener(NOTIFICATIONS_SYNC_EVENT, handleUploadSync);
-  }, [refreshNotifications, t]);
+  }, [refreshNotifications]);
 
   const filteredNotifications = useMemo(() => {
     const query = orderFilter.trim().toLowerCase();
@@ -184,18 +195,21 @@ export default function NotificationDropdown() {
     if (markingReadRef.current) return;
     markingReadRef.current = true;
     try {
-      const rows = await getNotifications() as NotificationRow[];
-      const unreadIds = rows
-        .filter((row) => String(row.status ?? "") === "0" && row.id_thong_bao !== undefined && row.id_thong_bao !== null)
+      // Tải mới một lần để có thông báo vừa phát sinh, rồi đánh dấu đã đọc bằng một request.
+      const latest = await refreshNotifications() || rowsRef.current;
+      const unreadIds = latest
+        .filter((row) => isUnreadRow(row) && row.id_thong_bao !== undefined && row.id_thong_bao !== null)
         .map((row) => row.id_thong_bao as string | number);
-      if (unreadIds.length > 0) await markNotificationsRead(unreadIds);
-      await refreshNotifications();
+      if (unreadIds.length === 0) return;
+      await markNotificationsRead(unreadIds);
+      const readIds = new Set(unreadIds.map(String));
+      applyRows(latest.map((row) => readIds.has(String(row.id_thong_bao)) ? { ...row, status: 1 } : row));
     } catch (markError) {
-      setError(markError instanceof Error ? markError.message : t("markReadError"));
+      setErrorMessage(markError instanceof Error ? markError.message : t("markReadError"));
     } finally {
       markingReadRef.current = false;
     }
-  }, [refreshNotifications, t]);
+  }, [applyRows, refreshNotifications, t]);
 
   const handleToggle = () => {
     const willOpen = !isOpen;
@@ -248,7 +262,8 @@ export default function NotificationDropdown() {
         </svg>
       </button>
 
-      <Dropdown isOpen={isOpen} onClose={() => setIsOpen(false)} className="absolute -right-[240px] mt-[17px] flex max-h-[80dvh] w-[350px] flex-col rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-lg dark:border-gray-800 dark:bg-gray-dark sm:w-[361px] lg:right-0">
+      {/* Dưới lg chuông nằm ở hàng menu thu gọn: hộp thông báo cố định theo bề ngang màn hình để không bị cắt. */}
+      <Dropdown isOpen={isOpen} onClose={() => setIsOpen(false)} className="flex flex-col rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-lg dark:border-gray-800 dark:bg-gray-dark max-lg:fixed max-lg:inset-x-3 max-lg:top-[140px] max-lg:mt-0 max-lg:max-h-[calc(100dvh-156px)] lg:right-0 lg:mt-[17px] lg:max-h-[80dvh] lg:w-[361px]">
         <div className="mb-3 flex shrink-0 items-center justify-between border-b border-gray-100 pb-3 dark:border-gray-700">
           <div>
             <h5 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{t("notifications")}</h5>

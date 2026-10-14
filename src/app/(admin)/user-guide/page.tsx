@@ -12,28 +12,29 @@ const DOCUMENT_FOLDERS = [
   ["04. PKL Bảng kê hàng hóa", "PKL", "guideDrivePkl"],
   ["05. CO Giấy chứng nhận xuất xứ", "CO", "guideDriveCo"],
   ["06. HC Giấy kiểm dịch y tế", "HC", "guideDriveHc"],
-  ["07. DON_KD Đơn đăng kí kiểm dịch động vật", "DON_KD", "guideDriveDonKd"],
+  ["07. DON_KD Đơn kiểm dịch động vật", "DON_KD", "guideDriveDonKd"],
   ["08. AN Thông báo hàng đến", "AN", "guideDriveAn"],
   ["09. EDO Lệnh giao hàng điện tử", "EDO", "guideDriveEdo"],
   ["10. CPN Chứng từ CPN quốc tế", "CPN", "guideDriveCpn"],
   ["11. TK Tờ khai hải quan", "TK", "guideDriveTk"],
-  ["12. BB_LM Biên bản lấy mẫu", "BB_LM", "guideDriveBbLm"],
+  ["12. BB_LM Biên bản lấy mẫu kiểm dịch", "BB_LM", "guideDriveBbLm"],
   ["13. INSPECTION Ảnh-video kiểm dịch", "INSPECTION", "guideDriveInspection"],
   ["14. PHI_TK Lệ phí tờ khai", "PHI_TK", "guideDrivePhiTk"],
   ["15. THUE_NK Nộp thuế nhập khẩu", "THUE_NK", "guideDriveThueNk"],
   ["16. CSHT Phí cơ sở hạ tầng", "CSHT", "guideDriveCSHT"],
   ["17. 15B Giấy chứng nhận kiểm dịch", "15B", "guideDrive15b"],
-  ["18. QDTQ Tờ khai hải quan - thông quan", "QDTQ", "guideDriveQdtq"],
+  ["18. QDTQ Quyết định thông quan", "QDTQ", "guideDriveQdtq"],
   ["19. MV Mã vạch hải quan", "MV", "guideDriveMv"],
-  ["20. TRA_CONG Trả cont rỗng", "TRA_CONG", "guideDriveTraCong"],
+  ["20. TRA_CONT Trả cont rỗng", "TRA_CONT", "guideDriveTraCong"],
 ] as const;
 
 const NAMING_EXAMPLES = [
-  ["PI", "26009_PI.pdf", "guideNamePi"],
+  ["PI", "26009_712836.pdf → 26009_PI_712836.pdf", "guideNamePi"],
   ["INV", "26009_INV.pdf", "guideNameInv"],
-  ["BL", "26009_BL.pdf", "guideNameBl"],
+  ["BB_LM", "26009_BnTT9172.pdf → 26009_BB_LM_BnTT9172.pdf", "guideNameBbLm"],
   ["PKL", "26009_PKL.pdf", "guideNamePkl"],
-  ["TRA_CONG", "26009_TRA_CONG_CONTAINER001.pdf", "guideNameTraCong"],
+  ["TRA_CONT", "26009_TRA_CONT_CONTAINER001/<tên file gốc>", "guideNameTraCong"],
+  ["INSPECTION", "26009_INSPECTION_CONTAINER001_lấy 5 thùng mở 2/<tên file gốc>", "guideNameInspection"],
 ] as const;
 
 export default function UserGuidePage() {
@@ -65,7 +66,7 @@ export default function UserGuidePage() {
           <div className="pl-12">├── 02. INV Hóa đơn/</div>
           <div className="pl-12">├── 03. BL Vận đơn/</div>
           <div className="pl-12">├── ... các thư mục chứng từ ...</div>
-          <div className="pl-12">└── 20. TRA_CONG Trả công rỗng cho cảng/</div>
+          <div className="pl-12">└── 20. TRA_CONT Trả cont rỗng/</div>
           <div className="mt-2 border-t border-blue-light-200 pt-2 dark:border-blue-light-500/20">└── XNK_DATA_COMPLETE/</div>
           <div className="pl-8">└── mã hợp đồng/</div>
         </div>

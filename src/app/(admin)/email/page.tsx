@@ -109,10 +109,10 @@ export default function EmailPage() {
   return (
     <section className="space-y-5">
       <EmailSendingIndicator sending={sending} total={selectedSuppliers.length} />
-      <p className="-mt-3 text-xs text-gray-500 dark:text-gray-400">{t("emailMaxRecipients", { count: MAX_EMAIL_RECIPIENTS })}</p>
       <div>
         <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">{t("emailPageTitle")}</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("emailPageDescription")}</p>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("emailMaxRecipients", { count: MAX_EMAIL_RECIPIENTS })}</p>
       </div>
       {error && <div className="rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">{error}</div>}
       <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(360px,1.1fr)_minmax(360px,0.9fr)]">
@@ -171,7 +171,7 @@ function SupplierList({ suppliers, suggestionSuppliers, query, selectedIds, allS
 }) {
   const { t } = useLanguage();
   return (
-    <div className="flex min-h-[520px] min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white xl:min-h-[520px] dark:border-gray-800 dark:bg-white/[0.03]">
       <div className="border-b border-gray-100 p-4 dark:border-gray-800">
         <h2 className="font-semibold text-gray-800 dark:text-white/90">{t("suppliers")}</h2>
         <SearchSuggestions value={query} onChange={onQuery} suggestions={suggestionSuppliers.flatMap((supplier) => [supplier.ten_ncc, supplier.email]).filter((value): value is string => Boolean(value))} placeholder={t("emailSearchSupplier")} ariaLabel={t("emailSearchSupplier")} className="mt-3 h-9 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
@@ -183,15 +183,15 @@ function SupplierList({ suppliers, suggestionSuppliers, query, selectedIds, allS
         </label>
         <p className="mt-1 text-[11px] text-gray-400">{t("emailSelectedSuppliersCount", { count: selectedIds.length })}</p>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
+      <div className="max-h-[60vh] min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar xl:max-h-none">
         {loading ? <p className="p-3 text-xs text-gray-500">{t("emailLoading")}</p> : suppliers.length === 0 ? <p className="p-3 text-xs text-gray-500">{t("emailNoSuppliers")}</p> : suppliers.map((supplier) => {
           const hasEmail = Boolean(String(supplier.email || "").trim());
           return (
             <label key={supplier.id_ncc} className={`flex items-start gap-2 rounded-lg px-2.5 py-2 ${selectedIds.includes(supplier.id_ncc) ? "bg-brand-50 dark:bg-brand-500/10" : "hover:bg-gray-50 dark:hover:bg-white/[0.03]"}`}>
               <input type="checkbox" checked={selectedIds.includes(supplier.id_ncc)} onChange={() => onToggle(supplier.id_ncc)} disabled={!canSend || !hasEmail} className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500" />
               <span className="min-w-0">
-                <span className="block truncate text-xs font-semibold text-gray-800 dark:text-white/90">{supplier.ten_ncc}</span>
-                <span className={`block truncate text-[11px] ${hasEmail ? "text-gray-500 dark:text-gray-400" : "text-amber-600"}`}>{hasEmail ? supplier.email : t("emailSupplierNoAddress")}</span>
+                <span className="block truncate text-xs font-semibold text-gray-800 dark:text-white/90" title={supplier.ten_ncc}>{supplier.ten_ncc}</span>
+                <span title={hasEmail ? String(supplier.email) : undefined} className={`block truncate text-[11px] ${hasEmail ? "text-gray-500 dark:text-gray-400" : "text-amber-600"}`}>{hasEmail ? supplier.email : t("emailSupplierNoAddress")}</span>
               </span>
             </label>
           );
@@ -213,7 +213,7 @@ function Compose({ selectedSuppliers, message, sending, canSend, canSubmit, subj
 }) {
   const { t } = useLanguage();
   return (
-    <div className="flex min-h-[520px] min-w-0 flex-col rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="flex min-w-0 flex-col rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 xl:min-h-[520px] dark:border-gray-800 dark:bg-white/[0.03]">
       <div className="border-b border-gray-100 pb-4 dark:border-gray-800">
         <h2 className="font-semibold text-gray-800 dark:text-white/90">{t("emailComposeTitle")}</h2>
         <p className="mt-1 text-xs text-gray-500">{t("emailPerSupplier")}</p>
@@ -227,9 +227,9 @@ function Compose({ selectedSuppliers, message, sending, canSend, canSubmit, subj
           <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-300">{t("emailSubjectLabel")}</label>
           <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">{subject}</div>
         </div>
-        <textarea value={message} onChange={(event) => onMessage(event.target.value)} disabled={!canSend || sending} rows={17} placeholder={t("emailMessagePlaceholder")} className="min-h-[280px] w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+        <textarea value={message} onChange={(event) => onMessage(event.target.value)} disabled={!canSend || sending} rows={17} placeholder={t("emailMessagePlaceholder")} className="h-56 min-h-[200px] w-full sm:h-auto sm:min-h-[280px] resize-none rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
       </div>
-      <div className="mt-2 flex items-center justify-between border-t border-gray-100 pt-3 dark:border-gray-800">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-gray-800">
         <span className="text-xs text-gray-400">{t("emailSelectedRecipientsCount", { count: selectedSuppliers.length })}</span>
         <button type="button" onClick={onSend} disabled={!canSubmit} className="h-10 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50">{sending ? t("emailSending") : t("emailSendButton")}</button>
       </div>

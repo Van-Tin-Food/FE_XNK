@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(npm run lint*)",
+      "Bash(npm run build)",
+      "Bash(npx tsc --noEmit*)",
+      "Bash(npx eslint *)",
+      "Bash(node --test *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Edit(./.env)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint-file.js\"",
+            "timeout": 60,
+            "asyncRewake": true
+          }
+        ]
+      }
+    ]
+  }
+}

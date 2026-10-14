@@ -208,7 +208,7 @@ function ShipmentCard({
       tabIndex={0}
       onClick={onClick}
       onKeyDown={handleKeyDown}
-      className="rounded-xl border border-gray-200 bg-white p-4 text-left shadow-theme-xs transition-colors hover:border-brand-300 hover:bg-brand-50/30 dark:border-gray-700 dark:bg-gray-800/40 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/5"
+      className="flex h-full flex-col rounded-xl border border-gray-200 bg-white p-4 text-left shadow-theme-xs transition-colors hover:border-brand-300 hover:bg-brand-50/30 dark:border-gray-700 dark:bg-gray-800/40 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/5"
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
@@ -221,7 +221,7 @@ function ShipmentCard({
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+      <div className="my-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-100 pt-3 dark:border-gray-700">
         <div className="min-w-0">
           <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("contractDate")}</p>
           <p className="mt-0.5 truncate text-xs font-medium text-gray-700 dark:text-gray-300">
@@ -246,7 +246,7 @@ function ShipmentCard({
         </div>
       </div>
 
-      <div className="mt-3 flex min-w-0 items-center justify-between gap-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+      <div className="mt-auto flex min-w-0 items-center justify-between gap-3 border-t border-gray-100 pt-3 dark:border-gray-700">
         <span
           className={`inline-flex max-w-[62%] min-w-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${sc.color} ${sc.bg}`}
           title={statusLabel}
@@ -319,8 +319,8 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         return a.orderCode.localeCompare(b.orderCode, "vi");
       }
       if (sortKey === "factory") {
-        va = a.summaryFields?.["TÃªn nhÃ  mÃ¡y"] || a.factoryCode || "";
-        vb = b.summaryFields?.["TÃªn nhÃ  mÃ¡y"] || b.factoryCode || "";
+        va = a.summaryFields?.["Tên nhà máy"] || a.factoryCode || "";
+        vb = b.summaryFields?.["Tên nhà máy"] || b.factoryCode || "";
       } else {
         va = a[sortKey as keyof Shipment] as string | undefined;
         vb = b[sortKey as keyof Shipment] as string | undefined;
@@ -340,7 +340,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
   return (
     <div className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
       {/* Table header */}
-      <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-4 dark:border-gray-800 sm:px-5">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-gray-100 px-4 py-4 dark:border-gray-800 sm:px-5">
         <div className="min-w-0">
           <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">{t("shipmentList")}</h3>
           <p className="text-xs text-gray-400 mt-0.5">
@@ -348,7 +348,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
             {shipments.length > 0 && ` • ${t("pageOf", { page: safePage, total: totalPages })}`}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="text-xs text-gray-400">{t("clickRowForDetails")}</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
             <circle cx="12" cy="12" r="10"/>
@@ -358,8 +358,8 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         </div>
       </div>
 
-      {/* Mobile card layout */}
-      <div className="space-y-3 p-4 lg:hidden">
+      {/* Dạng thẻ dưới 1280px (2 cột từ 768px); bảng 9 cột cần đủ chiều ngang khi sidebar mở. */}
+      <div className="space-y-3 p-4 xl:hidden">
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1">
             <label htmlFor="shipment-mobile-sort" className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -391,46 +391,48 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         {paged.length === 0 ? (
           <div className="py-10 text-center text-sm text-gray-400">{t("noShipments")}</div>
         ) : (
-          paged.map((shipment) => (
-            <ShipmentCard
-              key={shipment.id}
-              shipment={shipment}
-              onClick={() => onRowClick(shipment)}
-              t={t}
-              language={language}
-            />
-          ))
+          <div className="grid gap-3 md:grid-cols-2">
+            {paged.map((shipment) => (
+              <ShipmentCard
+                key={shipment.id}
+                shipment={shipment}
+                onClick={() => onRowClick(shipment)}
+                t={t}
+                language={language}
+              />
+            ))}
+          </div>
         )}
       </div>
 
-      {/* Desktop and tablet table layout */}
-      <div className="hidden w-full lg:block lg:max-xl:overflow-x-auto lg:max-xl:overscroll-x-contain lg:max-xl:custom-scrollbar">
-          <table className="w-full min-w-0 table-fixed border-separate border-spacing-0 [&_td]:overflow-hidden [&_th]:overflow-hidden lg:max-xl:min-w-[1120px]">
+      {/* Bảng từ 1280px. Dưới 1536px gộp ngày HĐ vào cột số HĐ và ẩn STT, nhà máy để các cột không bị cắt chữ. */}
+      <div className="hidden w-full xl:block">
+          <table className="w-full min-w-0 table-fixed border-separate border-spacing-0 [&_td]:overflow-hidden [&_th]:overflow-hidden">
             <thead className="border-b border-gray-100 dark:border-gray-800">
             <tr>
-              <th className="sticky top-[65px] z-40 w-[4%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("sequence")}</th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[8%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("orderCode")}>
+              <th className="sticky top-[65px] z-40 hidden w-[4%] bg-gray-50/95 px-4 py-3 2xl:table-cell text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("sequence")}</th>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[140px] backdrop-blur lg:top-[73px] 2xl:w-[9%] dark:bg-gray-900/95`} onClick={() => handleSort("orderCode")}>
                 <div className="flex items-center gap-1.5">{t("orderNumber")} <SortIcon col="orderCode" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[8%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("contractDate")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 hidden w-[8%] backdrop-blur lg:top-[73px] 2xl:table-cell dark:bg-gray-900/95`} onClick={() => handleSort("contractDate")}>
                 <div className="flex items-center gap-1.5">{t("contractDate")} <SortIcon col="contractDate" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[26%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 backdrop-blur lg:top-[73px] 2xl:w-[25%] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
                 <div className="flex items-center gap-1.5">{t("productName")} <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[16%] backdrop-blur lg:top-[73px] 2xl:w-[12%] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
                 <div className="flex items-center gap-1.5">{t("supplier")} <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("factory")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 hidden w-[10%] backdrop-blur lg:top-[73px] 2xl:table-cell dark:bg-gray-900/95`} onClick={() => handleSort("factory")}>
                 <div className="flex items-center gap-1.5">{t("factoryName")} <SortIcon col="factory" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[110px] backdrop-blur lg:top-[73px] 2xl:w-[10%] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
                 <div className="flex items-center gap-1.5">{t("arrivalDuration")} <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[13%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[140px] backdrop-blur lg:top-[73px] 2xl:w-[12%] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
                 <div className="flex items-center gap-1.5">{t("status")} <SortIcon col="status" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[130px] backdrop-blur lg:top-[73px] 2xl:w-[10%] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
                 <div className="flex items-center gap-1.5">{t("documents")} <SortIcon col="receivedDocs" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
             </tr>
@@ -461,7 +463,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                     className="group cursor-pointer hover:bg-brand-50/40 dark:hover:bg-brand-500/5 transition-colors duration-150"
                   >
                     {/* Row number */}
-                    <td className="py-3.5 px-4">
+                    <td className="hidden py-3.5 px-4 2xl:table-cell">
                       <span className="text-xs text-gray-400 tabular-nums">{rowNum}</span>
                     </td>
 
@@ -471,11 +473,14 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                         <span className="truncate font-mono text-sm font-semibold text-brand-600 group-hover:text-brand-700 dark:text-brand-400" title={shipment.orderCode}>
                           {shipment.orderCode}
                         </span>
+                        <span className="truncate text-xs text-gray-500 2xl:hidden dark:text-gray-400">
+                          {formatContractDate(shipment.database?.purchase?.ngay_hop_dong)}
+                        </span>
                       </div>
                     </td>
 
                     {/* Contract date */}
-                    <td className="py-3.5 px-4">
+                    <td className="hidden py-3.5 px-4 2xl:table-cell">
                       <span className="block truncate text-xs font-medium text-gray-700 dark:text-gray-300">
                         {formatContractDate(shipment.database?.purchase?.ngay_hop_dong)}
                       </span>
@@ -512,7 +517,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                     </td>
 
                     {/* Factory */}
-                    <td className="py-3.5 px-4">
+                    <td className="hidden py-3.5 px-4 2xl:table-cell">
                       <span
                         className="block truncate text-xs font-medium text-gray-700 dark:text-gray-300"
                         title={shipment.summaryFields?.["Tên nhà máy"] || shipment.factoryCode || ""}
