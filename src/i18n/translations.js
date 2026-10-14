@@ -156,7 +156,7 @@ export const translations = {
     guideDriveThueNk: "Chứng từ nộp thuế nhập khẩu; dùng mã THUE_NK.",
     guideDriveCSHT: "Phí cơ sở hạ tầng; dùng mã CSHT.",
     guideDrive15b: "Kết quả kiểm dịch mẫu 15B; dùng mã 15B.",
-    guideDriveQdtq: "Quyết định thông quan; dùng mã QDTQ.",
+    guideDriveQdtq: "Tờ khai hải quan & thông quan; dùng mã QDTQ.",
     guideDriveMv: "Mã vạch; dùng mã MV.",
     guideDriveTraCong: "Chứng từ trả cont rỗng; dùng mã TRA_CONT, mỗi số cont một thư mục con.",
     guideDriveImportantTitle: "Lưu ý khi upload",
