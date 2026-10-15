@@ -35,6 +35,36 @@ export interface AiChatTurn {
 
 export const AI_CHAT_MAX_QUESTION_LENGTH = 500;
 
+export interface AiChatPrepareResult {
+  ready: boolean;
+  loadedAt: string | null;
+  tableCount: number;
+  columnCount: number;
+}
+
+export async function prepareAiChat(signal?: AbortSignal): Promise<AiChatPrepareResult> {
+  const apiPath = "/api/ai-chat/prepare";
+  const token = getStoredUser()?.token?.trim();
+  let response: Response;
+  try {
+    response = await fetch(backendApiUrl(apiPath), {
+      method: "GET",
+      cache: "no-store",
+      signal,
+      headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw createNetworkApiError("Chatbox AI", "GET", apiPath, error);
+    throw error;
+  }
+  const { data, nonJsonPreview } = await parseApiResponse(response);
+  if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event("xnk:auth-expired"));
+  if (!response.ok) throw createHttpApiError("Chatbox AI", "GET", apiPath, response, data, nonJsonPreview);
+  const payload = (data as { data?: AiChatPrepareResult } | null)?.data;
+  if (!payload?.ready) throw createInvalidResponseError("Chatbox AI", "GET", apiPath, nonJsonPreview);
+  return payload;
+}
+
 /** Hỏi chatbox AI qua gateway Next → BE; trình duyệt không bao giờ gọi OpenRouter trực tiếp. */
 /** language: ngôn ngữ giao diện, BE trả nhãn bảng và câu trả lời theo ngôn ngữ này. */
 export async function askAiChat(question: string, history: AiChatTurn[], language: "vi" | "en", signal?: AbortSignal): Promise<AiChatAnswer> {

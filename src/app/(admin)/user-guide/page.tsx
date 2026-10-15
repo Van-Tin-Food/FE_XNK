@@ -23,9 +23,10 @@ const DOCUMENT_FOLDERS = [
   ["15. THUE_NK Nộp thuế nhập khẩu", "THUE_NK", "guideDriveThueNk"],
   ["16. CSHT Phí cơ sở hạ tầng", "CSHT", "guideDriveCSHT"],
   ["17. 15B Giấy chứng nhận kiểm dịch", "15B", "guideDrive15b"],
-  ["18. QDTQ Quyết định thông quan", "QDTQ", "guideDriveQdtq"],
+  ["18. QDTQ Tờ khai hải quan & thông quan", "QDTQ", "guideDriveQdtq"],
   ["19. MV Mã vạch hải quan", "MV", "guideDriveMv"],
   ["20. TRA_CONT Trả cont rỗng", "TRA_CONT", "guideDriveTraCong"],
+  ["99. PS Chứng từ phát sinh", "PS", "guideDrivePs"],
 ] as const;
 
 const NAMING_EXAMPLES = [
@@ -35,6 +36,7 @@ const NAMING_EXAMPLES = [
   ["PKL", "26009_PKL.pdf", "guideNamePkl"],
   ["TRA_CONT", "26009_TRA_CONT_CONTAINER001/<tên file gốc>", "guideNameTraCong"],
   ["INSPECTION", "26009_INSPECTION_CONTAINER001_lấy 5 thùng mở 2/<tên file gốc>", "guideNameInspection"],
+  ["PS", "26009_bien_ban_boi_thuong.pdf → 26009_PS_bien_ban_boi_thuong.pdf", "guideNamePs"],
 ] as const;
 
 export default function UserGuidePage() {

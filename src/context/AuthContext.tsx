@@ -7,6 +7,7 @@ import {
   GOOGLE_MFA_STORAGE_KEY,
   startGoogleSignIn,
 } from "@/services/authApi";
+import { createActivityLog } from "@/services/activityLogApi";
 import type { AuthUser } from "@/types/auth";
 import {
   canPerformShipmentAction,
@@ -16,6 +17,8 @@ import {
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 type AuthPermissions = Record<ShipmentActionPermissionKey, boolean>;
+
+const LOGOUT_LOG_WAIT_MS = 1500;
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -38,9 +41,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .map((action) => [action, canPerformShipmentAction(user, action)]),
   ) as AuthPermissions, [user]);
 
-  const logout = () => {
+  const clearSession = () => {
     clearStoredUser();
     setUser(null);
+  };
+
+  // Người dùng bấm đăng xuất: ghi nhật ký trước khi xoá token (gateway cần token còn khớp cookie),
+  // chờ tối đa LOGOUT_LOG_WAIT_MS để không làm chậm việc đăng xuất.
+  const logout = () => {
+    const current = user;
+    const logged = current?.token
+      ? createActivityLog(current, { action: "LOGOUT", location: "Sidebar/Logout", detail: `Đăng xuất tài khoản ${current.username}` }).catch(() => {})
+      : Promise.resolve();
+    void Promise.race([logged, new Promise((resolve) => window.setTimeout(resolve, LOGOUT_LOG_WAIT_MS))]).finally(clearSession);
   };
 
   useEffect(() => {
@@ -49,7 +62,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsInitialized(true);
     }, 0);
 
-    const handleExpiredSession = () => logout();
+    // Phiên hết hạn: token không còn hợp lệ nên không ghi nhật ký, chỉ xoá phiên.
+    const handleExpiredSession = () => clearSession();
     const handleGoogleDriveAuthRequired = () => {
       if (googleReauthStarted.current) return;
       googleReauthStarted.current = true;

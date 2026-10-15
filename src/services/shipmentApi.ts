@@ -28,9 +28,10 @@ export type DriveFolderLinks = {
 const DOCUMENT_CODES = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
   "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONT",
-  "AN", "EDO", "CPN", "INSPECTION",
+  "AN", "EDO", "CPN", "INSPECTION", "PS",
 ] as const;
-export const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION"]);
+// PS = chứng từ phát sinh: chứng từ không thuộc danh sách chuẩn, lưu ở thư mục "99. PS Chứng từ phát sinh".
+export const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION", "PS"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -97,7 +98,7 @@ const DOCUMENT_FIELD_MAP = {
   PI: "pi", INV: "inv", PKL: "pkl", BL: "bl", CO: "co", HC: "hc",
   DON_KD: "don_kd", AN: "an", EDO: "edo", CPN: "cpn", INSPECTION: "inspection",
   BB_LM: "bb_lm", PHI_TK: "phi_tk", THUE_NK: "thue_nk",
-  TK: "tk", "15B": "15b", QDTQ: "qdtq", MV: "mv", TRA_CONT: "tra_cong",
+  TK: "tk", "15B": "15b", QDTQ: "qdtq", MV: "mv", TRA_CONT: "tra_cong", PS: "ps",
 } as const satisfies Record<(typeof DOCUMENT_CODES)[number], keyof DriveDocumentRecord>;
 
 function buildDocuments(total: DriveDocumentRecord | undefined): ShipmentDocument[] {

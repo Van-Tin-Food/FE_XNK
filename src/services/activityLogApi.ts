@@ -6,9 +6,15 @@ import { createHttpApiError, createInvalidResponseError, createNetworkApiError, 
 
 export interface ActivityLogPayload {
   action: string;
+  /** Mã màn hình nơi thao tác (vd "ShipmentDetailModal/Documents/CO"); trang Nhật ký đổi thành tên dễ đọc. */
   location?: string;
+  /** Nội dung chi tiết: đối tượng + thay đổi "trường: cũ → mới" ngăn cách bằng " | ". */
   detail?: string;
+  status?: "success" | "failed";
 }
+
+/** BE giữ tối đa 4000 ký tự nội dung. */
+const MAX_DETAIL_LENGTH = 4000;
 
 export interface ActivityLog {
   id: number | string;
@@ -21,6 +27,35 @@ export interface ActivityLog {
   location: string;
   detail: string;
   createdAt: string;
+  ipAddress?: string;
+  /** Trình duyệt · hệ điều hành, BE tóm tắt từ User-Agent (vd "Chrome · Windows"). */
+  device?: string;
+  status?: "success" | "failed";
+}
+
+export interface ActivityActor {
+  id: number;
+  name: string;
+  username: string;
+  role?: string;
+}
+
+export interface ActivityLogQuery {
+  limit: number;
+  offset: number;
+  userId?: number;
+  action?: string;
+  role?: string;
+  status?: "success" | "failed";
+  from?: string;
+  to?: string;
+  q?: string;
+}
+
+export interface ActivityLogPage {
+  logs: ActivityLog[];
+  total: number;
+  actors: ActivityActor[];
 }
 
 export type EmailDeliveryStatus = "sent" | "not sent";
@@ -69,19 +104,40 @@ function normalizeLog(row: unknown, index: number): ActivityLog | null {
     location: String(row.location ?? "").trim(),
     detail: String(row.detail ?? "").trim(),
     createdAt,
+    ipAddress: String(row.ip_address ?? "").trim() || undefined,
+    device: String(row.device ?? "").trim() || undefined,
+    status: row.status === "failed" ? "failed" : "success",
   };
 }
 
-export async function getActivityLogs(): Promise<ActivityLog[]> {
-  const apiPath = "/api/auth/activity-logs";
+function normalizeActor(row: unknown): ActivityActor | null {
+  if (!isRecord(row)) return null;
+  const id = Number(row.id);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return {
+    id,
+    name: String(row.name ?? "").trim(),
+    username: String(row.username ?? "").trim(),
+    role: String(row.role ?? "").trim() || undefined,
+  };
+}
+
+/** Nhật ký thao tác, lọc + phân trang phía server (mới nhất trước). */
+export async function getActivityLogs(query: ActivityLogQuery, signal?: AbortSignal): Promise<ActivityLogPage> {
+  const params = new URLSearchParams({ limit: String(query.limit), offset: String(query.offset) });
+  for (const key of ["userId", "action", "role", "status", "from", "to", "q"] as const) {
+    const value = query[key];
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  const pagePath = `/api/auth/activity-logs?${params.toString()}`;
   const token = getStoredUser()?.token?.trim();
-  const pagePath = `${apiPath}?limit=100&offset=0`;
   let response: Response;
   try {
     response = await fetch(backendApiUrl(pagePath), {
       method: "GET",
       headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       cache: "no-store",
+      signal,
     });
   } catch (error) {
     if (error instanceof TypeError) throw createNetworkApiError("Nhật ký", "GET", pagePath, error);
@@ -92,11 +148,12 @@ export async function getActivityLogs(): Promise<ActivityLog[]> {
   if (!response.ok) throw createHttpApiError("Nhật ký", "GET", pagePath, response, result, nonJsonPreview);
   if (result === null) throw createInvalidResponseError("Nhật ký", "GET", pagePath, nonJsonPreview);
   const logs = findLogRows(result).map((row, index) => normalizeLog(row, index)).filter((log): log is ActivityLog => log !== null);
-  return logs.sort((a, b) => {
-    const timeA = Date.parse(a.createdAt);
-    const timeB = Date.parse(b.createdAt);
-    return (Number.isFinite(timeB) ? timeB : 0) - (Number.isFinite(timeA) ? timeA : 0);
-  });
+  const pagination = isRecord(result) && isRecord(result.pagination) ? result.pagination : {};
+  const total = Number(pagination.total);
+  const actors = isRecord(result) && Array.isArray(result.actors)
+    ? result.actors.map(normalizeActor).filter((actor): actor is ActivityActor => actor !== null)
+    : [];
+  return { logs, total: Number.isFinite(total) ? total : logs.length, actors };
 }
 
 export async function getEmailActivityLogs(): Promise<ActivityLog[]> {
@@ -190,14 +247,13 @@ export async function createActivityLog(user: AuthUser | null, payload: Activity
         "Content-Type": "application/json",
         ...(user.token ? { Authorization: `Bearer ${user.token}` } : {}),
       },
+      // Người thực hiện do BE lấy từ token; IP/thiết bị do gateway chuyển tiếp.
       body: JSON.stringify({
-        userId: user.id,
-        action: payload.action.slice(0, 255),
+        action: payload.action.slice(0, 64),
         location: (payload.location || "").slice(0, 255),
-        // Keep the original audit detail. The activity page can still derive a
-        // compact subject for filtering, but the database must retain the
-        // exact file names and before/after values for troubleshooting.
-        detail: (payload.detail || "").slice(0, 255),
+        // Giữ nguyên tên file và giá trị trước → sau để tra cứu khi có sự cố.
+        detail: (payload.detail || "").slice(0, MAX_DETAIL_LENGTH),
+        ...(payload.status ? { status: payload.status } : {}),
       }),
     });
   } catch (error) {

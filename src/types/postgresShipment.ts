@@ -119,6 +119,8 @@ export interface DriveDocumentRecord {
   edo?: DriveDocumentValue;
   cpn?: DriveDocumentValue;
   inspection?: DriveDocumentValue;
+  /** Chứng từ phát sinh (PS). */
+  ps?: DriveDocumentValue;
   bb_lm?: DriveDocumentValue;
   phi_tk?: DriveDocumentValue;
   thue_nk?: DriveDocumentValue;

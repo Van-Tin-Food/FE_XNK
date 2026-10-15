@@ -167,10 +167,10 @@ const STAGE_DOC_GROUPS: Record<Exclude<ShipmentFlowStage["key"], "delivered">, s
 const DOCUMENT_DISPLAY_ORDER = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
   "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONT",
-  "AN", "EDO", "CPN", "INSPECTION",
+  "AN", "EDO", "CPN", "INSPECTION", "PS",
 ];
 
-const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION"]);
+const OPTIONAL_DOCUMENT_CODES = new Set(["AN", "EDO", "CPN", "INSPECTION", "PS"]);
 // Chứng từ lưu theo thư mục container trên Drive: phải chọn số cont trước khi upload.
 const CONTAINER_FOLDER_DOCUMENT_CODES = new Set(["TRA_CONT", "INSPECTION"]);
 
@@ -180,16 +180,18 @@ function containerFolderLabel(folderName: string | null | undefined, orderCode: 
   return name.toUpperCase().startsWith(prefix) ? name.slice(prefix.length) : name;
 }
 const OPTIONAL_DOCUMENT_OPTIONS = [
-  { code: "AN", label: "AN - Giấy chứng nhận kiểm dịch an toàn thực phẩm" },
-  { code: "EDO", label: "EDO - Lệnh giao hàng điện tử" },
-  { code: "CPN", label: "CPN - Chứng từ CPN quốc tế" },
-  { code: "INSPECTION", label: "INSPECTION - Ảnh/video kiểm dịch" },
+  { code: "AN", label: "AN - Báo hàng đến" },
+  { code: "EDO", label: "EDO - Lệnh giao hàng" },
+  { code: "CPN", label: "CPN - CPN quốc tế" },
+  { code: "INSPECTION", label: "INSPECTION - Ảnh kiểm dịch" },
+  { code: "PS", label: "PS - Phát sinh" },
 ] as const;
 const OPTIONAL_DOCUMENT_COLORS: Record<string, { badge: string; dot: string }> = {
   AN: { badge: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300", dot: "bg-emerald-500" },
   EDO: { badge: "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300", dot: "bg-sky-500" },
   CPN: { badge: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300", dot: "bg-amber-500" },
   INSPECTION: { badge: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300", dot: "bg-violet-500" },
+  PS: { badge: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300", dot: "bg-rose-500" },
 };
 
 type CarrierTrackingLink = {
@@ -3034,10 +3036,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <h3 className="text-sm font-semibold text-gray-800 dark:text-white">Chứng từ đính kèm</h3>
                   <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">Không bắt buộc</span>
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{isArchived ? "Hồ sơ đã lưu trữ, không thể bổ sung file" : "Bấm vào ô để chọn một hoặc nhiều file"}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{isArchived ? "Hồ sơ đã lưu trữ" : "Bấm ô để thêm file"}</p>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                 {optionalDocuments.map((document) => {
                   const files = documentFileGroups.find((group) => group.document.id === document.id)?.files || [];
                   const option = OPTIONAL_DOCUMENT_OPTIONS.find((item) => item.code === document.id);
@@ -3073,10 +3075,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           } else handlePickUpload(document.id, true);
                         }
                       }}
-                      className={`group flex min-w-0 flex-col items-start gap-3 rounded-lg border bg-white p-3 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${!isArchived && canUploadThisDocument ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
+                      className={`group flex min-w-0 flex-col items-start gap-2 rounded-lg border bg-white p-2.5 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${!isArchived && canUploadThisDocument ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
                     >
                       <div className="flex w-full items-center justify-between gap-2">
-                        <span className={`flex h-8 min-w-12 items-center justify-center rounded-md px-2 text-[11px] font-bold ${color.badge}`}>
+                        <span className={`flex h-7 min-w-0 items-center justify-center truncate rounded-md px-2 text-[11px] font-bold ${color.badge}`}>
                           {document.id}
                         </span>
                         <div className="flex items-center gap-2">
@@ -3103,10 +3105,18 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       </div>
                       <div className="min-w-0 w-full">
                         <p className="truncate text-xs font-semibold text-gray-700 dark:text-gray-200">{option?.label.split(" - ").slice(1).join(" - ") || document.name}</p>
-                        <p className={`mt-1 text-[11px] ${hasFile ? "text-success-600 dark:text-success-400" : "text-gray-400"}`}>
-                          {hasFile ? `${files.length} file đã đính kèm` : "Bấm để chọn file"}
+                        <p className={`mt-0.5 text-[11px] ${hasFile ? "text-success-600 dark:text-success-400" : "text-gray-400"}`}>
+                          {hasFile ? `${files.length} file` : "Chưa có file"}
                         </p>
-                        {hasFile && files[0] && <p className="mt-1 truncate text-[10px] text-gray-400">{[usesContainerFolder ? files[0].label : (files[0].fileName || files[0].label), files[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(files[0].uploadedAt, language)].join(" · ")}</p>}
+                        {/* Chỉ hiện tên file, người upload và thời gian xem khi rê chuột. */}
+                        {hasFile && files[0] && (
+                          <p
+                            className="mt-0.5 truncate text-[10px] text-gray-400"
+                            title={[usesContainerFolder ? files[0].label : (files[0].fileName || files[0].label), files[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(files[0].uploadedAt, language)].join(" · ")}
+                          >
+                            {usesContainerFolder ? files[0].label : (files[0].fileName || files[0].label)}
+                          </p>
+                        )}
                       </div>
                       {!isArchived && canUploadThisDocument && (usesContainerFolder || hasFile) && (
                         <div className="flex w-full flex-col gap-2" onClick={stopEvent} onKeyDown={stopEvent}>

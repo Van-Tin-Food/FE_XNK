@@ -4,7 +4,7 @@ import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import type { ApiError } from "@/utils/apiError";
-import { AI_CHAT_MAX_QUESTION_LENGTH, askAiChat, type AiChatResult, type AiChatSection, type AiChatTurn } from "@/services/aiChatApi";
+import { AI_CHAT_MAX_QUESTION_LENGTH, askAiChat, prepareAiChat, type AiChatResult, type AiChatSection, type AiChatTurn } from "@/services/aiChatApi";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 interface ChatMessage {
@@ -157,6 +157,8 @@ export default function AiChatBox() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const nextId = useRef(1);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -170,17 +172,27 @@ export default function AiChatBox() {
 
   useEffect(() => {
     if (!isOpen) return;
-    inputRef.current?.focus();
+    const controller = new AbortController();
+    setIsPreparing(true);
+    setIsReady(false);
+    prepareAiChat(controller.signal)
+      .then(() => setIsReady(true))
+      .catch(() => setIsReady(false))
+      .finally(() => setIsPreparing(false));
     const handleKey = (event: KeyboardEvent) => { if (event.key === "Escape") setIsOpen(false); };
     window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    return () => { controller.abort(); window.removeEventListener("keydown", handleKey); };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && isReady) inputRef.current?.focus();
+  }, [isOpen, isReady]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const send = useCallback(async (raw: string) => {
     const question = raw.trim();
-    if (!question || isSending) return;
+    if (!question || isSending || !isReady) return;
     if (question.length > AI_CHAT_MAX_QUESTION_LENGTH) return;
     // Ngữ cảnh: chỉ vài lượt hỏi/đáp dạng chữ gần nhất, không gửi lại bảng dữ liệu.
     const history: AiChatTurn[] = messages
@@ -208,7 +220,7 @@ export default function AiChatBox() {
       setIsSending(false);
       abortRef.current = null;
     }
-  }, [isSending, language, messages, t]);
+  }, [isReady, isSending, language, messages, t]);
 
   if (!canUse) return null;
 
@@ -263,11 +275,13 @@ export default function AiChatBox() {
               <div className="space-y-3">
                 <p className="text-sm text-gray-600 dark:text-gray-300">{t("aiChatWelcome")}</p>
                 <div className="flex flex-wrap gap-2">
-                  {SUGGESTION_KEYS.map((key) => (
+                  {isReady && SUGGESTION_KEYS.map((key) => (
                     <button key={key} type="button" onClick={() => void send(t(key))} className="rounded-full border border-brand-200 bg-brand-50 px-3 py-1.5 text-left text-xs font-medium text-brand-700 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
                       {t(key)}
                     </button>
                   ))}
+                  {isPreparing && <p className="text-xs text-gray-500 dark:text-gray-400">{t("aiChatPreparing")}</p>}
+                  {!isPreparing && !isReady && <p className="text-xs text-error-600 dark:text-error-400">{t("aiChatPrepareError")}</p>}
                 </div>
               </div>
             )}
@@ -314,11 +328,11 @@ export default function AiChatBox() {
               />
               <button
                 type="submit"
-                disabled={isSending || !input.trim()}
+                disabled={isPreparing || !isReady || isSending || !input.trim()}
                 aria-label={t("aiChatSend")}
                 className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {t("aiChatSend")}
+                {isPreparing ? t("aiChatPreparingShort") : t("aiChatSend")}
               </button>
             </div>
             <p className="mt-1.5 flex justify-between gap-2 text-[11px] text-gray-400">

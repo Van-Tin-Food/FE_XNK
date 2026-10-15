@@ -74,6 +74,14 @@ async function forward(request: NextRequest, { params }: RouteContext) {
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("Content-Type", contentType);
 
+  // BE chỉ thấy IP/User-Agent của gateway: chuyển tiếp thông tin trình duyệt cho nhật ký thao tác.
+  const clientIp = request.headers.get("cf-connecting-ip")
+    || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || request.headers.get("x-real-ip");
+  if (clientIp) headers.set("X-Client-IP", clientIp.slice(0, 64));
+  const clientAgent = request.headers.get("user-agent");
+  if (clientAgent) headers.set("X-Client-User-Agent", clientAgent.slice(0, 300));
+
   const apiKey = process.env.BE_XNK_API_KEY?.trim();
   if (apiKey) headers.set("X-Api-Key", apiKey);
 
