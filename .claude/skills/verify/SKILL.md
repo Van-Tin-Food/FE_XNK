@@ -15,8 +15,7 @@ TypeScript/lint/build hiển nhiên; các vấn đề khác liệt kê để ng�
    - từng file test: `node --test tests/<file>.test.mjs` (truyền cả thư mục `tests/` sẽ lỗi)
    - `npm run build`
 3. Đối chiếu với `.claude/docs/frontend-rules.md` mục 10 (Verification Checklist), đặc biệt:
-   - Chức năng mới có trong `PERMISSION_FUNCTIONS` / `PERMISSION_GROUPS` và bảng `EXPECTED_FUNCTIONS` của
-     `tests/shipmentActionPermissions.test.mjs`, khớp với `be/src/config/rbac.js`; component hỏi quyền bằng
+   - Chức năng mới có trong `PERMISSION_FUNCTIONS` / `PERMISSION_GROUPS`, khớp với `be/src/config/rbac.js`; component hỏi quyền bằng
      `can(fn, level)`, không kiểm tra tên role.
    - Mọi chữ hiển thị mới có key trong `src/i18n/translations.js` cho **cả `vi` và `en`**
      (kiểm tra từng key mới bằng `grep`, đếm đủ 2 lần).

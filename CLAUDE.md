@@ -70,7 +70,7 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
 1. Đọc trang/component gần nhất đang làm việc tương tự, và route/controller BE của API liên quan
    (đừng đoán tên trường từ nhãn giao diện).
 2. Chức năng mới cần quyền: thêm vào `PERMISSION_FUNCTIONS` + `PERMISSION_GROUPS`, bản dịch `permissionFn_*` /
-   `permissionFnDesc_*`, bảng `EXPECTED_FUNCTIONS` trong `tests/shipmentActionPermissions.test.mjs`; cùng lúc thêm ở BE
+   `permissionFnDesc_*`; cùng lúc thêm ở BE
    (`PERMISSION_FUNCTIONS`, `ROLE_PERMISSIONS`, route). Ẩn nút ở FE **không** thay cho kiểm tra ở BE.
 3. Mọi chữ hiển thị mới: thêm key vào cả `vi` và `en`. Không dịch lan sang phần code cũ không liên quan.
 4. Có đủ trạng thái loading / rỗng / lỗi / không có quyền / đang gửi (khoá nút, chống bấm hai lần).

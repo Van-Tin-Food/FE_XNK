@@ -53,7 +53,7 @@ For every new page, control, API function, or visible behavior:
 ### Rules for every new capability
 
 - Use an existing function or add one to `PERMISSION_FUNCTIONS` + `PERMISSION_GROUPS`, with `permissionFn_*` /
-  `permissionFnDesc_*` translations, and update `EXPECTED_FUNCTIONS` in the permission test. Add the same function and its
+  `permissionFnDesc_*` translations. Add the same function and its
   role defaults in the BE in the same change.
 - Use `useAuth().can(fn, level)` (or `hasPermission(user, fn, level)`) before rendering the page control, menu item, button,
   modal action, or destructive shortcut. Never check role names in components.

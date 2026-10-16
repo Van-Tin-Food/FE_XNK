@@ -28,6 +28,9 @@ export const PERMISSION_FUNCTIONS = {
   activityLogs: ["none", "view"], // Nhật ký thao tác
   users: ["none", "view", "edit"], // Tài khoản: xem; edit = tạo, sửa, phân quyền, đổi mật khẩu
   userGuide: ["none", "view"], // Hướng dẫn sử dụng
+  // Hai link Google Apps Script trong menu Công cụ hỗ trợ: ngoài hệ thống, quyền chỉ ẩn/hiện menu.
+  marketResearch: ["none", "view"], // Nghiên cứu thị trường
+  legacyEtaOrders: ["none", "view"], // Dữ liệu hợp đồng cũ
 } as const satisfies Record<string, readonly PermissionLevel[]>;
 
 export type PermissionFunction = keyof typeof PERMISSION_FUNCTIONS;
@@ -38,9 +41,11 @@ export const PERMISSION_FUNCTION_KEYS = Object.keys(PERMISSION_FUNCTIONS) as Per
 // Nhóm hiển thị trên màn quản lý tài khoản.
 export const PERMISSION_GROUPS: ReadonlyArray<{ key: string; functions: readonly PermissionFunction[] }> = [
   { key: "permissionGroupShipments", functions: ["shipments", "shipmentCancel", "tracking", "exportShipments", "aiChat"] },
-  { key: "permissionGroupDocuments", functions: ["documents", "documentArchive", "documentSync", "containerTransport"] },
+  { key: "permissionGroupDocuments", functions: ["documents", "documentArchive", "containerTransport"] },
+  // Khớp đúng 4 mục của menu "Công cụ hỗ trợ" trên sidebar.
+  { key: "supportTools", functions: ["email", "documentSync", "marketResearch", "legacyEtaOrders"] },
   { key: "permissionGroupSensitive", functions: ["purchaseAmounts", "supplierContact"] },
-  { key: "permissionGroupSystem", functions: ["masterData", "email", "users", "activityLogs", "userGuide"] },
+  { key: "permissionGroupSystem", functions: ["masterData", "users", "activityLogs", "userGuide"] },
 ];
 
 const LEVEL_RANK: Record<PermissionLevel, number> = { none: 0, view: 1, edit: 2 };

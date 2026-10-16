@@ -25,6 +25,9 @@ const AppSidebar: React.FC = () => {
   const canViewLogs = can("activityLogs");
   const canViewEmailTools = can("email");
   const canViewDocumentSync = can("documentSync");
+  const canViewMarketResearch = can("marketResearch");
+  const canViewLegacyEta = can("legacyEtaOrders");
+  const canViewSupportTools = canViewEmailTools || canViewDocumentSync || canViewMarketResearch || canViewLegacyEta;
   const canManageUsers = can("users");
   const canManageMasterData = can("masterData");
   const { t } = useLanguage();
@@ -164,7 +167,7 @@ const AppSidebar: React.FC = () => {
             </li>
           )}
 
-          {(canViewEmailTools || canViewDocumentSync) && (
+          {canViewSupportTools && (
             <li>
               <button type="button" onClick={() => setSupportOpen((current) => !current)} className={`menu-item group w-full ${supportOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={supportOpen}>
                 <span className={supportOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
@@ -179,14 +182,14 @@ const AppSidebar: React.FC = () => {
               </ul>}
             </li>
           )}
-          {canViewEmailTools && supportOpen && showText && (
+          {canViewMarketResearch && supportOpen && showText && (
             <li className="-mt-3 pl-11">
               <a href={MARKET_RESEARCH_HREF} target="_blank" rel="noopener noreferrer" className="block rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]">
                 {t("marketResearch")}
               </a>
             </li>
           )}
-          {(canViewEmailTools || canViewDocumentSync) && supportOpen && showText && (
+          {canViewLegacyEta && supportOpen && showText && (
             <li className="-mt-3 pl-11">
               <a href={LEGACY_ETA_HREF} target="_blank" rel="noopener noreferrer" className="block rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]">
                 {t("legacyEtaOrders")}
