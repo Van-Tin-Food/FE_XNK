@@ -1,12 +1,15 @@
+import type { PermissionMap } from "@/config/shipmentActionPermissions";
+
 export interface AuthUser {
   id?: number;
   username: string;
   name: string;
   role: string;
-  session?: string;
   token?: string;
   /** Email đã liên kết với tài khoản (dùng để xác thực Google bước 2). */
   email?: string;
+  /** Quyền thực tế theo chức năng do BE tính (chuẩn của role + tùy chỉnh riêng). */
+  permissions?: Partial<PermissionMap>;
 }
 
 export interface LoginMfaInfo {
@@ -31,9 +34,6 @@ export interface LoginResponse {
   token?: string;
   accessToken?: string;
   access_token?: string;
-  session?: string;
-  sessionId?: string;
-  session_id?: string;
   mfaRequired?: boolean;
   pendingToken?: string;
   googleAuthUrl?: string;

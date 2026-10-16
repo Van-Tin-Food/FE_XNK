@@ -6,7 +6,6 @@ import { analyzeDocument, checkDocumentFileNames, uploadDocument } from "@/servi
 import { createDatabaseRow, databaseEndpoints, listCatalogRows } from "@/services/postgresShipmentApi";
 import type { PurchaseRecord, SupplierRecord } from "@/types/postgresShipment";
 import { useAuth } from "@/context/AuthContext";
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useLanguage } from "@/context/LanguageContext";
@@ -91,10 +90,11 @@ function fileToBase64(file: File, errorMessage: string): Promise<string> {
 }
 
 export default function CreateShipmentModal({ isOpen, onClose, onCreated, existingOrderCodes }: CreateShipmentModalProps) {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const { notify } = useSystemNotification();
   const { t } = useLanguage();
-  const canCreateShipment = canPerformShipmentAction(user, "createShipment");
+  // Tạo đơn = quyền sửa Đơn hàng (gồm cả upload PI của đơn mới).
+  const canCreateShipment = can("shipments", "edit");
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadRequestIdRef = useRef<string | null>(null);
   const [file, setFile] = useState<File | null>(null);

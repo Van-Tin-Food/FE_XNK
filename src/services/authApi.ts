@@ -1,5 +1,14 @@
 import type { AuthUser, LoginMfaInfo, LoginResponse } from "@/types/auth";
 import { backendApiUrl } from "@/services/backendApiUrl";
+import {
+  completePermissions,
+  normalizePermissionMap,
+  normalizeRole,
+  PERMISSION_LEVELS,
+  type PermissionFunction,
+  type PermissionLevel,
+  type PermissionMap,
+} from "@/config/shipmentActionPermissions";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
 const AUTH_STORAGE_KEY = "dashboard_auth_user";
@@ -49,6 +58,15 @@ function storeUser(user: AuthUser): AuthUser {
   return user;
 }
 
+/**
+ * Cập nhật role / quyền của phiên đang đăng nhập. Chỉ ghi localStorage, KHÔNG ghi lại cookie token:
+ * ghi cookie sẽ đặt lại hạn 8 giờ mỗi lần tải trang, làm phiên đăng nhập kéo dài mãi.
+ */
+function storeUserProfile(user: AuthUser): AuthUser {
+  if (typeof window !== "undefined") localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+  return user;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -59,11 +77,11 @@ function normalizeUser(payload: unknown, fallbackUsername: string): AuthUser {
     const id = Number(rawId);
     const username = String(payload.username ?? payload.userName ?? fallbackUsername).trim() || fallbackUsername;
     const name = String(payload.name ?? payload.fullName ?? payload.full_name ?? username).trim() || username;
-    const role = String(payload.role ?? payload.userRole ?? payload.position ?? "User").trim() || "User";
-    const session = String(payload.session ?? payload.sessionId ?? payload.session_id ?? "").trim() || undefined;
+    const role = normalizeRole(String(payload.role ?? payload.userRole ?? payload.position ?? "")) || "user";
     const email = String(payload.email ?? "").trim() || undefined;
     const token = String(payload.token ?? payload.accessToken ?? payload.access_token ?? "").trim() || undefined;
-    return { id: Number.isInteger(id) && id > 0 ? id : undefined, username, name, role, session, email, token };
+    const permissions = normalizePermissionMap(payload.permissions);
+    return { id: Number.isInteger(id) && id > 0 ? id : undefined, username, name, role, email, token, permissions };
   }
 
   return {
@@ -90,13 +108,9 @@ function extractUser(json: LoginResponse, fallbackUsername: string): AuthUser {
   const topLevelToken = String(
     json.token ?? json.accessToken ?? json.access_token ?? data.token ?? data.accessToken ?? data.access_token ?? "",
   ).trim() || undefined;
-  const topLevelSession = String(
-    json.session ?? json.sessionId ?? json.session_id ?? data.session ?? data.sessionId ?? data.session_id ?? "",
-  ).trim() || undefined;
   return {
     ...user,
     token: user.token || topLevelToken,
-    session: user.session || topLevelSession,
   };
 }
 
@@ -149,13 +163,16 @@ export interface AuthActionResponse {
   message?: string;
   error?: string;
   data?: unknown;
-}export interface ManagedUser {
-  id: number;      
+}
+
+export interface ManagedUser {
+  id: number;
   username: string;
   name: string;
   role: string;
-  session: string;
   email?: string;
+  /** Quyền tùy chỉnh riêng: chỉ gồm chức năng khác chuẩn của role. */
+  customPermissions: Partial<PermissionMap>;
 }
 
 function findUserRows(payload: unknown): unknown[] {
@@ -177,9 +194,9 @@ function normalizeManagedUser(payload: unknown): ManagedUser | null {
     id,
     username,
     name: String(payload.name ?? payload.fullName ?? payload.full_name ?? nestedUser.name ?? username).trim() || username,
-    role: String(payload.role ?? payload.userRole ?? payload.user_role ?? nestedUser.role ?? "").trim(),
-    session: String(payload.session ?? payload.sessionId ?? payload.session_id ?? nestedUser.session ?? "").trim(),
+    role: normalizeRole(String(payload.role ?? payload.userRole ?? payload.user_role ?? nestedUser.role ?? "")),
     email: String(payload.email ?? nestedUser.email ?? "").trim() || undefined,
+    customPermissions: normalizePermissionMap(payload.customPermissions ?? nestedUser.customPermissions),
   };
 }
 
@@ -241,8 +258,8 @@ export interface RegisterUserPayload {
   username: string;
   name: string;
   password: string;
+  /** Tài khoản mới nhận quyền chuẩn của role; tùy chỉnh quyền sửa sau ở danh sách tài khoản. */
   role: string;
-  session: string;
   /** Email Google dùng cho bước xác thực 2 của đăng nhập. */
   email?: string;
 }
@@ -262,23 +279,70 @@ export async function getUsers(): Promise<ManagedUser[]> {
     .filter((user): user is ManagedUser => user !== null);
 }
 
-export async function getUserById(id: number): Promise<ManagedUser> {
-  const result = await authRequest(`users/${id}`, { method: "GET" });
-  const source = isRecord(result) && result.data !== undefined ? result.data : result;
-  const user = normalizeManagedUser(source)
-    || (isRecord(source) ? normalizeManagedUser(source.user) : null);
-  if (!user) throw new Error("Dữ liệu tài khoản từ máy chủ không hợp lệ");
-  return user;
-}
-
 export async function updateUser(
   id: number,
-  changes: Pick<ManagedUser, "role" | "session"> & { email?: string },
+  changes: { role?: string; email?: string; customPermissions?: Partial<PermissionMap> },
 ): Promise<AuthActionResponse> {
   return await authRequest(`users/${id}`, {
     method: "PATCH",
     body: JSON.stringify(changes),
   }) as AuthActionResponse;
+}
+
+export interface RoleStandard {
+  code: string;
+  /** Quyền chuẩn đầy đủ của role (khai báo trong be/src/config/rbac.js). */
+  permissions: PermissionMap;
+  /** Role admin: luôn toàn quyền, không sửa quyền. */
+  locked: boolean;
+  userCount: number;
+}
+
+export interface RoleCatalog {
+  levels: PermissionLevel[];
+  functions: Array<{ key: PermissionFunction; levels: PermissionLevel[] }>;
+  roles: RoleStandard[];
+}
+
+/** Quyền chuẩn của từng role, dùng để biết quyền nào của tài khoản là theo role, quyền nào là tùy chỉnh. */
+export async function getRoleCatalog(): Promise<RoleCatalog> {
+  const result = await authRequest("roles", { method: "GET" });
+  const data = isRecord(result) && isRecord(result.data) ? result.data : {};
+  const roles = (Array.isArray(data.roles) ? data.roles : []).flatMap((item): RoleStandard[] => {
+    if (!isRecord(item)) return [];
+    const code = normalizeRole(String(item.code ?? ""));
+    if (!code) return [];
+    return [{
+      code,
+      permissions: completePermissions(normalizePermissionMap(item.permissions)),
+      locked: item.locked === true,
+      userCount: Number(item.userCount) || 0,
+    }];
+  });
+  const functions = (Array.isArray(data.functions) ? data.functions : []).flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const key = String(item.key ?? "") as PermissionFunction;
+    const levels = (Array.isArray(item.levels) ? item.levels : [])
+      .filter((level): level is PermissionLevel => (PERMISSION_LEVELS as readonly unknown[]).includes(level));
+    return key ? [{ key, levels }] : [];
+  });
+  return { levels: [...PERMISSION_LEVELS], functions, roles };
+}
+
+/**
+ * Role + quyền hiện tại của tài khoản đang đăng nhập (BE đọc từ DB). Gọi khi tải lại trang / chuyển trang
+ * để quyền đổi có hiệu lực mà không phải đăng xuất. Giữ nguyên token đang dùng.
+ */
+export async function fetchCurrentUser(): Promise<AuthUser> {
+  const stored = getStoredUser();
+  if (!stored?.token) throw new Error("Chưa đăng nhập");
+  const result = await authRequest("me", { method: "GET" });
+  const source = isRecord(result) && isRecord(result.data) ? result.data : null;
+  if (!source) throw createInvalidResponseError("Tài khoản", "GET", "/api/auth/me", "");
+  const fresh = normalizeUser(source, stored.username);
+  // Phiên có thể đã đổi (đăng xuất / đăng nhập tài khoản khác) trong lúc chờ: không ghi đè.
+  if (getStoredUser()?.token !== stored.token) throw new Error("Phiên đăng nhập đã thay đổi");
+  return storeUserProfile({ ...stored, ...fresh, token: stored.token });
 }
 
 /** Quyền Google đã lưu hết hạn/lỗi: BE trả sẵn URL cấp quyền lại để FE chuyển hướng. */

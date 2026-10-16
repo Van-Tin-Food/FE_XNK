@@ -2,18 +2,18 @@
 import { ThemeToggleButton } from "@/components/common/ThemeToggleButton";
 import AvatarText from "@/components/ui/avatar/AvatarText";
 import NotificationDropdown from "@/components/header/NotificationDropdown";
+import ReloadHomeLink from "@/components/common/ReloadHomeLink";
 import { useAuth } from "@/context/AuthContext";
 import { useSidebar } from "@/context/SidebarContext";
 import Link from "next/link";
 import React, { useState ,useEffect,useRef} from "react";
 import { useLanguage } from "@/context/LanguageContext";
-import { normalizeRole } from "@/config/shipmentActionPermissions";
 
 const AppHeader: React.FC = () => {
   const [isApplicationMenuOpen, setApplicationMenuOpen] = useState(false);
   const { language, toggleLanguage, t } = useLanguage();
-  const { user } = useAuth();
-  const isOperationalRole = ["logistic", "van_chuyen"].includes(normalizeRole(user?.role));
+  const { user, can } = useAuth();
+  const canViewUserGuide = can("userGuide");
 
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
 
@@ -88,10 +88,11 @@ const AppHeader: React.FC = () => {
             {/* Cross Icon */}
           </button>
 
-          <Link href="/" className="flex items-center gap-2 font-semibold text-gray-900 dark:text-white lg:hidden">
+          {/* Bấm logo là tải lại trang (đọc lại dữ liệu và phân quyền). */}
+          <ReloadHomeLink title={t("reloadApp")} className="flex items-center gap-2 font-semibold text-gray-900 dark:text-white lg:hidden">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-xs font-bold text-white">XNK</span>
             <span>{t("importExport")}</span>
-          </Link>
+          </ReloadHomeLink>
 
           <button
             onClick={toggleApplicationMenu}
@@ -154,7 +155,7 @@ const AppHeader: React.FC = () => {
           } items-center justify-between w-full gap-4 px-5 py-4 lg:flex shadow-theme-md lg:justify-end lg:px-0 lg:shadow-none`}
         >
           <div className="flex items-center gap-2 2xsm:gap-3">
-            {!isOperationalRole && (
+            {canViewUserGuide && (
               <Link
                 href="/user-guide"
                 title={t("userGuide")}
@@ -186,7 +187,7 @@ const AppHeader: React.FC = () => {
           </div>
           <div
             className="flex shrink-0 items-center gap-3 text-gray-700 dark:text-gray-300"
-            title={`${user?.name || "User"} • ${user?.role || ""} • ${user?.session || ""}`}
+            title={`${user?.name || "User"} • ${user?.role || ""}`}
           >
             <AvatarText
               name={user?.name || "User"}

@@ -188,8 +188,8 @@ Sau khi đăng nhập thành công:
    chặn kịch bản script ngoài tự gắn header từ trình duyệt.
 3. **Secret không xuống client:** hostname BE, `BE_XNK_API_KEY`, header Cloudflare Access đều nằm ở
    gateway (server Next.js), không xuất hiện trong bundle trình duyệt.
-4. **Phân quyền hiển thị theo role/session** lấy từ JWT đã xác minh; quyền thực tế vẫn được BE kiểm
-   tra lại — FE ẩn nút chỉ để trải nghiệm, không phải lớp bảo vệ.
+4. **Phân quyền hiển thị theo chức năng** (`user.permissions` do BE trả ở đăng nhập và `GET /api/auth/me`, đọc lại
+   khi tải lại / chuyển trang); quyền thực tế vẫn được BE kiểm tra lại — FE ẩn nút chỉ để trải nghiệm, không phải lớp bảo vệ.
 5. **Đăng xuất tập trung** khi token hết hạn qua sự kiện `xnk:auth-expired`.
 
 ---

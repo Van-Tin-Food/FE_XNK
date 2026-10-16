@@ -8,7 +8,6 @@ import { ChevronLeftIcon, EyeCloseIcon, EyeIcon } from "@/icons";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
 import React, { useRef, useState } from "react";
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 
 /** true nếu kết quả login là nhánh cần xác thực thêm bằng Google. */
 function isLoginMfaInfo(value: unknown): value is LoginMfaInfo {
@@ -23,9 +22,8 @@ export default function SignInForm() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const submittingRef = useRef(false);
-  const { user: currentUser, setUser } = useAuth();
-  const canManageUsers = canPerformShipmentAction(currentUser, "registerUser")
-    && canPerformShipmentAction(currentUser, "updateUserPassword");
+  const { setUser, can } = useAuth();
+  const canManageUsers = can("users", "edit");
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

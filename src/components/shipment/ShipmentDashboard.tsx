@@ -11,7 +11,6 @@ import ShipmentTable from "./ShipmentTable";
 import ShipmentDetailModal from "./ShipmentDetailModal";
 import CreateShipmentModal from "./CreateShipmentModal";
 import { useAuth } from "@/context/AuthContext";
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useLanguage } from "@/context/LanguageContext";
 import { getDefaultEtaRange } from "@/utils/shipmentDateFilter";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
@@ -82,12 +81,13 @@ function matchesBaseFilter(shipment: Shipment, filter: ShipmentFilter): boolean 
 }
 
 export default function ShipmentDashboard() {
-  const { user } = useAuth();
+  const { can } = useAuth();
   const { t } = useLanguage();
   const { notify } = useSystemNotification();
-  const canCreateShipment = canPerformShipmentAction(user, "createShipment");
-  const canExportShipments = canPerformShipmentAction(user, "exportShipments");
-  const canViewPurchaseAmounts = canPerformShipmentAction(user, "viewPurchaseAmounts");
+  const canViewShipments = can("shipments");
+  const canCreateShipment = can("shipments", "edit");
+  const canExportShipments = can("exportShipments");
+  const canViewPurchaseAmounts = can("purchaseAmounts");
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
   const [updatedBy, setUpdatedBy] = useState<string>("");
@@ -112,6 +112,12 @@ export default function ShipmentDashboard() {
   const [isExporting, setIsExporting] = useState(false);
 
   const loadData = useCallback(async () => {
+    // Không có quyền xem đơn hàng: không gọi API (BE cũng trả 403) và bỏ dữ liệu đang giữ.
+    if (!canViewShipments) {
+      setShipments([]);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setApiError(null);
 
@@ -129,7 +135,7 @@ export default function ShipmentDashboard() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [canViewShipments]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -239,6 +245,18 @@ export default function ShipmentDashboard() {
     setSelectedShipment(shipment);
     setIsModalOpen(true);
   };
+
+  if (!canViewShipments) {
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white">{t("dashboardTitle")}</h1>
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center dark:border-gray-800 dark:bg-gray-900 sm:p-10">
+          <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("noShipmentPermissionTitle")}</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("noShipmentPermissionDescription")}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-5">

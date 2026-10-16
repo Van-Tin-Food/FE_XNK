@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import React, { useState } from "react";
-import { canPerformShipmentAction, normalizeRole } from "../config/shipmentActionPermissions";
+import ReloadHomeLink from "../components/common/ReloadHomeLink";
 import { useAuth } from "../context/AuthContext";
 import { useSidebar } from "../context/SidebarContext";
 import { GridIcon, HorizontaLDots } from "../icons/index";
@@ -13,7 +13,7 @@ const MARKET_RESEARCH_HREF = "https://script.google.com/a/macros/vantinfood.vn/s
 const LEGACY_ETA_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbwlTy4uv4eGx5beJfLKRwJj-VW0H5uFxSeRbhGOstoGn4bPjjJ2-0E0xqwghxvB3R3_7g/exec";
 
 const AppSidebar: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { can, logout } = useAuth();
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -21,15 +21,12 @@ const AppSidebar: React.FC = () => {
   const [supportOpen, setSupportOpen] = useState(pathname === "/email" || pathname === "/document-sync");
   const [catalogOpen, setCatalogOpen] = useState(pathname === "/master-data");
   const [logsOpen, setLogsOpen] = useState(pathname === "/activity-logs");
-  const role = normalizeRole(user?.role);
-  const isOperationalRole = role === "logistic" || role === "van_chuyen";
-  const canViewLogs = !isOperationalRole && canPerformShipmentAction(user, "viewActivityLogs");
-  const canSendEmail = !isOperationalRole && canPerformShipmentAction(user, "sendEmail");
-  const canViewEmailTools = canPerformShipmentAction(user, "viewEmailTools") || canSendEmail;
-  const canSyncDocuments = canPerformShipmentAction(user, "syncDocuments");
-  const canViewDocumentSync = canPerformShipmentAction(user, "viewDocumentSync") || canSyncDocuments;
-  const canManageUsers = !isOperationalRole && (canPerformShipmentAction(user, "viewUsers") || canPerformShipmentAction(user, "manageUsers"));
-  const canManageMasterData = canPerformShipmentAction(user, "viewMasterData") || canPerformShipmentAction(user, "manageMasterData");
+  // Menu hiện theo quyền thực tế của tài khoản (mức view trở lên), không theo tên role.
+  const canViewLogs = can("activityLogs");
+  const canViewEmailTools = can("email");
+  const canViewDocumentSync = can("documentSync");
+  const canManageUsers = can("users");
+  const canManageMasterData = can("masterData");
   const { t } = useLanguage();
 
   return (
@@ -46,16 +43,17 @@ const AppSidebar: React.FC = () => {
           !isExpanded && !isHovered ? "lg:justify-center" : "justify-start"
         }`}
       >
-        <Link
-          href="/"
-          aria-label="Trang quản lý xuất nhập khẩu"
+        {/* Bấm logo là tải lại trang: dữ liệu và phân quyền đều được đọc lại. */}
+        <ReloadHomeLink
+          ariaLabel="Trang quản lý xuất nhập khẩu"
+          title={t("reloadApp")}
           className="flex h-10 items-center gap-3 font-semibold text-gray-900 dark:text-white"
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-sm font-bold text-white">
             XNK
           </span>
           {showText && <span>{t("importExportManagement")}</span>}
-        </Link>
+        </ReloadHomeLink>
       </div>
 
       <nav className="mb-6 min-h-0 flex-1 overflow-y-auto">

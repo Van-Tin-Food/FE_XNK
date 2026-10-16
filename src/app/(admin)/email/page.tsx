@@ -1,6 +1,5 @@
 "use client";
 
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import SearchSuggestions from "@/components/common/SearchSuggestions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
@@ -17,12 +16,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 const MAX_EMAIL_RECIPIENTS = 15;
 
 export default function EmailPage() {
-  const { user } = useAuth();
+  const { can } = useAuth();
   const { t } = useLanguage();
   const { notify } = useSystemNotification();
   const router = useRouter();
-  const canSend = canPerformShipmentAction(user, "sendEmail");
-  const canView = canPerformShipmentAction(user, "viewEmailTools") || canSend;
+  const canSend = can("email", "edit");
+  const canView = can("email");
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [message, setMessage] = useState("");

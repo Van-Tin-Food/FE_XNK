@@ -2,18 +2,20 @@
 
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
-import { canPerformShipmentAction, RBAC_ROLES, RBAC_SESSIONS } from "@/config/shipmentActionPermissions";
+import { isAdminRole, RBAC_ROLES } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { recordActivity } from "@/services/activityLogApi";
 import { registerUser } from "@/services/authApi";
 import Link from "next/link";
 import React, { useState } from "react";
 
-const EMPTY_FORM = { username: "", name: "", email: "", password: "", confirmPassword: "", role: "van_chuyen", session: "view" };
+const EMPTY_FORM = { username: "", name: "", email: "", password: "", confirmPassword: "", role: "van_chuyen" };
 
 export default function SignUpForm() {
-  const { user } = useAuth();
-  const canRegister = canPerformShipmentAction(user, "registerUser");
+  const { user, can } = useAuth();
+  const canRegister = can("users", "edit");
+  // Chỉ admin được tạo tài khoản admin (BE cũng chặn).
+  const roleOptions = RBAC_ROLES.filter((role) => role !== "admin" || isAdminRole(user?.role));
   const [form, setForm] = useState(EMPTY_FORM);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -23,11 +25,7 @@ export default function SignUpForm() {
     return <AccessDenied title="Không có quyền đăng ký tài khoản" userExists={Boolean(user)} />;
   }
 
-  const updateField = (field: keyof typeof form, value: string) => setForm((current) => (
-    field === "role"
-      ? { ...current, role: value, session: value === "admin" ? "manage" : current.session }
-      : { ...current, [field]: value }
-  ));
+  const updateField = (field: keyof typeof form, value: string) => setForm((current) => ({ ...current, [field]: value }));
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -41,8 +39,8 @@ export default function SignUpForm() {
 
     setLoading(true);
     try {
-      const result = await registerUser({ username: values.username, name: values.name, email: values.email, password: values.password, role: values.role, session: values.session });
-      recordActivity(user, { action: "REGISTER_USER", location: "Auth/SignUp", detail: `Tạo tài khoản ${values.username}; role ${values.role}; session ${values.session}${values.email ? `; email ${values.email}` : ""}` });
+      const result = await registerUser({ username: values.username, name: values.name, email: values.email, password: values.password, role: values.role });
+      recordActivity(user, { action: "REGISTER_USER", location: "Auth/SignUp", detail: `Tạo tài khoản ${values.username}; role ${values.role}${values.email ? `; email ${values.email}` : ""}` });
       setSuccess(result.message || `Đã tạo tài khoản ${values.username}.`);
       setForm(EMPTY_FORM);
     } catch (submitError) {
@@ -58,10 +56,7 @@ export default function SignUpForm() {
         <Field label="Tên đăng nhập"><Input type="text" value={form.username} onChange={(e) => updateField("username", e.target.value)} autoComplete="off" placeholder="Nhập tên đăng nhập" /></Field>
         <Field label="Tên hiển thị"><Input type="text" value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="Nhập tên người dùng" /></Field>
         <Field label="Email Google (xác thực 2 bước)"><Input type="email" value={form.email} onChange={(e) => updateField("email", e.target.value)} autoComplete="off" placeholder="ten@vantinfood.vn" /></Field>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Role"><select value={form.role} onChange={(e) => updateField("role", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{RBAC_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</select></Field>
-          <Field label="Session"><select value={form.session} disabled={form.role === "admin"} onChange={(e) => updateField("session", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-60 focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{(form.role === "admin" ? ["manage"] : RBAC_SESSIONS).map((session) => <option key={session} value={session}>{session}</option>)}</select></Field>
-        </div>
+        <Field label="Role"><select value={form.role} onChange={(e) => updateField("role", e.target.value)} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{roleOptions.map((role) => <option key={role} value={role}>{role}</option>)}</select></Field>
         <Field label="Mật khẩu"><Input type="password" value={form.password} onChange={(e) => updateField("password", e.target.value)} autoComplete="new-password" placeholder="Nhập mật khẩu" /></Field>
         <Field label="Xác nhận mật khẩu"><Input type="password" value={form.confirmPassword} onChange={(e) => updateField("confirmPassword", e.target.value)} autoComplete="new-password" placeholder="Nhập lại mật khẩu" /></Field>
         <Feedback error={error} success={success} />

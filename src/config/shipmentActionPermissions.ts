@@ -1,109 +1,118 @@
 import type { AuthUser } from "@/types/auth";
 
+// Phân quyền theo chức năng, mỗi chức năng một mức: none (không) / view (xem) / edit (sửa, gồm cả tạo mới).
+// Quyền thực tế của tài khoản do BE tính (chuẩn của role + tùy chỉnh riêng) và trả về ở đăng nhập và
+// GET /api/auth/me; FE chỉ đọc user.permissions, không tự suy quyền từ tên role.
+// Danh mục chức năng đồng bộ với PERMISSION_FUNCTIONS trong be/src/config/rbac.js.
+
 export const RBAC_ROLES = ["admin", "it", "logistic", "van_chuyen"] as const;
-export const RBAC_SESSIONS = ["manage", "view"] as const;
-
 export type RbacRole = (typeof RBAC_ROLES)[number];
-export type RbacSession = (typeof RBAC_SESSIONS)[number];
 
-export type ShipmentActionPermissionKey =
-  | "createShipment"
-  | "uploadDocument"
-  | "passDocument"
-  | "archiveDocuments"
-  | "editReturnItem"
-  | "editShipmentDetails"
-  | "cancelShipment"
-  | "viewActivityLogs"
-  | "viewUsers"
-  | "manageUsers"
-  | "viewMasterData"
-  | "viewEmailLogs"
-  | "manageMasterData"
-  | "registerUser"
-  | "updateUserPassword"
-  | "viewEmailTools"
-  | "viewTracking"
-  | "sendEmail"
-  | "viewDocumentSync"
-  | "syncDocuments"
-  | "exportShipments"
-  | "useAiChat"            // chatbox AI tra cứu đơn hàng (chỉ đọc)
-  // Dữ liệu nhạy cảm (đồng bộ với SENSITIVE_DATA_VIEWERS trong be/src/config/rbac.js):
-  | "viewPurchaseAmounts"   // đơn giá, tổng tiền hàng
-  | "viewSupplierContact";  // email, SĐT, địa chỉ nhà cung cấp
+export const PERMISSION_LEVELS = ["none", "view", "edit"] as const;
+export type PermissionLevel = (typeof PERMISSION_LEVELS)[number];
 
-type ActionAccess = {
-  view: ShipmentActionPermissionKey[];
-  manage: ShipmentActionPermissionKey[];
-};
+export const PERMISSION_FUNCTIONS = {
+  shipments: ["none", "view", "edit"], // Đơn hàng: xem; edit = tạo đơn, sửa chi tiết, upload PI
+  shipmentCancel: ["none", "edit"], // Hủy đơn
+  documents: ["none", "view", "edit"], // Chứng từ: xem; edit = upload (trừ PI), PASS
+  documentArchive: ["none", "edit"], // Lưu trữ hồ sơ đơn đã đủ chứng từ
+  containerTransport: ["none", "view", "edit"], // Vận chuyển / trả container
+  tracking: ["none", "view"], // Theo dõi hành trình tàu
+  exportShipments: ["none", "view"], // Xuất Excel
+  purchaseAmounts: ["none", "view"], // Đơn giá, tổng tiền hàng
+  supplierContact: ["none", "view"], // Email, SĐT, địa chỉ nhà cung cấp
+  aiChat: ["none", "view"], // Chatbox AI
+  masterData: ["none", "view", "edit"], // Danh mục NCC, hãng tàu, kho
+  documentSync: ["none", "view", "edit"], // Đồng bộ chứng từ Drive
+  email: ["none", "view", "edit"], // Email nhà cung cấp: xem; edit = gửi
+  activityLogs: ["none", "view"], // Nhật ký thao tác
+  users: ["none", "view", "edit"], // Tài khoản: xem; edit = tạo, sửa, phân quyền, đổi mật khẩu
+  userGuide: ["none", "view"], // Hướng dẫn sử dụng
+} as const satisfies Record<string, readonly PermissionLevel[]>;
 
-// Chỉnh quyền giao diện tại đây.
-// - view: được xem màn hình/dữ liệu.
-// - manage: được thực hiện thao tác thay đổi dữ liệu.
-// - admin: luôn có toàn quyền, không cần liệt kê từng action.
-const ROLE_ACCESS: Record<Exclude<RbacRole, "admin">, ActionAccess> = {
-  it: {
-    // IT chỉ được xem dữ liệu. Session view/manage không làm thay đổi quyền IT.
-    view: ["viewActivityLogs", "viewUsers", "viewMasterData", "viewEmailLogs", "viewEmailTools", "viewDocumentSync", "viewTracking", "useAiChat"],
-    manage: [],
-  },
-  logistic: {
-    // Xuất Excel chỉ đọc dữ liệu nên có ở cả session view và manage.
-    view: ["viewTracking", "exportShipments", "viewPurchaseAmounts", "useAiChat"],
-    manage: [
-      "createShipment", "uploadDocument", "passDocument", "editShipmentDetails",
-      "cancelShipment", "syncDocuments", "manageMasterData",
-    ],
-  },
-  van_chuyen: {
-    view: ["viewTracking", "exportShipments", "useAiChat"],
-    manage: ["uploadDocument", "passDocument", "archiveDocuments", "editReturnItem", "syncDocuments", "manageMasterData"],
-  },
-};
+export type PermissionFunction = keyof typeof PERMISSION_FUNCTIONS;
+export type PermissionMap = Record<PermissionFunction, PermissionLevel>;
+
+export const PERMISSION_FUNCTION_KEYS = Object.keys(PERMISSION_FUNCTIONS) as PermissionFunction[];
+
+// Nhóm hiển thị trên màn quản lý tài khoản.
+export const PERMISSION_GROUPS: ReadonlyArray<{ key: string; functions: readonly PermissionFunction[] }> = [
+  { key: "permissionGroupShipments", functions: ["shipments", "shipmentCancel", "tracking", "exportShipments", "aiChat"] },
+  { key: "permissionGroupDocuments", functions: ["documents", "documentArchive", "documentSync", "containerTransport"] },
+  { key: "permissionGroupSensitive", functions: ["purchaseAmounts", "supplierContact"] },
+  { key: "permissionGroupSystem", functions: ["masterData", "email", "users", "activityLogs", "userGuide"] },
+];
+
+const LEVEL_RANK: Record<PermissionLevel, number> = { none: 0, view: 1, edit: 2 };
 
 export function normalizeRole(value?: string): string {
-  const role = String(value || "").trim().toLocaleLowerCase("vi");
-  return role;
+  return String(value || "").trim().toLocaleLowerCase("vi");
 }
 
-export function normalizeSession(value?: string): RbacSession {
-  const session = String(value || "").trim().toLocaleLowerCase("vi");
-  return RBAC_SESSIONS.includes(session as RbacSession) ? session as RbacSession : "view";
+export function isAdminRole(role?: string): boolean {
+  return normalizeRole(role) === "admin";
 }
 
-export function canViewSensitiveData(user: AuthUser | null): boolean {
-  return normalizeRole(user?.role) === "admin";
+export function levelRank(level?: string): number {
+  return LEVEL_RANK[level as PermissionLevel] ?? 0;
 }
 
-export function canPerformShipmentAction(user: AuthUser | null, action: ShipmentActionPermissionKey): boolean {
-  const role = normalizeRole(user?.role) as RbacRole;
-  const session = normalizeSession(user?.session);
-  if (!user || !role || !RBAC_ROLES.includes(role)) return false;
-  if (role === "admin") return true;
-
-  const access = ROLE_ACCESS[role];
-  if (role === "it") return access.view.includes(action);
-  if (access.manage.includes(action)) return session === "manage";
-  return access.view.includes(action);
+export function isPermissionFunction(value: string): value is PermissionFunction {
+  return Object.prototype.hasOwnProperty.call(PERMISSION_FUNCTIONS, value);
 }
 
+export function isLevelAllowed(fn: PermissionFunction, level: string): level is PermissionLevel {
+  return (PERMISSION_FUNCTIONS[fn] as readonly string[]).includes(level);
+}
+
+/** Đọc map { chức năng: mức } từ API: bỏ chức năng lạ và mức không hợp lệ. */
+export function normalizePermissionMap(value: unknown): Partial<PermissionMap> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Partial<PermissionMap> = {};
+  for (const [fn, raw] of Object.entries(value as Record<string, unknown>)) {
+    const level = String(raw ?? "").trim().toLowerCase();
+    if (isPermissionFunction(fn) && isLevelAllowed(fn, level)) result[fn] = level;
+  }
+  return result;
+}
+
+export function fullPermissions(): PermissionMap {
+  return Object.fromEntries(PERMISSION_FUNCTION_KEYS.map((fn) => {
+    const levels = PERMISSION_FUNCTIONS[fn];
+    return [fn, levels[levels.length - 1]];
+  })) as PermissionMap;
+}
+
+/** Quyền đầy đủ cho mọi chức năng (thiếu = none). */
+export function completePermissions(value: Partial<PermissionMap> | undefined): PermissionMap {
+  return Object.fromEntries(PERMISSION_FUNCTION_KEYS.map((fn) => [fn, value?.[fn] || "none"])) as PermissionMap;
+}
+
+/** Quyền thực tế = chuẩn của role, ghi đè bằng tùy chỉnh (giống BE, dùng để xem trước khi sửa quyền). */
+export function effectivePermissions(role: string, standard: Partial<PermissionMap> | undefined, custom: Partial<PermissionMap> | undefined): PermissionMap {
+  if (isAdminRole(role)) return fullPermissions();
+  const base = completePermissions(standard);
+  return Object.fromEntries(PERMISSION_FUNCTION_KEYS.map((fn) => [fn, custom?.[fn] || base[fn]])) as PermissionMap;
+}
+
+/** Chỉ giữ chức năng khác chuẩn của role (chỉnh về đúng chuẩn thì không còn là tùy chỉnh). */
+export function diffFromStandard(standard: Partial<PermissionMap> | undefined, custom: Partial<PermissionMap>): Partial<PermissionMap> {
+  const base = completePermissions(standard);
+  return Object.fromEntries(
+    Object.entries(custom).filter(([fn, level]) => isPermissionFunction(fn) && base[fn] !== level),
+  ) as Partial<PermissionMap>;
+}
+
+/** Tài khoản có chức năng fn ở mức level trở lên không (edit bao gồm view). Admin luôn có. */
+export function hasPermission(user: AuthUser | null, fn: PermissionFunction, level: PermissionLevel = "view"): boolean {
+  if (!user) return false;
+  if (isAdminRole(user.role)) return true;
+  return levelRank(user.permissions?.[fn]) >= levelRank(level);
+}
+
+/** PI là chứng từ gốc của đơn nên thuộc quyền sửa Đơn hàng; chứng từ khác thuộc quyền sửa Chứng từ. */
 export function canUploadDocumentType(user: AuthUser | null, documentCode: string): boolean {
-  if (!canPerformShipmentAction(user, "uploadDocument")) return false;
-  return normalizeRole(user?.role) !== "van_chuyen" || documentCode.trim().toUpperCase() !== "PI";
+  return documentCode.trim().toUpperCase() === "PI"
+    ? hasPermission(user, "shipments", "edit")
+    : hasPermission(user, "documents", "edit");
 }
-
-// Đủ mọi action (TypeScript báo lỗi nếu thiếu key). Trước đây danh sách chỉ lấy action có trong
-// ROLE_ACCESS nên action chỉ-admin không có trong useAuth().permissions và admin bị ẩn nút.
-const ALL_SHIPMENT_ACTIONS: Record<ShipmentActionPermissionKey, true> = {
-  createShipment: true, uploadDocument: true, passDocument: true, archiveDocuments: true,
-  editReturnItem: true, editShipmentDetails: true, cancelShipment: true, viewActivityLogs: true,
-  viewUsers: true, manageUsers: true, viewMasterData: true, viewEmailLogs: true,
-  manageMasterData: true, registerUser: true, updateUserPassword: true, viewEmailTools: true,
-  viewTracking: true, sendEmail: true, viewDocumentSync: true, syncDocuments: true,
-  exportShipments: true, useAiChat: true, viewPurchaseAmounts: true, viewSupplierContact: true,
-};
-
-export const SHIPMENT_ACTION_PERMISSIONS = Object.fromEntries(
-  Object.keys(ALL_SHIPMENT_ACTIONS).map((action) => [action, []]),
-) as Record<ShipmentActionPermissionKey, never[]>;

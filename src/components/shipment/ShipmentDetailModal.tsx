@@ -1138,8 +1138,10 @@ function getOcrDocumentType(documentCode: string): OcrDocumentType | null {
 }
 
 export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefresh }: ShipmentDetailModalProps) {
-  const { user, permissions } = useAuth();
-  const canUseTracking = permissions.viewTracking;
+  const { user, can } = useAuth();
+  const canUseTracking = can("tracking");
+  const canViewDocuments = can("documents");
+  const canViewTransport = can("containerTransport");
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
   const { language, t } = useLanguage();
@@ -1388,14 +1390,23 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   const isCancelled = shipment.status === "cancelled";
   const isArchived =  documentProgress?.archiveStatus === 1;
-  const canUploadDocuments = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.uploadDocument;
-  const canPassDocuments = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.passDocument;
-  const canArchiveDocuments = !isCancelled && !isArchived && permissions.archiveDocuments;
-  const canEditReturnItem = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.editReturnItem;
-  const canEditDetails = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.editShipmentDetails;
-  const canCancelShipment = !isCancelled && !isArchiveStateLoading && !isArchived && permissions.cancelShipment;
-  // Tiền hàng chỉ admin/logistic xem được; BE cũng không trả các cột này cho role khác.
-  const canViewPurchaseAmounts = permissions.viewPurchaseAmounts;
+  const isEditableState = !isCancelled && !isArchiveStateLoading && !isArchived;
+  // Upload được ít nhất một loại chứng từ: PI theo quyền sửa Đơn hàng, chứng từ khác theo quyền sửa Chứng từ.
+  // Từng mã chứng từ kiểm tra thêm bằng canUploadDocumentType.
+  const canUploadDocuments = isEditableState && canViewDocuments && (can("documents", "edit") || can("shipments", "edit"));
+  const canPassDocuments = isEditableState && can("documents", "edit");
+  const canArchiveDocuments = !isCancelled && !isArchived && can("documentArchive", "edit");
+  const canEditReturnItem = isEditableState && can("containerTransport", "edit");
+  const canEditDetails = isEditableState && can("shipments", "edit");
+  const canCancelShipment = isEditableState && can("shipmentCancel", "edit");
+  // Tiền hàng theo quyền purchaseAmounts; BE cũng không trả các cột này khi thiếu quyền.
+  const canViewPurchaseAmounts = can("purchaseAmounts");
+  const isTabVisible = (tab: ModalTab) => (tab !== "folder" || Boolean(archived?.archived))
+    && (tab !== "journey" || canUseTracking)
+    && ((tab !== "documents" && tab !== "folder") || canViewDocuments)
+    && (tab !== "return" || canViewTransport);
+  // Quyền vừa đổi (tải lại khi chuyển trang / bị BE từ chối): tab không còn được xem thì về Tổng quan.
+  const currentTab: ModalTab = isTabVisible(activeTab) ? activeTab : "overview";
   const purchaseDetailCompareFields = canViewPurchaseAmounts
     ? ["ten_hang", "so_kien", "net_weight", "don_gia", "tong_gia"]
     : ["ten_hang", "so_kien", "net_weight"];
@@ -2407,12 +2418,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
       {/* Tabs */}
       <div className="flex flex-shrink-0 flex-wrap items-center gap-1 border-b border-gray-100 px-3 py-2 no-scrollbar dark:border-gray-800 sm:flex-nowrap sm:overflow-x-auto sm:px-6">
-        {TAB_LIST.filter((tab) => (tab.key !== "folder" || archived?.archived) && (tab.key !== "journey" || canUseTracking)).map(tab => (
+        {TAB_LIST.filter((tab) => isTabVisible(tab.key)).map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`inline-flex min-w-0 basis-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-all duration-150 sm:basis-auto sm:flex-shrink-0 sm:flex-none sm:justify-start sm:px-3 sm:py-1.5 ${
-              activeTab === tab.key
+              currentTab ===tab.key
                 ? "bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"
                 : "text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200"
             }`}
@@ -2568,7 +2579,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
 
         {/* ── OVERVIEW ── */}
-        {activeTab === "overview" && (
+        {currentTab ==="overview" && (
           <div className="flex min-w-0 flex-col gap-4 sm:gap-6">
             {/* Key info grid */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -2647,7 +2658,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
 
         {/* ── JOURNEY ── */}
-        {canUseTracking && activeTab === "journey" && (
+        {canUseTracking && currentTab ==="journey" && (
           <div className="flex flex-col gap-6">
             <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02] sm:p-5">
               <div className="flex items-start justify-between gap-4">
@@ -2797,7 +2808,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
 
         {/* ── DOCUMENTS ── */}
-        {activeTab === "documents" && (
+        {currentTab ==="documents" && (
           <div className="flex flex-col gap-4">
             {canArchiveDocuments && documentsReadyForArchive && !isArchived && (
               <button type="button" onClick={handleArchive} disabled={isArchiveLoading} className="flex w-full items-center justify-center rounded-xl bg-success-500 px-4 py-3 text-sm font-semibold text-white hover:bg-success-600 disabled:cursor-not-allowed disabled:opacity-60">
@@ -3225,7 +3236,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
 
         {/* ── RETURN ITEM ── */}
-        {activeTab === "return" && (
+        {currentTab ==="return" && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -3369,7 +3380,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
 
         {/* ── DETAILS ── */}
-        {activeTab === "details" && (
+        {currentTab ==="details" && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -3612,7 +3623,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
 
         {/* ── FOLDER ── */}
-        {activeTab === "folder" && (
+        {currentTab ==="folder" && (
           <div className="flex flex-col gap-4">
             <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02] sm:p-5">
               <div className="mb-4 flex items-start gap-3 sm:items-center sm:gap-4">

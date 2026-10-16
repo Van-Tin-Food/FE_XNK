@@ -22,7 +22,6 @@ export interface ActivityLog {
   username?: string;
   userName?: string;
   role?: string;
-  session?: string;
   action: string;
   location: string;
   detail: string;
@@ -99,7 +98,6 @@ function normalizeLog(row: unknown, index: number): ActivityLog | null {
     username: String(row.username ?? row.user_name ?? nestedUser.username ?? "").trim() || undefined,
     userName: String(row.name ?? row.full_name ?? row.fullName ?? nestedUser.name ?? "").trim() || undefined,
     role: String(row.role ?? row.user_role ?? row.userRole ?? nestedUser.role ?? "").trim() || undefined,
-    session: String(row.session ?? row.user_session ?? row.userSession ?? row.session_id ?? nestedUser.session ?? "").trim() || undefined,
     action: String(row.action ?? "").trim(),
     location: String(row.location ?? "").trim(),
     detail: String(row.detail ?? "").trim(),

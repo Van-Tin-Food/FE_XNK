@@ -1,6 +1,5 @@
 "use client";
 
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import SearchSuggestions from "@/components/common/SearchSuggestions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
@@ -127,7 +126,7 @@ function ActivityRow({ log }: { log: ActivityLog }) {
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-semibold text-gray-800 dark:text-white/90">{actor(log)}</span>
             {log.username && log.username !== log.userName && <span className="text-xs text-gray-500 dark:text-gray-400">@{log.username}</span>}
-            {log.role && <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">{log.role}{log.session ? ` · ${log.session}` : ""}</span>}
+            {log.role && <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">{log.role}</span>}
             <time dateTime={log.createdAt} title={dateTime(log.createdAt, language, true)} className="w-full text-xs text-gray-500 sm:ml-auto sm:w-auto">{dateTime(log.createdAt, language, true)}</time>
           </div>
 
@@ -192,11 +191,11 @@ function ActivityRow({ log }: { log: ActivityLog }) {
 }
 
 export default function ActivityLogsPage() {
-  const { user } = useAuth();
+  const { can } = useAuth();
   const { language, t } = useLanguage();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
+  const canViewLogs = can("activityLogs");
   // Tab (Lịch sử thao tác / Nhật kí email) lấy trực tiếp từ URL (?tab=). Sidebar là nơi duy nhất
   // chuyển mục — vào mục nào hiện đúng mục đó, không còn state riêng nên không thể lệch tab.
   const activeTab: "activity" | "email" = searchParams.get("tab") === "email" ? "email" : "activity";

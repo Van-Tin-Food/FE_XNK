@@ -1,6 +1,5 @@
 "use client";
 
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import {
@@ -16,11 +15,11 @@ import { useEffect, useState } from "react";
 import { recordActivity } from "@/services/activityLogApi";
 
 export default function DocumentSyncPage() {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const { t } = useLanguage();
   const router = useRouter();
-  const canViewSync = canPerformShipmentAction(user, "viewDocumentSync") || canPerformShipmentAction(user, "syncDocuments");
-  const canSync = canPerformShipmentAction(user, "syncDocuments");
+  const canViewSync = can("documentSync");
+  const canSync = can("documentSync", "edit");
   const [result, setResult] = useState<DocumentSyncResult | null>(null);
   const [scanning, setScanning] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);

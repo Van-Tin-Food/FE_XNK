@@ -1,5 +1,11 @@
 type ApiPayload = Record<string, unknown>;
 
+/**
+ * BE từ chối vì thiếu quyền: quyền đang hiển thị ở FE có thể đã cũ (admin vừa đổi role / quyền).
+ * AuthContext nghe sự kiện này để tải lại quyền mới, ẩn các nút không còn dùng được.
+ */
+export const PERMISSIONS_STALE_EVENT = "xnk:permissions-stale";
+
 export type ApiError = Error & {
   /** HTTP status khi lỗi đến từ response của backend. */
   status?: number;
@@ -100,6 +106,22 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return backendMessage || "Câu hỏi chưa hợp lệ.";
     case "EMAIL_CONFIG_MISSING":
       return "Chức năng gửi email chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
+    case "PERMISSION_DENIED":
+      return "Tài khoản không có quyền thực hiện thao tác này. Quyền có thể vừa được thay đổi, giao diện đã cập nhật lại.";
+    case "ADMIN_ONLY":
+      return backendMessage || "Chỉ tài khoản admin được thực hiện thao tác này.";
+    case "SELF_PERMISSION_CHANGE":
+      return "Không thể tự đổi role hoặc quyền của chính mình.";
+    case "PERMISSION_ESCALATION":
+      return backendMessage || "Không thể cấp quyền cao hơn quyền của chính bạn.";
+    case "INVALID_PERMISSION":
+      return backendMessage || "Quyền chọn chưa hợp lệ. Vui lòng kiểm tra lại.";
+    case "INVALID_ROLE":
+      return "Role không hợp lệ.";
+    case "ACCOUNT_NOT_FOUND":
+      return "Tài khoản không còn tồn tại. Vui lòng đăng nhập lại.";
+    case "AUTH_LOOKUP_FAILED":
+      return "Không kiểm tra được tài khoản đăng nhập. Vui lòng thử lại sau.";
     default:
       break;
   }
@@ -142,6 +164,9 @@ export function createHttpApiError(
     code: code || undefined,
     message: detail,
   });
+  if (response.status === 403 && code === "PERMISSION_DENIED" && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(PERMISSIONS_STALE_EVENT));
+  }
   const error = new Error(getFriendlyMessage(scope, response.status, code, message)) as ApiError;
   error.technicalMessage = technicalMessage;
   error.status = response.status;

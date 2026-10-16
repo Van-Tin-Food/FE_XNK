@@ -1,7 +1,9 @@
 "use client";
 
 import { getDriveFolderLinks, type DriveFolderLinks } from "@/services/shipmentApi";
+import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 // Dán URL thư mục Drive tương ứng vào đúng mã chứng từ. Có URL thì tên thư mục sẽ click được.
@@ -41,11 +43,20 @@ const NAMING_EXAMPLES = [
 
 export default function UserGuidePage() {
   const { t } = useLanguage();
+  const { can } = useAuth();
+  const router = useRouter();
+  const canViewGuide = can("userGuide");
   const [driveLinks, setDriveLinks] = useState<DriveFolderLinks>({ documents: {} });
 
   useEffect(() => {
+    if (!canViewGuide) {
+      router.replace("/");
+      return;
+    }
     void getDriveFolderLinks().then(setDriveLinks).catch(() => setDriveLinks({ documents: {} }));
-  }, []);
+  }, [canViewGuide, router]);
+
+  if (!canViewGuide) return null;
 
   return (
     <div className="space-y-6 pb-8">

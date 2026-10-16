@@ -1,6 +1,5 @@
 "use client";
 
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import type { ApiError } from "@/utils/apiError";
@@ -151,7 +150,7 @@ function ResultBlock({ result }: { result: AiChatResult }) {
 
 /** Chatbox AI tra cứu đơn hàng (thử nghiệm, chỉ đọc). Gọi BE; BE gọi OpenRouter và truy vấn PostgreSQL. */
 export default function AiChatBox() {
-  const { user } = useAuth();
+  const { can } = useAuth();
   const { t, language } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -164,7 +163,8 @@ export default function AiChatBox() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const canUse = canPerformShipmentAction(user, "useAiChat");
+  // Chatbox đọc dữ liệu đơn hàng nên cần cả quyền chatbox lẫn quyền xem đơn hàng (BE kiểm tra giống vậy).
+  const canUse = can("aiChat") && can("shipments");
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });

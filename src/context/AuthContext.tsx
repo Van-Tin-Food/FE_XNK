@@ -2,33 +2,48 @@
 
 import {
   clearStoredUser,
+  fetchCurrentUser,
   getStoredUser,
   GOOGLE_DRIVE_AUTH_REQUIRED_EVENT,
   GOOGLE_MFA_STORAGE_KEY,
   startGoogleSignIn,
 } from "@/services/authApi";
-import { createActivityLog } from "@/services/activityLogApi";
 import type { AuthUser } from "@/types/auth";
 import {
-  canPerformShipmentAction,
-  SHIPMENT_ACTION_PERMISSIONS,
-  type ShipmentActionPermissionKey,
+  completePermissions,
+  fullPermissions,
+  hasPermission,
+  isAdminRole,
+  type PermissionFunction,
+  type PermissionLevel,
+  type PermissionMap,
 } from "@/config/shipmentActionPermissions";
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { PERMISSIONS_STALE_EVENT, type ApiError } from "@/utils/apiError";
+import { usePathname } from "next/navigation";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-type AuthPermissions = Record<ShipmentActionPermissionKey, boolean>;
-
-const LOGOUT_LOG_WAIT_MS = 1500;
+// Tải lại trang (F5): chờ BE trả role + quyền mới tối đa ngần này rồi mới hiện giao diện.
+// Mạng chậm / BE lỗi thì dùng tạm quyền đã lưu, lần tải trang sau sẽ đọc lại.
+const INITIAL_REFRESH_TIMEOUT_MS = 6000;
 
 interface AuthContextValue {
   user: AuthUser | null;
   isInitialized: boolean;
-  permissions: AuthPermissions;
+  /** Quyền thực tế theo chức năng (admin: toàn quyền). */
+  permissions: PermissionMap;
+  /** Có chức năng fn ở mức level trở lên không (edit bao gồm view). */
+  can: (fn: PermissionFunction, level?: PermissionLevel) => boolean;
+  /** Đọc lại role + quyền hiện tại từ BE. */
+  refreshUser: () => Promise<void>;
   setUser: (user: AuthUser | null) => void;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+function sameUser(left: AuthUser | null, right: AuthUser | null): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Server và lần render client đầu tiên phải cùng bắt đầu với user = null.
@@ -36,34 +51,71 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const googleReauthStarted = useRef(false);
-  const permissions = useMemo(() => Object.fromEntries(
-    (Object.keys(SHIPMENT_ACTION_PERMISSIONS) as ShipmentActionPermissionKey[])
-      .map((action) => [action, canPerformShipmentAction(user, action)]),
-  ) as AuthPermissions, [user]);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const pathname = usePathname();
+  const lastPathname = useRef<string | null>(null);
 
-  const clearSession = () => {
+  const permissions = useMemo(
+    () => (user && isAdminRole(user.role) ? fullPermissions() : completePermissions(user?.permissions)),
+    [user],
+  );
+  const can = useCallback(
+    (fn: PermissionFunction, level: PermissionLevel = "view") => hasPermission(user, fn, level),
+    [user],
+  );
+
+  const clearSession = useCallback(() => {
     clearStoredUser();
     setUser(null);
-  };
+  }, []);
 
-  // Người dùng bấm đăng xuất: ghi nhật ký trước khi xoá token (gateway cần token còn khớp cookie),
-  // chờ tối đa LOGOUT_LOG_WAIT_MS để không làm chậm việc đăng xuất.
-  const logout = () => {
-    const current = user;
-    const logged = current?.token
-      ? createActivityLog(current, { action: "LOGOUT", location: "Sidebar/Logout", detail: `Đăng xuất tài khoản ${current.username}` }).catch(() => {})
-      : Promise.resolve();
-    void Promise.race([logged, new Promise((resolve) => window.setTimeout(resolve, LOGOUT_LOG_WAIT_MS))]).finally(clearSession);
-  };
+  /** Role + quyền đổi (admin vừa sửa) có hiệu lực mà không phải đăng xuất. Gộp các lần gọi trùng nhau. */
+  const refreshUser = useCallback(() => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const task = (async () => {
+      if (!getStoredUser()?.token) return;
+      try {
+        const fresh = await fetchCurrentUser();
+        setUser((current) => (sameUser(current, fresh) ? current : fresh));
+      } catch (error) {
+        // Token hết hạn / tài khoản đã bị xoá: authApi đã xoá phiên trong trình duyệt.
+        if ((error as ApiError).status === 401) setUser(null);
+        // Lỗi mạng / BE tạm lỗi: giữ quyền đang có.
+      }
+    })().finally(() => {
+      refreshInFlight.current = null;
+    });
+    refreshInFlight.current = task;
+    return task;
+  }, []);
+
+  // Đăng xuất không ghi nhật ký thao tác (nhật ký chỉ ghi thao tác nghiệp vụ).
+  const logout = clearSession;
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setUser(getStoredUser());
-      setIsInitialized(true);
+    let active = true;
+    let fallbackTimer: number | undefined;
+    const startTimer = window.setTimeout(() => {
+      const stored = getStoredUser();
+      setUser(stored);
+      if (!stored?.token) {
+        setIsInitialized(true);
+        return;
+      }
+      // Tải lại trang: lấy role + quyền mới nhất từ BE trước khi hiện menu / nút thao tác.
+      fallbackTimer = window.setTimeout(() => {
+        if (active) setIsInitialized(true);
+      }, INITIAL_REFRESH_TIMEOUT_MS);
+      void refreshUser().finally(() => {
+        window.clearTimeout(fallbackTimer);
+        if (active) setIsInitialized(true);
+      });
     }, 0);
 
     // Phiên hết hạn: token không còn hợp lệ nên không ghi nhật ký, chỉ xoá phiên.
     const handleExpiredSession = () => clearSession();
+    // BE từ chối vì thiếu quyền: quyền đang hiển thị đã cũ, đọc lại để ẩn các nút không còn dùng được.
+    const handlePermissionsStale = () => void refreshUser();
     const handleGoogleDriveAuthRequired = () => {
       if (googleReauthStarted.current) return;
       googleReauthStarted.current = true;
@@ -82,15 +134,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
     };
     window.addEventListener("xnk:auth-expired", handleExpiredSession);
+    window.addEventListener(PERMISSIONS_STALE_EVENT, handlePermissionsStale);
     window.addEventListener(GOOGLE_DRIVE_AUTH_REQUIRED_EVENT, handleGoogleDriveAuthRequired);
     return () => {
-      window.clearTimeout(timer);
+      active = false;
+      window.clearTimeout(startTimer);
+      window.clearTimeout(fallbackTimer);
       window.removeEventListener("xnk:auth-expired", handleExpiredSession);
+      window.removeEventListener(PERMISSIONS_STALE_EVENT, handlePermissionsStale);
       window.removeEventListener(GOOGLE_DRIVE_AUTH_REQUIRED_EVENT, handleGoogleDriveAuthRequired);
     };
-  }, []);
+  }, [clearSession, refreshUser]);
 
-  return <AuthContext.Provider value={{ user, isInitialized, permissions, setUser, logout }}>{children}</AuthContext.Provider>;
+  // Chuyển trang trong app: đọc lại role + quyền. Lần đầu đã đọc ở effect khởi tạo phía trên.
+  useEffect(() => {
+    if (lastPathname.current === null || lastPathname.current === pathname) {
+      lastPathname.current = pathname;
+      return;
+    }
+    lastPathname.current = pathname;
+    void refreshUser();
+  }, [pathname, refreshUser]);
+
+  return (
+    <AuthContext.Provider value={{ user, isInitialized, permissions, can, refreshUser, setUser, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

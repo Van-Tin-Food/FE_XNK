@@ -27,8 +27,11 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
   trình duyệt không bao giờ gọi thẳng BE. `src/proxy.ts` là middleware chặn trang khi chưa đăng nhập.
 - `src/services/` — toàn bộ lời gọi API (`shipmentApi.ts`, `postgresShipmentApi.ts`, `authApi.ts`...).
   Không gọi `fetch` trong component.
-- `src/config/shipmentActionPermissions.ts` — ma trận quyền giao diện (`ROLE_ACCESS`). Component lấy quyền
-  qua `useAuth().permissions` hoặc `canPerformShipmentAction`.
+- `src/config/shipmentActionPermissions.ts` — danh mục chức năng (`PERMISSION_FUNCTIONS`, mức `none`/`view`/`edit`,
+  đồng bộ với `be/src/config/rbac.js`). Quyền thực tế do BE tính (chuẩn role + tùy chỉnh `users.permissions`) và trả
+  về ở đăng nhập và `GET /api/auth/me`; component hỏi quyền bằng `useAuth().can(fn, level)` hoặc
+  `hasPermission(user, fn, level)`, **không** kiểm tra tên role. `AuthContext` đọc lại quyền khi tải lại trang,
+  khi chuyển trang và khi BE trả 403 `PERMISSION_DENIED`; logo XNK (`ReloadHomeLink`) tải lại trang.
 - `src/i18n/translations.js` — chuỗi giao diện, hai ngôn ngữ `vi` và `en`, dùng `t("key", { biến })`.
 - `src/utils/apiError.ts` — `getFriendlyMessage` đổi mã lỗi BE thành câu cho người dùng. Mã lỗi BE mới
   phải thêm ở đây, nếu không người dùng chỉ thấy câu chung chung theo HTTP status.
@@ -45,9 +48,9 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
   ảnh đã có với INSPECTION) trước khi upload; file nằm trong thư mục container trên Drive.
 - Mọi luồng upload phải gọi `checkDocumentFileNames` **trước** khi upload, chạy OCR hay ghi DB, để báo
   trùng tên sớm. Không tự đổi tên hay đánh số file ở FE — quy tắc đặt tên nằm ở BE.
-- Role: `admin`, `it`, `logistic`, `van_chuyen`; mỗi user **một role** (`user.role`). `logistic` upload mọi
-  chứng từ, `van_chuyen` upload mọi chứng từ trừ PI (`canUploadDocumentType`); tab Chi tiết sửa theo `editShipmentDetails`.
-- Tiền hàng: admin, `logistic` xem được; liên hệ nhà cung cấp: chỉ admin.
+- Upload PI cần `shipments:edit`, chứng từ khác cần `documents:edit` (`canUploadDocumentType`); tab Chi tiết sửa theo
+  `shipments:edit`, hủy đơn theo `shipmentCancel:edit`.
+- Tiền hàng theo chức năng `purchaseAmounts`, liên hệ nhà cung cấp theo `supplierContact` (BE cũng ẩn cột khi thiếu quyền).
 
 ## Tải dữ liệu
 
@@ -66,9 +69,9 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
 
 1. Đọc trang/component gần nhất đang làm việc tương tự, và route/controller BE của API liên quan
    (đừng đoán tên trường từ nhãn giao diện).
-2. Chức năng mới cần quyền: thêm action vào `ShipmentActionPermissionKey` + `ROLE_ACCESS`, cập nhật
-   bảng `EXPECTED` trong `tests/shipmentActionPermissions.test.mjs`. Ẩn nút ở FE **không** thay cho
-   kiểm tra ở BE.
+2. Chức năng mới cần quyền: thêm vào `PERMISSION_FUNCTIONS` + `PERMISSION_GROUPS`, bản dịch `permissionFn_*` /
+   `permissionFnDesc_*`, bảng `EXPECTED_FUNCTIONS` trong `tests/shipmentActionPermissions.test.mjs`; cùng lúc thêm ở BE
+   (`PERMISSION_FUNCTIONS`, `ROLE_PERMISSIONS`, route). Ẩn nút ở FE **không** thay cho kiểm tra ở BE.
 3. Mọi chữ hiển thị mới: thêm key vào cả `vi` và `en`. Không dịch lan sang phần code cũ không liên quan.
 4. Có đủ trạng thái loading / rỗng / lỗi / không có quyền / đang gửi (khoá nút, chống bấm hai lần).
 5. **Mọi giao diện viết mới hoặc sửa phải responsive ngay trong cùng thay đổi** (không để "làm sau"):
@@ -81,6 +84,6 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
 
 - Push lên `main` (chạy Docker CI, xem `.github/workflows/docker.yml`).
 - Commit `.env`, đưa hostname BE, `BE_XNK_API_KEY` hay secret vào code phía client.
-- Đổi ma trận quyền ngoài phạm vi yêu cầu, đổi contract API mà không sửa BE cùng lúc.
+- Đổi danh mục chức năng / quyền chuẩn ngoài phạm vi yêu cầu, đổi contract API mà không sửa BE cùng lúc.
 
 Trả lời người dùng bằng tiếng Việt.

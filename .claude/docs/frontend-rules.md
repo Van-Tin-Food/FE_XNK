@@ -3,12 +3,8 @@
 > Bản commit của quy tắc frontend (bản gốc `.codex/skills/xnk-frontend/SKILL.md` bị gitignore).
 > Sửa quy tắc thì sửa file này; nếu còn dùng Codex thì chép sang `.codex` cho đồng bộ.
 >
-> **Hiện trạng khác với quy tắc (đã kiểm tra 14/10/2026):**
-> - Ma trận quyền nằm ở `ROLE_ACCESS` (`view`/`manage` cho từng role) trong
->   `src/config/shipmentActionPermissions.ts`, không phải `ROLE_ACTIONS`/`MANAGE_ACTIONS` như mục 3.
->   Mọi thay đổi quyền phải cập nhật bảng `EXPECTED` trong `tests/shipmentActionPermissions.test.mjs`.
-> - Session chỉ còn `manage`/`view`; alias cũ không còn được chuẩn hoá (role lạ = không có quyền).
-> - Backend hiện không kiểm tra quyền (xem `be/src/config/rbac.js`), nên ẩn nút ở FE đang là lớp chặn duy nhất.
+> **Phân quyền hiện tại (15/10/2026):** theo chức năng, mức `none`/`view`/`edit`, không còn session. BE tính quyền
+> thực tế và chặn thật (403 `PERMISSION_DENIED`); FE chỉ ẩn/hiện theo `user.permissions` do BE trả về. Xem mục 3.
 
 # XNK Frontend Skill
 
@@ -43,31 +39,31 @@ For every new page, control, API function, or visible behavior:
 
 ## 3. RBAC and Sensitive Data
 
-### Current role model
+### Current permission model
 
-Use normalized values:
-
-- `admin`: all actions.
-- `it`: can view all modules, users, master data, and logs; cannot edit.
-- `logistic`: create/edit/cancel shipments, upload every document, edit details, export Excel, see purchase amounts.
-- `van_chuyen`: transport/return and document actions (no PI upload); cannot create shipments; no purchase amounts.
-
-One shipment process only (the former `mua_hang` role and purchasing/logistics screens were removed). One role per
-user (`user.role`). Sessions are `manage` and `view`; unknown roles get no permissions. The exact matrix is
-`ROLE_ACCESS` in `src/config/shipmentActionPermissions.ts`, mirrored by `EXPECTED` in `tests/shipmentActionPermissions.test.mjs`.
+- Permissions are per function (`PERMISSION_FUNCTIONS` in `src/config/shipmentActionPermissions.ts`, mirrored from
+  `be/src/config/rbac.js`), each with a level `none` < `view` < `edit` (`edit` includes creating).
+- The role (`admin`, `it`, `logistic`, `van_chuyen`) gives default levels defined in the BE; each account may have
+  overrides (`customPermissions`) edited on the account management screen. The BE returns the effective map as
+  `user.permissions` on login and `GET /api/auth/me`. `admin` always has full access.
+- `AuthContext` refreshes the user (role + permissions) on page load (F5), on every route change, and when any API
+  returns 403 `PERMISSION_DENIED` (`PERMISSIONS_STALE_EVENT` from `src/utils/apiError.ts`). The XNK logo reloads the page.
+- One shipment process only (the former `mua_hang` role and purchasing/logistics screens were removed). There is no session.
 
 ### Rules for every new capability
 
-- Add a named action to `ShipmentActionPermissionKey`.
-- Add it to `ROLE_ACCESS` (`view` or `manage` list of each role) and update `EXPECTED` in the permission test.
-- Use `canPerformShipmentAction(user, action)` before rendering the page control, menu item, button, modal action, or destructive shortcut.
+- Use an existing function or add one to `PERMISSION_FUNCTIONS` + `PERMISSION_GROUPS`, with `permissionFn_*` /
+  `permissionFnDesc_*` translations, and update `EXPECTED_FUNCTIONS` in the permission test. Add the same function and its
+  role defaults in the BE in the same change.
+- Use `useAuth().can(fn, level)` (or `hasPermission(user, fn, level)`) before rendering the page control, menu item, button,
+  modal action, or destructive shortcut. Never check role names in components.
 - Hide controls users cannot use; disabled controls are appropriate when context should remain visible but action must be unavailable.
 - Do not use frontend hiding as backend security. The backend must authorize every mutation.
 - Keep GET data loading working according to the project contract. Do not add a frontend permission guard that prevents a shared table from loading data merely because a role cannot edit it.
 - For sensitive fields, do not render or include them in client state when the user should not see them. UI hiding alone is insufficient if the API returns the data.
 - When adding a Sidebar item, use the same permission helper and preserve route access behavior.
 
-If a new resource has both view and manage semantics, represent them clearly in action names and session handling instead of scattering role checks across JSX.
+If a new resource has both view and edit semantics, use one function with the levels `view` and `edit` instead of scattering role checks across JSX.
 
 ## 4. API Services and Data Contracts
 

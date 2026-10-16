@@ -2,7 +2,6 @@
 
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
-import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
 import { recordActivity } from "@/services/activityLogApi";
 import { updateUserPassword } from "@/services/authApi";
@@ -10,8 +9,8 @@ import Link from "next/link";
 import React, { useState } from "react";
 
 export default function ResetPasswordForm() {
-  const { user } = useAuth();
-  const canUpdatePassword = canPerformShipmentAction(user, "updateUserPassword");
+  const { user, can } = useAuth();
+  const canUpdatePassword = can("users", "edit");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
