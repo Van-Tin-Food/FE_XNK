@@ -40,6 +40,8 @@ interface ShipmentDetailModalProps {
 }
 
 type ModalTab = "overview" | "journey" | "documents" | "return" | "details" | "folder";
+/** Một file trong khung xem bên phải. Chứng từ nhiều file xem lần lượt bằng ‹ › hoặc phím ← →. */
+type PreviewItem = { url: string; name: string; label?: string; meta?: string; downloadUrl?: string; fileName?: string };
 
 const TAB_LIST: { key: ModalTab; labelKey: string; icon: React.ReactNode }[] = [
   {
@@ -1166,8 +1168,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const now = new Date();
     return Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   });
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewName, setPreviewName] = useState("");
+  const [previewItems, setPreviewItems] = useState<PreviewItem[]>([]);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const previewItem = previewItems[previewIndex] || null;
+  const previewUrl = previewItem?.url || null;
+  const previewName = previewItem?.name || "";
   const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
   const [isPreviewCollapsed, setIsPreviewCollapsed] = useState(false);
   const [ocrFilePreviewUrl, setOcrFilePreviewUrl] = useState<string | null>(null);
@@ -1224,7 +1229,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isOpeningTracking, setIsOpeningTracking] = useState(false);
   const [selectedTrackingCode, setSelectedTrackingCode] = useState("");
   const [documentFolderNames, setDocumentFolderNames] = useState<Record<string, string>>({});
-  const [openDocumentFileListId, setOpenDocumentFileListId] = useState<string | null>(null);
   const evergreenTrackingInProgress = React.useRef(false);
   const [documentProgress, setDocumentProgress] = useState<DocumentProgressResponse | null>(null);
   const [documentProgressError, setDocumentProgressError] = useState("");
@@ -1233,16 +1237,36 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [warehouseOptions, setWarehouseOptions] = useState<WarehouseRecord[]>([]);
 
   const resetFilePreview = () => {
-    setPreviewUrl(null);
-    setPreviewName("");
+    setPreviewItems([]);
+    setPreviewIndex(0);
     setIsPreviewMaximized(false);
     setIsPreviewCollapsed(false);
     setLocalUploads({});
-    setOpenDocumentFileListId(null);
     setSelectedContainerCodes({});
     setInspectionFolderNote("");
     setInspectionFolderChoice("");
   };
+
+  const openPreview = (items: PreviewItem[], index = 0) => {
+    if (items.length === 0) return;
+    setPreviewItems(items);
+    setPreviewIndex(Math.min(Math.max(index, 0), items.length - 1));
+    setIsPreviewCollapsed(false);
+  };
+
+  /** Mọi file của một chứng từ thành danh sách xem lần lượt. */
+  const documentPreviewItems = (
+    documentName: string,
+    documentId: string,
+    files: Array<{ url: string; fileName: string; label: string; uploadedBy: string; uploadedAt: string }>,
+  ): PreviewItem[] => files.map((file, index) => ({
+    url: toDocumentPreviewUrl(file.url),
+    downloadUrl: toDocumentDownloadUrl(file.url),
+    name: files.length > 1 ? `${documentName} — ${file.label}` : (file.fileName || documentName),
+    label: `${documentId === "BL" ? "B/L" : documentId} ${index + 1}`,
+    fileName: file.fileName || file.label,
+    meta: [file.uploadedBy || "Chưa có người upload", formatUploadDateTime(file.uploadedAt, language)].join(" · "),
+  }));
 
   const handleModalClose = () => {
     resetFilePreview();
@@ -1252,12 +1276,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   // Modal được giữ mounted giữa các lần chọn đơn, vì vậy phải xóa file của đơn cũ
   // cả khi đóng modal lẫn khi parent chuyển thẳng sang một shipment khác.
   useEffect(() => {
-    setPreviewUrl(null);
-    setPreviewName("");
+    setPreviewItems([]);
+    setPreviewIndex(0);
     setIsPreviewMaximized(false);
     setIsPreviewCollapsed(false);
     setLocalUploads({});
-    setOpenDocumentFileListId(null);
     setSelectedContainerCodes({});
     setInspectionFolderNote("");
     setInspectionFolderChoice("");
@@ -1280,6 +1303,19 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   useEffect(() => {
     if (previewUrl) setIsPreviewCollapsed(false);
   }, [previewUrl]);
+
+  // Đang xem chứng từ nhiều file: phím ← → chuyển file (bỏ qua khi đang gõ trong ô nhập).
+  useEffect(() => {
+    if (!previewUrl || isPreviewCollapsed || previewItems.length < 2) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      if (event.key === "ArrowLeft") setPreviewIndex((current) => Math.max(current - 1, 0));
+      if (event.key === "ArrowRight") setPreviewIndex((current) => Math.min(current + 1, previewItems.length - 1));
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isPreviewCollapsed, previewItems.length, previewUrl]);
 
   useEffect(() => {
     if (!ocrUploadFile) {
@@ -2472,9 +2508,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     onClick={() => {
                       if (!ocrUploadDocId || !ocrFilePreviewUrl) return;
                       setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: ocrFilePreviewUrl }));
-                      setPreviewUrl(ocrFilePreviewUrl);
-                      setPreviewName(ocrUploadFile.name);
-                      setIsPreviewCollapsed(false);
+                      openPreview([{ url: ocrFilePreviewUrl, name: ocrUploadFile.name, fileName: ocrUploadFile.name }]);
                     }}
                     className="shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20"
                   >
@@ -2923,13 +2957,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <div
                     key={doc.id}
                     onClick={() => {
-                      if (documentFiles.length > 1) {
-                        setOpenDocumentFileListId((current) => current === doc.id ? null : doc.id);
-                      } else if (documentFiles[0]) {
-                        setPreviewUrl(toDocumentPreviewUrl(documentFiles[0].url));
-                        setPreviewName(documentFiles[0].fileName || doc.name);
-                        setIsPreviewCollapsed(false);
-                      }
+                      openPreview(documentPreviewItems(doc.name, doc.id, documentFiles));
                     }}
                     className={`flex flex-col items-stretch gap-3 rounded-xl border p-3 transition-colors sm:flex-row sm:flex-wrap sm:items-center sm:p-3.5 ${
                       documentFiles.length > 0 ? "cursor-pointer hover:border-brand-300" : ""
@@ -3002,49 +3030,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         </button>
                       )}
                     </div>
-                    {openDocumentFileListId === doc.id && documentFiles.length > 1 && (
-                      <div className="w-full rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-900">
-                        <p className="px-2 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400">{t("selectDocumentFile")}</p>
-                        <div className="max-h-48 space-y-1 overflow-y-auto custom-scrollbar">
-                          {documentFiles.map((file, index) => (
-                            <div key={`${file.url}-${index}`} className="flex items-center gap-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPreviewUrl(toDocumentPreviewUrl(file.url));
-                                  setPreviewName(`${doc.name} — ${file.label}`);
-                                  setIsPreviewCollapsed(false);
-                                  setOpenDocumentFileListId(null);
-                                }}
-                                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-gray-700 dark:text-gray-200"
-                              >
-                                <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-400">{doc.id === "BL" ? "B/L" : doc.id} {index + 1}</span>
-                                <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">
-                                  <span className="block truncate">{CONTAINER_FOLDER_DOCUMENT_CODES.has(doc.id) ? file.label : (file.fileName || file.label)}</span>
-                                  <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
-                                </span>
-                              </button>
-                              <a
-                                href={toDocumentDownloadUrl(file.url)}
-                                download={file.fileName || undefined}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(event) => event.stopPropagation()}
-                                title={t("downloadDocument")}
-                                aria-label={`${t("downloadDocument")} ${file.fileName || file.label}`}
-                                className="mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                  <path d="M12 3v12" />
-                                  <path d="m7 10 5 5 5-5" />
-                                  <path d="M5 21h14" />
-                                </svg>
-                              </a>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -3074,31 +3059,21 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     <div
                       key={document.id}
                       role="button"
-                      tabIndex={isArchived || !canUploadThisDocument ? -1 : 0}
+                      tabIndex={hasFile || (!isArchived && canUploadThisDocument) ? 0 : -1}
                       onClick={() => {
                         if (hasFile) {
-                          if (files.length > 1) setOpenDocumentFileListId((current) => current === document.id ? null : document.id);
-                          else {
-                            setPreviewUrl(toDocumentPreviewUrl(files[0].url));
-                            setPreviewName(files[0].fileName || document.name);
-                            setIsPreviewCollapsed(false);
-                          }
+                          openPreview(documentPreviewItems(document.name, document.id, files));
                         } else if (!isArchived && canUploadThisDocument) handlePickUpload(document.id, true);
                       }}
                       onKeyDown={(event) => {
-                        if ((event.key === "Enter" || event.key === " ") && !isArchived && canUploadThisDocument) {
+                        if ((event.key === "Enter" || event.key === " ") && (hasFile || (!isArchived && canUploadThisDocument))) {
                           event.preventDefault();
                           if (hasFile) {
-                            if (files.length > 1) setOpenDocumentFileListId((current) => current === document.id ? null : document.id);
-                            else {
-                              setPreviewUrl(toDocumentPreviewUrl(files[0].url));
-                              setPreviewName(files[0].fileName || document.name);
-                              setIsPreviewCollapsed(false);
-                            }
+                            openPreview(documentPreviewItems(document.name, document.id, files));
                           } else handlePickUpload(document.id, true);
                         }
                       }}
-                      className={`group flex min-w-0 flex-col items-start gap-2 rounded-lg border bg-white p-2.5 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${!isArchived && canUploadThisDocument ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
+                      className={`group flex min-w-0 flex-col items-start gap-2 rounded-lg border bg-white p-2.5 text-left transition-all dark:bg-gray-900 ${hasFile ? "border-success-200 dark:border-success-500/30" : "border-gray-200 dark:border-gray-700"} ${hasFile || (!isArchived && canUploadThisDocument) ? "cursor-pointer hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-sm dark:hover:border-brand-500/50" : "opacity-75"}`}
                     >
                       <div className="flex w-full items-center justify-between gap-2">
                         <span className={`flex h-7 min-w-0 items-center justify-center truncate rounded-md px-2 text-[11px] font-bold ${color.badge}`}>
@@ -3196,47 +3171,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           >
                             {hasFile ? t("uploadAnother") : t("uploadDocument")}
                           </button>
-                        </div>
-                      )}
-                      {openDocumentFileListId === document.id && files.length > 1 && (
-                        <div className="w-full space-y-1 border-t border-gray-100 pt-2 dark:border-gray-800">
-                          {files.map((file, index) => (
-                            <div key={`${file.url}-${index}`} className="flex items-center gap-1 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800">
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setPreviewUrl(toDocumentPreviewUrl(file.url));
-                                  setPreviewName(`${document.name} — ${file.label}`);
-                                  setIsPreviewCollapsed(false);
-                                  setOpenDocumentFileListId(null);
-                                }}
-                                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-gray-600 dark:text-gray-300"
-                              >
-                                <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-300">{document.id} {index + 1}</span>
-                                <span className="min-w-0 truncate">
-                                  <span className="block truncate">{usesContainerFolder ? file.label : (file.fileName || file.label)}</span>
-                                  <span className="block truncate text-[10px] text-gray-400">{file.uploadedBy || "Chưa có người upload"} · {formatUploadDateTime(file.uploadedAt, language)}</span>
-                                </span>
-                              </button>
-                              <a
-                                href={toDocumentDownloadUrl(file.url)}
-                                download={file.fileName || undefined}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(event) => event.stopPropagation()}
-                                title={t("downloadDocument")}
-                                aria-label={`${t("downloadDocument")} ${file.fileName || file.label}`}
-                                className="mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                  <path d="M12 3v12" />
-                                  <path d="m7 10 5 5 5-5" />
-                                  <path d="M5 21h14" />
-                                </svg>
-                              </a>
-                            </div>
-                          ))}
                         </div>
                       )}
                     </div>
@@ -3701,15 +3635,52 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     </Modal>
       {previewUrl && !isPreviewCollapsed && (
         <aside className={`fixed right-0 top-0 z-[100000] flex h-screen min-h-0 flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isPreviewMaximized ? "w-full" : "w-[92vw] md:w-1/2"}`}>
-          <div className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">
-            <p className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-white">{previewName}</p>
-            <button type="button" onClick={() => setIsPreviewMaximized((current) => !current)} className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={isPreviewMaximized ? t("minimize") : t("maximize")}>
+          <div className="flex min-h-14 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 py-2 sm:gap-3 sm:px-4 dark:border-gray-700">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-gray-800 dark:text-white" title={previewName}>{previewName}</p>
+              {previewItem?.meta && <p className="truncate text-[11px] text-gray-400" title={previewItem.meta}>{previewItem.meta}</p>}
+            </div>
+            {previewItems.length > 1 && (
+              <div className="flex shrink-0 items-center gap-1">
+                <button type="button" onClick={() => setPreviewIndex((current) => Math.max(current - 1, 0))} disabled={previewIndex === 0} aria-label={t("previousFile")} title={`${t("previousFile")} (←)`} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+                </button>
+                <span className="min-w-12 text-center text-xs font-semibold tabular-nums text-gray-600 dark:text-gray-300">{previewIndex + 1}/{previewItems.length}</span>
+                <button type="button" onClick={() => setPreviewIndex((current) => Math.min(current + 1, previewItems.length - 1))} disabled={previewIndex === previewItems.length - 1} aria-label={t("nextFile")} title={`${t("nextFile")} (→)`} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+                </button>
+              </div>
+            )}
+            {previewItem?.downloadUrl && (
+              <a href={previewItem.downloadUrl} download={previewItem.fileName || undefined} target="_blank" rel="noopener noreferrer" title={t("downloadDocument")} aria-label={`${t("downloadDocument")} ${previewItem.fileName || previewName}`} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>
+              </a>
+            )}
+            <button type="button" onClick={() => setIsPreviewMaximized((current) => !current)} className="hidden shrink-0 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 sm:inline-flex dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={isPreviewMaximized ? t("minimize") : t("maximize")}>
               {isPreviewMaximized ? t("minimize") : t("maximize")}
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
-            <iframe title={previewName} src={previewUrl} className="block h-[calc(100vh-4.5rem)] min-h-[720px] w-full rounded-lg bg-white" />
+          <div className="flex min-h-0 flex-1 bg-gray-100 p-2 dark:bg-gray-950">
+            <iframe key={previewUrl} title={previewName} src={previewUrl} className="block h-full min-h-[320px] w-full rounded-lg bg-white" />
           </div>
+          {/* Danh sách file của chứng từ: bấm để nhảy thẳng tới file, không phải mở từng cái. */}
+          {previewItems.length > 1 && (
+            <div className="flex shrink-0 gap-2 overflow-x-auto border-t border-gray-200 bg-white p-2 custom-scrollbar dark:border-gray-700 dark:bg-gray-900">
+              {previewItems.map((item, index) => (
+                <button
+                  key={`${item.url}-${index}`}
+                  type="button"
+                  onClick={() => setPreviewIndex(index)}
+                  aria-current={index === previewIndex ? "true" : undefined}
+                  title={[item.fileName, item.meta].filter(Boolean).join(" · ")}
+                  className={`flex min-h-10 max-w-48 shrink-0 flex-col items-start justify-center rounded-lg border px-2.5 py-1 text-left text-[11px] transition ${index === previewIndex ? "border-brand-400 bg-brand-50 text-brand-700 dark:border-brand-500/60 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"}`}
+                >
+                  <span className="font-semibold">{item.label || index + 1}</span>
+                  <span className="w-full truncate text-gray-400">{item.fileName}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </aside>
       )}
       {previewUrl && !isPreviewCollapsed && (
