@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 // Dán URL thư mục Drive tương ứng vào đúng mã chứng từ. Có URL thì tên thư mục sẽ click được.
+// Tên thư mục ưu tiên lấy từ BE (đúng tên Drive); danh sách dưới chỉ là dự phòng khi chưa tải được.
 const DOCUMENT_FOLDERS = [
   ["01. PI Hợp đồng mua", "PI", "guideDrivePi"],
   ["02. INV Hóa đơn", "INV", "guideDriveInv"],
@@ -14,7 +15,7 @@ const DOCUMENT_FOLDERS = [
   ["04. PKL Bảng kê hàng hóa", "PKL", "guideDrivePkl"],
   ["05. CO Giấy chứng nhận xuất xứ", "CO", "guideDriveCo"],
   ["06. HC Giấy kiểm dịch y tế", "HC", "guideDriveHc"],
-  ["07. DON_KD Đơn kiểm dịch động vật", "DON_KD", "guideDriveDonKd"],
+  ["07. DON_KD Đơn đăng kí kiểm dịch động vật", "DON_KD", "guideDriveDonKd"],
   ["08. AN Thông báo hàng đến", "AN", "guideDriveAn"],
   ["09. EDO Lệnh giao hàng điện tử", "EDO", "guideDriveEdo"],
   ["10. CPN Chứng từ CPN quốc tế", "CPN", "guideDriveCpn"],
@@ -122,10 +123,10 @@ export default function UserGuidePage() {
                 <div className="min-w-0">
                   {driveLinks.documents?.[code] ? (
                     <a href={driveLinks.documents[code]} target="_blank" rel="noreferrer" className="break-words text-sm font-semibold text-brand-600 underline decoration-brand-300 underline-offset-2 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200">
-                      {folder}
+                      {driveLinks.names?.[code] || folder}
                     </a>
                   ) : (
-                    <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{folder}</p>
+                    <p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{driveLinks.names?.[code] || folder}</p>
                   )}
                   <p className="mt-1 text-sm leading-5 text-gray-600 dark:text-gray-300">{t(descriptionKey)}</p>
                 </div>

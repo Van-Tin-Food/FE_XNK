@@ -24,6 +24,8 @@ export type DriveFolderLinks = {
   source?: string;
   complete?: string;
   documents?: Record<string, string>;
+  /** Tên thư mục Drive theo mã chứng từ, vd PI → "01. PI Hợp đồng mua". */
+  names?: Record<string, string>;
 };
 const DOCUMENT_CODES = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
@@ -609,11 +611,32 @@ export async function getDriveFolderLinks(): Promise<DriveFolderLinks> {
   const documents = Object.fromEntries(
     Object.entries(response).filter(([key, value]) => key !== "source" && key !== "complete" && typeof value === "string"),
   ) as Record<string, string>;
+  const names = isRecord(response.names)
+    ? Object.fromEntries(Object.entries(response.names).filter(([, value]) => typeof value === "string")) as Record<string, string>
+    : {};
   return {
     source: typeof response.source === "string" ? response.source : "",
     complete: typeof response.complete === "string" ? response.complete : "",
     documents,
+    names,
   };
+}
+
+/** Tên chứng từ hiển thị = tên thư mục Drive bỏ số thứ tự ("01. PI Hợp đồng mua" → "PI Hợp đồng mua"). */
+export function documentDisplayName(folderName: string | undefined): string {
+  return String(folderName || "").replace(/^\d+\.\s*/, "").trim();
+}
+
+let documentFolderNamesCache: Promise<Record<string, string>> | null = null;
+/** Tên thư mục Drive của các chứng từ; gọi API một lần cho cả phiên, lỗi thì lần sau gọi lại. */
+export function getDocumentFolderNames(): Promise<Record<string, string>> {
+  documentFolderNamesCache ??= getDriveFolderLinks()
+    .then((links) => links.names || {})
+    .catch((error: unknown) => {
+      documentFolderNamesCache = null;
+      throw error;
+    });
+  return documentFolderNamesCache;
 }
 
 export type OcrDataRow = Record<string, string>;

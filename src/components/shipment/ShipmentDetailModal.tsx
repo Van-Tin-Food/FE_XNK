@@ -4,7 +4,7 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, fetchReturnItems, getArchivedDocuments, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listCatalogRows, passDriveDocument, returnItemsFromRelations, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
@@ -1223,6 +1223,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [emailSent] = useState(false);
   const [isOpeningTracking, setIsOpeningTracking] = useState(false);
   const [selectedTrackingCode, setSelectedTrackingCode] = useState("");
+  const [documentFolderNames, setDocumentFolderNames] = useState<Record<string, string>>({});
   const [openDocumentFileListId, setOpenDocumentFileListId] = useState<string | null>(null);
   const evergreenTrackingInProgress = React.useRef(false);
   const [documentProgress, setDocumentProgress] = useState<DocumentProgressResponse | null>(null);
@@ -1265,6 +1266,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   useEffect(() => {
     setSelectedTrackingCode("");
   }, [shipment?.id]);
+
+  // Tên chứng từ lấy theo tên thư mục Drive; chưa tải được thì giữ tên mặc định "Chứng từ <mã>".
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void getDocumentFolderNames()
+      .then((names) => { if (!cancelled) setDocumentFolderNames(names); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isOpen]);
 
   useEffect(() => {
     if (previewUrl) setIsPreviewCollapsed(false);
@@ -1491,7 +1502,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         ? "bg-amber-500"
         : "bg-blue-light-500";
   const progressDocuments = documentProgress?.documents as Record<string, { files?: DriveDocumentFileRecord[] }> | undefined;
-  const documentsSorted = [...(shipment.documents || [])].map((document) => {
+  const documentsSorted = [...(shipment.documents || [])].map((rawDocument) => {
+    const document = { ...rawDocument, name: documentDisplayName(documentFolderNames[rawDocument.id.toUpperCase()]) || rawDocument.name };
     if (locallyPassedDocumentIds.includes(document.id)) {
       return { ...document, status: "ok" as const, url: undefined, urls: [], files: [], fileId: undefined, note: "Chứng từ đã được PASS" };
     }
@@ -2945,7 +2957,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 dark:text-white/90 truncate">{language === "en" ? t("documentName", { code: doc.id }) : doc.name}</p>
+                      <p className="text-sm font-medium text-gray-800 dark:text-white/90 truncate" title={doc.name}>{language === "en" ? t("documentName", { code: doc.id }) : doc.name}</p>
                       <p className="text-xs text-gray-400">{doc.type.toUpperCase()}</p>
                       {documentFiles[0] && <p className="mt-1 truncate text-[10px] text-gray-400">{[CONTAINER_FOLDER_DOCUMENT_CODES.has(doc.id) ? documentFiles[0].label : (documentFiles[0].fileName || documentFiles[0].label), documentFiles[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(documentFiles[0].uploadedAt, language)].join(" · ")}</p>}
                     </div>
