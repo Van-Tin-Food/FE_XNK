@@ -1,7 +1,9 @@
 import ThemeTogglerTwo from "@/components/common/ThemeTogglerTwo";
 
 import { ThemeProvider } from "@/context/ThemeContext";
+import Image from "next/image";
 import Link from "next/link";
+import logoFull from "@/icons/logo_VTF.png";
 import React from "react";
 
 export default function AuthLayout({
@@ -17,8 +19,8 @@ export default function AuthLayout({
           <div className="lg:w-1/2 w-full h-full bg-brand-950 dark:bg-white/5 lg:grid items-center hidden">
             <div className="relative z-1 flex items-center justify-center">
               <div className="flex flex-col items-center max-w-xs">
-                <Link href="/" className="mb-5 flex items-center gap-3 text-2xl font-semibold text-white">
-                  <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-500 text-sm font-bold">XNK</span>
+                <Link href="/" className="mb-5 flex flex-col items-center gap-4 text-2xl font-semibold text-white">
+                  <Image src={logoFull} alt="Vạn Tín Food" width={240} priority className="h-auto w-60" />
                 Operation Dashboard 
                 </Link>
                 <p className="text-center text-gray-400 dark:text-white/60">

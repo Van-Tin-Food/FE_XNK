@@ -1,9 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import React, { useState } from "react";
 import ReloadHomeLink from "../components/common/ReloadHomeLink";
+import logoMark from "../icons/logo-vtf-mark.png";
 import { useAuth } from "../context/AuthContext";
 import { useSidebar } from "../context/SidebarContext";
 import { GridIcon, HorizontaLDots } from "../icons/index";
@@ -52,9 +54,7 @@ const AppSidebar: React.FC = () => {
           title={t("reloadApp")}
           className="flex h-10 items-center gap-3 font-semibold text-gray-900 dark:text-white"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-sm font-bold text-white">
-            XNK
-          </span>
+          <Image src={logoMark} alt="Vạn Tín Food" width={40} height={40} priority className="h-10 w-10 shrink-0 object-contain" />
           {showText && <span>{t("importExportManagement")}</span>}
         </ReloadHomeLink>
       </div>

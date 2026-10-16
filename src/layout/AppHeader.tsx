@@ -3,8 +3,10 @@ import { ThemeToggleButton } from "@/components/common/ThemeToggleButton";
 import AvatarText from "@/components/ui/avatar/AvatarText";
 import NotificationDropdown from "@/components/header/NotificationDropdown";
 import ReloadHomeLink from "@/components/common/ReloadHomeLink";
+import logoMark from "@/icons/logo-vtf-mark.png";
 import { useAuth } from "@/context/AuthContext";
 import { useSidebar } from "@/context/SidebarContext";
+import Image from "next/image";
 import Link from "next/link";
 import React, { useState ,useEffect,useRef} from "react";
 import { useLanguage } from "@/context/LanguageContext";
@@ -90,7 +92,7 @@ const AppHeader: React.FC = () => {
 
           {/* Bấm logo là tải lại trang (đọc lại dữ liệu và phân quyền). */}
           <ReloadHomeLink title={t("reloadApp")} className="flex items-center gap-2 font-semibold text-gray-900 dark:text-white lg:hidden">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-xs font-bold text-white">XNK</span>
+            <Image src={logoMark} alt="Vạn Tín Food" width={36} height={36} priority className="h-9 w-9 shrink-0 object-contain" />
             <span>{t("importExport")}</span>
           </ReloadHomeLink>
 
