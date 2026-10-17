@@ -31,6 +31,7 @@ export function activityLocationParts(location: string, t: Translate): string[] 
       const tabLabel = tab === "Documents" ? t("locDocuments")
         : tab === "Details" ? t("locOrderInfo")
           : tab === "ReturnItem" ? t("locTransport")
+          : tab === "Costs" ? t("locCosts")
             : tab;
       return [t("locHome"), t("locOrderDetail"), ...(tabLabel ? [tabLabel] : []), ...tail];
     }
@@ -56,6 +57,10 @@ export function activityLocationParts(location: string, t: Translate): string[] 
       return [t("locSidebar"), rest[0] === "Logout" ? t("logout") : rest[0]].filter(Boolean);
     case "Email":
       return [t("email")];
+    case "PaymentRequests":
+      return [t("locPaymentRequests")];
+    case "GoogleChat":
+      return [t("locGoogleChat"), t("locPaymentRequests")];
     default:
       return [raw];
   }

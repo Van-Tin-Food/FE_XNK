@@ -32,6 +32,7 @@ const AppSidebar: React.FC = () => {
   const canViewSupportTools = canViewEmailTools || canViewDocumentSync || canViewMarketResearch || canViewLegacyEta;
   const canManageUsers = can("users");
   const canManageMasterData = can("masterData");
+  const canViewPaymentRequests = can("paymentRequests");
   const { t } = useLanguage();
 
   return (
@@ -88,6 +89,24 @@ const AppSidebar: React.FC = () => {
               {showText && <span className="menu-item-text">{t("importExport")}</span>}
             </Link>
           </li>
+          {canViewPaymentRequests && (
+            <li>
+              <Link
+                href="/payment-requests"
+                className={`menu-item group ${
+                  pathname.startsWith("/payment-requests") ? "menu-item-active" : "menu-item-inactive"
+                } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
+              >
+                <span className={pathname.startsWith("/payment-requests") ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M6 2h12v20l-3-2-3 2-3-2-3 2V2z" />
+                    <path d="M9 7h6M9 11h6M9 15h4" />
+                  </svg>
+                </span>
+                {showText && <span className="menu-item-text">{t("paymentRequests")}</span>}
+              </Link>
+            </li>
+          )}
           {/* <li>
             <Link
               href="/user-guide"

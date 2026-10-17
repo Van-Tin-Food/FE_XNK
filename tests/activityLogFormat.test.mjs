@@ -18,6 +18,8 @@ test("vị trí: mã màn hình đổi thành đường dẫn dễ đọc", () =
   assert.deepEqual(activityLocationParts("Support/DocumentSync/BL", t), ["documentSync", "BL"]);
   assert.deepEqual(activityLocationParts("AiChat", t), ["locAiChat"]);
   assert.deepEqual(activityLocationParts("Sidebar/Logout", t), ["locSidebar", "logout"]);
+  assert.deepEqual(activityLocationParts("PaymentRequests", t), ["locPaymentRequests"]);
+  assert.deepEqual(activityLocationParts("GoogleChat", t), ["locGoogleChat", "locPaymentRequests"]);
 });
 
 test("vị trí: mã lạ hoặc rỗng không làm lỗi", () => {

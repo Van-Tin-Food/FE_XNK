@@ -133,6 +133,29 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Tài khoản không còn tồn tại. Vui lòng đăng nhập lại.";
     case "AUTH_LOOKUP_FAILED":
       return "Không kiểm tra được tài khoản đăng nhập. Vui lòng thử lại sau.";
+    case "INVALID_PAYMENT_REQUEST":
+    case "INVALID_PAYMENT_CATEGORY":
+      return backendMessage || "Dữ liệu đề nghị thanh toán chưa hợp lệ.";
+    case "PAYMENT_REQUEST_NOT_FOUND":
+      return "Không tìm thấy đề nghị thanh toán (có thể bạn không có quyền xem).";
+    case "PAYMENT_REQUEST_FORBIDDEN":
+      return "Chỉ người tạo đề nghị hoặc kế toán được thao tác.";
+    case "PAYMENT_REQUEST_CANCELLED":
+    case "PAYMENT_REQUEST_LOCKED":
+    case "PAYMENT_REQUEST_ALREADY_DECIDED":
+    case "PAYMENT_REQUEST_NOT_APPROVED":
+    case "PAYMENT_REQUEST_LINK_REQUIRED":
+      return backendMessage || "Trạng thái đề nghị đã thay đổi. Vui lòng tải lại.";
+    case "PAYMENT_DOCUMENT_NOT_FOUND":
+      return "Chứng từ không còn trong hồ sơ đề nghị. Vui lòng tải lại.";
+    case "INVALID_FILE_ID":
+      return "Mã file chứng từ không hợp lệ.";
+    case "PAYMENT_COST_UNAVAILABLE":
+      return backendMessage || "Chi phí đã được đưa vào đề nghị khác. Vui lòng tải lại danh sách chi phí.";
+    case "GOOGLE_CHAT_NOT_CONFIGURED":
+      return "Google Chat chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
+    case "GOOGLE_CHAT_REQUEST_FAILED":
+      return "Không gửi được lên Google Chat. Vui lòng thử lại sau.";
     default:
       break;
   }

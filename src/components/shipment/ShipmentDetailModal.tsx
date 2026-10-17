@@ -32,6 +32,8 @@ import {
 } from "@/utils/internationalNumber";
 import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@/utils/documentFile";
 import UploadProgressToast from "@/components/common/UploadProgressToast";
+import ShipmentCostsTab from "./ShipmentCostsTab";
+import InternationalPaymentStatus from "./InternationalPaymentStatus";
 
 interface ShipmentDetailModalProps {
   shipment: Shipment | null;
@@ -40,7 +42,7 @@ interface ShipmentDetailModalProps {
   onRefresh?: () => Promise<void>;
 }
 
-type ModalTab = "overview" | "journey" | "documents" | "return" | "details" | "folder";
+type ModalTab = "overview" | "journey" | "documents" | "return" | "details" | "costs" | "folder";
 /** Một file trong khung xem bên phải. Chứng từ nhiều file xem lần lượt bằng ‹ › hoặc phím ← →. */
 type PreviewItem = { url: string; name: string; label?: string; meta?: string; downloadUrl?: string; fileName?: string };
 
@@ -95,6 +97,15 @@ const TAB_LIST: { key: ModalTab; labelKey: string; icon: React.ReactNode }[] = [
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>
+      </svg>
+    ),
+  },
+  {
+    key: "costs",
+    labelKey: "costsTab",
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
       </svg>
     ),
   },
@@ -1453,7 +1464,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const isTabVisible = (tab: ModalTab) => (tab !== "folder" || Boolean(archived?.archived))
     && (tab !== "journey" || canUseTracking)
     && ((tab !== "documents" && tab !== "folder") || canViewDocuments)
-    && (tab !== "return" || canViewTransport);
+    && (tab !== "return" || canViewTransport)
+    && (tab !== "costs" || can("containerCosts"));
   // Quyền vừa đổi (tải lại khi chuyển trang / bị BE từ chối): tab không còn được xem thì về Tổng quan.
   const currentTab: ModalTab = isTabVisible(activeTab) ? activeTab : "overview";
   const purchaseDetailCompareFields = canViewPurchaseAmounts
@@ -2662,6 +2674,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <InfoRow label={t("netWeight")} value={overviewNetWeightDisplay || t("notAvailable")} />
                   {canViewPurchaseAmounts && <InfoRow label={t("unitPrice")} value={overviewUnitPriceDisplay || t("notAvailable")} />}
                   {canViewPurchaseAmounts && <InfoRow label={t("goodsValue")} value={overviewGoodsValueDisplay || t("notAvailable")} />}
+                  <InternationalPaymentStatus contract={shipment.database?.purchase?.ma_hop_dong || shipment.orderCode} />
                 </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
@@ -3351,6 +3364,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
 
         {/* ── DETAILS ── */}
+        {currentTab ==="costs" && (
+          <ShipmentCostsTab contract={shipment.database?.purchase?.ma_hop_dong || shipment.orderCode} />
+        )}
+
         {currentTab ==="details" && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-3">

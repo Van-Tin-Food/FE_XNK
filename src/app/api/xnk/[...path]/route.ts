@@ -6,12 +6,16 @@ export const maxDuration = 180;
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 
+const GOOGLE_CHAT_EVENTS_ROUTE = "POST api/google-chat/events";
+
 const PUBLIC_ROUTES = new Set([
   "POST api/auth/login",
   "GET api/auth/google/start",
   // Bước 2 của MFA Google: tự kiểm tra code + state + pendingToken, chưa có
   // token phiên nên phải để public như login.
   "POST api/auth/google/verify",
+  // Google Chat gửi sự kiện nút Duyệt / Từ chối đề nghị thanh toán; BE tự kiểm tra token của Google.
+  GOOGLE_CHAT_EVENTS_ROUTE,
   "GET health",
   "GET api/health",
   "GET node/health",
@@ -70,6 +74,10 @@ async function forward(request: NextRequest, { params }: RouteContext) {
     Accept: request.headers.get("accept") || "application/json",
   });
   if (sessionToken && !isPublic) headers.set("Authorization", `Bearer ${sessionToken}`);
+  const googleChatAuthorization = request.headers.get("authorization");
+  if (`${request.method} ${joinedPath}` === GOOGLE_CHAT_EVENTS_ROUTE && googleChatAuthorization) {
+    headers.set("Authorization", googleChatAuthorization);
+  }
 
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("Content-Type", contentType);

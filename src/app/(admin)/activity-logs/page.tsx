@@ -45,8 +45,20 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   DOCUMENT_SYNC_ACCEPT: "logDocumentSyncAccept",
   DOCUMENT_SYNC_RENAME: "logDocumentSyncRename",
   DOCUMENT_SYNC_RESTORE: "logDocumentSyncRestore",
+  PAYMENT_REQUEST_CREATE: "logPaymentCreate",
+  PAYMENT_REQUEST_UPDATE: "logPaymentUpdate",
+  PAYMENT_REQUEST_LINK: "logPaymentLink",
+  PAYMENT_REQUEST_NOTIFY: "logPaymentNotify",
+  PAYMENT_REQUEST_APPROVE: "logPaymentApprove",
+  PAYMENT_REQUEST_REJECT: "logPaymentReject",
+  PAYMENT_REQUEST_COMPLETE: "logPaymentComplete",
+  PAYMENT_REQUEST_SEND: "logPaymentSend",
+  PAYMENT_REQUEST_UPLOAD: "logPaymentUpload",
+  PAYMENT_REQUEST_DOCUMENT_REMOVE: "logPaymentDocRemove",
+  PAYMENT_COST_UPDATE: "logPaymentCostUpdate",
+  PAYMENT_REQUEST_CANCEL: "logPaymentCancel",
 };
-const ROLES = ["admin", "it", "logistic", "van_chuyen"];
+const ROLES = ["admin", "it", "logistic", "van_chuyen", "ke_toan"];
 const SELECT_CLASS = "h-10 min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200";
 
 function actionLabel(action: string, t: (key: string) => string): string {
