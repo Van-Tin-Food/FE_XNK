@@ -44,6 +44,12 @@ export function isSupportedDocumentFile(file: Pick<File, "name">): boolean {
   return DOCUMENT_FILE_EXTENSIONS.includes(getFileExtension(file.name) as typeof DOCUMENT_FILE_EXTENSIONS[number]);
 }
 
+export function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 export function getDocumentMimeType(file: Pick<File, "name" | "type">): string {
   return file.type || DOCUMENT_MIME_TYPES[getFileExtension(file.name)] || "application/octet-stream";
 }

@@ -48,6 +48,10 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
   ảnh đã có với INSPECTION) trước khi upload; file nằm trong thư mục container trên Drive.
 - Mọi luồng upload phải gọi `checkDocumentFileNames` **trước** khi upload, chạy OCR hay ghi DB, để báo
   trùng tên sớm. Không tự đổi tên hay đánh số file ở FE — quy tắc đặt tên nằm ở BE.
+- Upload chứng từ dùng `uploadDocument(input, { onProgress })` trong `shipmentApi.ts`: BE mở phiên upload, trình duyệt gửi
+  file thẳng lên Google Drive (`utils/driveResumableUpload.ts`, từng phần 8 MB), BE xác nhận rồi lưu DB. Không gửi file
+  base64 qua gateway: gateway chạy trên Vercel, giới hạn 4,5 MB mỗi request. Tối đa 1 GB/file
+  (`MAX_DOCUMENT_UPLOAD_BYTES`); file OCR vẫn qua gateway nên tối đa `MAX_OCR_FILE_BYTES` (4 MB).
 - Upload PI cần `shipments:edit`, chứng từ khác cần `documents:edit` (`canUploadDocumentType`); tab Chi tiết sửa theo
   `shipments:edit`, hủy đơn theo `shipmentCancel:edit`.
 - Tiền hàng theo chức năng `purchaseAmounts`, liên hệ nhà cung cấp theo `supplierContact` (BE cũng ẩn cột khi thiếu quyền).

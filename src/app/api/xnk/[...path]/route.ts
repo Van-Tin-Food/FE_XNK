@@ -81,6 +81,8 @@ async function forward(request: NextRequest, { params }: RouteContext) {
   if (clientIp) headers.set("X-Client-IP", clientIp.slice(0, 64));
   const clientAgent = request.headers.get("user-agent");
   if (clientAgent) headers.set("X-Client-User-Agent", clientAgent.slice(0, 300));
+  // Upload thẳng lên Google Drive: BE mở phiên upload kèm Origin của trang web, Google mới cho trình duyệt gửi file (CORS).
+  headers.set("X-Client-Origin", request.headers.get("origin") || request.nextUrl.origin);
 
   const apiKey = process.env.BE_XNK_API_KEY?.trim();
   if (apiKey) headers.set("X-Api-Key", apiKey);

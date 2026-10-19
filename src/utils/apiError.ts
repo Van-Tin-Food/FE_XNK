@@ -106,6 +106,17 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return backendMessage || "Câu hỏi chưa hợp lệ.";
     case "EMAIL_CONFIG_MISSING":
       return "Chức năng gửi email chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
+    case "FILE_TOO_LARGE":
+      return backendMessage || "File vượt quá dung lượng cho phép.";
+    case "INVALID_FILE_SIZE":
+      return "Dung lượng file không hợp lệ. Vui lòng chọn lại file.";
+    case "UPLOAD_SESSION_FAILED":
+    case "MISSING_UPLOAD_ORIGIN":
+      return "Không mở được phiên upload Google Drive. Vui lòng thử lại.";
+    case "UPLOAD_TOKEN_INVALID":
+      return "Phiên upload đã hết hạn hoặc không hợp lệ. Vui lòng upload lại.";
+    case "UPLOAD_FILE_MISMATCH":
+      return "File trên Google Drive không khớp với phiên upload. Vui lòng upload lại.";
     case "PERMISSION_DENIED":
       return "Tài khoản không có quyền thực hiện thao tác này. Quyền có thể vừa được thay đổi, giao diện đã cập nhật lại.";
     case "ADMIN_ONLY":
@@ -129,6 +140,7 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
   if (status === 401) return "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
   if (status === 403) return "Bạn không có quyền thực hiện thao tác này.";
   if (status === 404) return "Không tìm thấy dữ liệu cần xử lý.";
+  if (status === 413) return "File quá lớn để gửi lên máy chủ. Vui lòng nén file rồi thử lại.";
   if (status === 409) return "Dữ liệu đã tồn tại hoặc đang được sử dụng. Vui lòng kiểm tra lại.";
   if (status === 422) return "Thông tin chưa đúng định dạng. Vui lòng kiểm tra lại.";
   if (status === 429) return "Bạn thao tác quá nhanh. Vui lòng chờ một chút rồi thử lại.";

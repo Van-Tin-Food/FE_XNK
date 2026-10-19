@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/modal";
-import { analyzeDocument, checkDocumentFileNames, uploadDocument } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentFileNames, MAX_OCR_FILE_BYTES, uploadDocument } from "@/services/shipmentApi";
 import { createDatabaseRow, databaseEndpoints, listCatalogRows } from "@/services/postgresShipmentApi";
 import type { PurchaseRecord, SupplierRecord } from "@/types/postgresShipment";
 import { useAuth } from "@/context/AuthContext";
@@ -10,7 +10,8 @@ import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { findBestCatalogMatch } from "@/utils/masterDataMatching";
-import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
+import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@/utils/documentFile";
+import UploadProgressToast from "@/components/common/UploadProgressToast";
 
 interface CreateShipmentModalProps {
   isOpen: boolean;
@@ -77,18 +78,6 @@ function mapOcrFields(data: Record<string, string>): ReviewFields {
   };
 }
 
-function fileToBase64(file: File, errorMessage: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") return reject(new Error(errorMessage));
-      resolve(reader.result.includes(",") ? reader.result.split(",", 2)[1] : reader.result);
-    };
-    reader.onerror = () => reject(new Error(errorMessage));
-    reader.readAsDataURL(file);
-  });
-}
-
 export default function CreateShipmentModal({ isOpen, onClose, onCreated, existingOrderCodes }: CreateShipmentModalProps) {
   const { user, can } = useAuth();
   const { notify } = useSystemNotification();
@@ -101,7 +90,8 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
   const [isFilePanelMaximized, setIsFilePanelMaximized] = useState(false);
-  const [fileData, setFileData] = useState("");
+  // Tiến độ upload PI lên Google Drive khi bấm tạo đơn; null = không upload.
+  const [uploadedBytes, setUploadedBytes] = useState<number | null>(null);
   const [fields, setFields] = useState<ReviewFields>(EMPTY_FIELDS);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -153,7 +143,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     setFile(null);
     setIsFilePanelOpen(false);
     setIsFilePanelMaximized(false);
-    setFileData("");
+    setUploadedBytes(null);
     setFields(EMPTY_FIELDS);
     setError("");
     setIsAnalyzing(false);
@@ -174,14 +164,17 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       setError(t("piPdfOnly"));
       return;
     }
+    // PI được phân tích OCR qua gateway (giới hạn 4,5 MB mỗi request).
+    if (selected.size > MAX_OCR_FILE_BYTES) {
+      setError(t("ocrFileTooLarge", { file: selected.name, size: formatFileSize(selected.size), max: "4 MB" }));
+      return;
+    }
 
     setFile(selected);
     uploadRequestIdRef.current = crypto.randomUUID();
     setError("");
     setIsAnalyzing(true);
     try {
-      const base64 = await fileToBase64(selected, t("readPiError"));
-      setFileData(base64);
       const result = await analyzeDocument({ documentType: "PI", file: selected });
       const mappedRows = result.data.map(mapOcrFields);
       if (mappedRows.length === 0) throw new Error(t("noOcrProducts"));
@@ -194,7 +187,6 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         : { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: mapped.supplier, supplierId: mapped.supplierId, origin: mapped.origin, productName: mapped.productName });
     } catch (err) {
       setFile(null);
-      setFileData("");
       setError(err instanceof Error ? err.message : t("analyzePiError"));
     } finally {
       setIsAnalyzing(false);
@@ -229,7 +221,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   const hasMissingRequiredFields = missingRequiredFields.length > 0;
 
   const handleConfirm = async () => {
-    if (!canCreateShipment || !file || !fileData || isSaving) return;
+    if (!canCreateShipment || !file || isSaving) return;
     if (duplicateOrderCode) {
       setError(t("duplicatePi", { orderCode: fields.orderCode.trim() }));
       return;
@@ -250,6 +242,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     }
     setIsSaving(true);
     setError("");
+    let shipmentCreated = false;
     try {
       // Kiểm tra trùng tên file PI trước khi ghi DB để không tạo đơn rỗng khi upload bị từ chối.
       const nameCheck = await checkDocumentFileNames({ orderCode: normalizedOrderCode, documentCode: "PI", fileNames: [file.name] });
@@ -271,15 +264,14 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         ma_hop_dong: normalizedOrderCode,
         ten_hang: fields.productName.trim(),
       });
+      shipmentCreated = true;
+      setUploadedBytes(0);
       await uploadDocument({
-        action: "uploadDocument",
         orderCode: normalizedOrderCode,
         documentCode: "PI",
-        fileName: file.name,
-        fileData,
-        mimeType: getDocumentMimeType(file),
+        file,
         requestId: uploadRequestIdRef.current || (uploadRequestIdRef.current = crypto.randomUUID()),
-      });
+      }, { onProgress: ({ loaded }) => setUploadedBytes(loaded) });
       recordActivity(user, {  
         action: "CREATE_SHIPMENT",
         location: "ShipmentDashboard/CreateShipmentModal",
@@ -289,8 +281,19 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       notify(t("shipmentCreated", { orderCode: fields.orderCode.trim() }), "success");
       handleClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("createShipmentError"));
+      const reason = err instanceof Error ? err.message : t("createShipmentError");
+      if (shipmentCreated) {
+        // Đơn đã ghi DB nhưng PI chưa lên Drive: báo rõ để upload lại PI ở chi tiết đơn, không tạo đơn lần nữa.
+        const message = t("shipmentCreatedPiUploadFailed", { orderCode: normalizedOrderCode, reason });
+        notify(message, "error");
+        await onCreated();
+        handleClose();
+        return;
+      }
+      setError(reason);
+      notify(reason, "error");
     } finally {
+      setUploadedBytes(null);
       setIsSaving(false);
     }
   };
@@ -368,6 +371,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         <button type="button" onClick={handleConfirm} disabled={!canCreateShipment || !file || isAnalyzing || isSaving || duplicateOrderCode || hasMissingRequiredFields} title={hasMissingRequiredFields ? t("requiredMissing", { fields: missingRequiredFields.join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? t("saving") : t("confirmCreate")}</button>
       </div>
     </Modal>
+      {uploadedBytes !== null && file && <UploadProgressToast fileName={file.name} loaded={uploadedBytes} size={file.size} />}
       {isFilePanelOpen && filePreviewUrl && (
         <aside className={`fixed right-0 top-0 z-[100000] flex h-screen min-h-0 flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isFilePanelMaximized ? "w-full" : "w-[92vw] md:w-1/2"}`}>
           <div className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">

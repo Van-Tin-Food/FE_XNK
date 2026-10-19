@@ -4,7 +4,7 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, MAX_DOCUMENT_UPLOAD_BYTES, MAX_OCR_FILE_BYTES, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listCatalogRows, passDriveDocument, returnItemsFromRelations, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
@@ -30,7 +30,8 @@ import {
   toDatabaseNumber,
   toDatabasePackageCount,
 } from "@/utils/internationalNumber";
-import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
+import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@/utils/documentFile";
+import UploadProgressToast from "@/components/common/UploadProgressToast";
 
 interface ShipmentDetailModalProps {
   shipment: Shipment | null;
@@ -543,17 +544,8 @@ function formatUploadDateTime(value: string | null | undefined, language: string
   });
 }
 
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") return reject(new Error("Không đọc được file"));
-      resolve(reader.result.includes(",") ? reader.result.split(",", 2)[1] : reader.result);
-    };
-    reader.onerror = () => reject(new Error("Không đọc được file"));
-    reader.readAsDataURL(file);
-  });
-}
+/** File đang gửi lên Google Drive: hiện thanh tiến độ trong modal. */
+type UploadProgressState = { fileName: string; index: number; total: number; loaded: number; size: number };
 
 type OcrDocumentType = "PI" | "INV" | "PKL" | "BL";
 
@@ -1179,7 +1171,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [localUploads, setLocalUploads] = useState<Record<string, string>>({});
   const [ocrUploadDocId, setOcrUploadDocId] = useState<string | null>(null);
   const [ocrUploadFile, setOcrUploadFile] = useState<File | null>(null);
-  const [ocrUploadFileData, setOcrUploadFileData] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
+  const isUploadingFile = uploadProgress !== null;
   const [ocrUploadRequestId, setOcrUploadRequestId] = useState("");
   const pendingUploadRequestIds = React.useRef(new Map<string, string>());
   const [ocrUploadRows, setOcrUploadRows] = useState<Array<Record<string, string>>>([]);
@@ -1304,6 +1297,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     if (previewUrl) setIsPreviewCollapsed(false);
   }, [previewUrl]);
 
+  useEffect(() => {
+    if (!isUploadingFile) return;
+    const warnBeforeLeave = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeave);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeave);
+  }, [isUploadingFile]);
+
   // Đang xem chứng từ nhiều file: phím ← → chuyển file (bỏ qua khi đang gõ trong ô nhập).
   useEffect(() => {
     if (!previewUrl || isPreviewCollapsed || previewItems.length < 2) return;
@@ -1354,7 +1357,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setDocumentProgressError("");
     setOcrUploadDocId(null);
     setOcrUploadFile(null);
-    setOcrUploadFileData("");
     setOcrUploadRequestId("");
     pendingUploadRequestIds.current.clear();
     setOcrUploadRows([]);
@@ -1857,6 +1859,21 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         setOcrUploadError("Chứng từ có OCR chỉ xử lý từng file một để xác nhận kết quả.");
         return;
       }
+      // Báo ngay khi chọn file, không đợi upload mới lỗi.
+      const oversized = files.filter((selectedFile) => selectedFile.size > MAX_DOCUMENT_UPLOAD_BYTES);
+      if (oversized.length > 0) {
+        const message = t("uploadFileTooLarge", { max: "1 GB", files: oversized.map((selectedFile) => selectedFile.name).join(", ") });
+        setOcrUploadError(message);
+        notify(message, "error");
+        return;
+      }
+      // File OCR vẫn gửi qua gateway để phân tích (giới hạn 4,5 MB mỗi request).
+      if (documentType && file.size > MAX_OCR_FILE_BYTES) {
+        const message = t("ocrFileTooLarge", { file: file.name, size: formatFileSize(file.size), max: "4 MB" });
+        setOcrUploadError(message);
+        notify(message, "error");
+        return;
+      }
       // Báo trùng tên ngay khi chọn file, trước khi upload hoặc chạy OCR.
       setIsOcrSaving(true);
       const nameCheck = await checkDocumentFileNames({
@@ -1872,42 +1889,51 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         return;
       }
       if (!documentType) {
+        // Upload lần lượt từng file thẳng lên Google Drive; một file lỗi thì vẫn upload tiếp các file còn lại.
         let lastUpload: Awaited<ReturnType<typeof uploadDocument>> | null = null;
-        for (const selectedFile of files) {
+        const uploadedNames: string[] = [];
+        const failures: string[] = [];
+        for (const [index, selectedFile] of files.entries()) {
           const fingerprint = `${shipment.orderCode}:${docId}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`;
           const requestId = pendingUploadRequestIds.current.get(fingerprint) || crypto.randomUUID();
           pendingUploadRequestIds.current.set(fingerprint, requestId);
-          const fileData = await readFileAsBase64(selectedFile);
-          lastUpload = await uploadDocument({
-            action: "uploadDocument",
-            orderCode: shipment.orderCode,
-            documentCode: docId,
-            fileName: selectedFile.name,
-            fileData,
-            mimeType: getDocumentMimeType(selectedFile),
-            requestId,
-            ...uploadTarget,
+          setUploadProgress({ fileName: selectedFile.name, index: index + 1, total: files.length, loaded: 0, size: selectedFile.size });
+          try {
+            lastUpload = await uploadDocument(
+              { orderCode: shipment.orderCode, documentCode: docId, file: selectedFile, requestId, ...uploadTarget },
+              { onProgress: ({ loaded }) => setUploadProgress((current) => (current ? { ...current, loaded } : current)) },
+            );
+            uploadedNames.push(selectedFile.name);
+            pendingUploadRequestIds.current.delete(fingerprint);
+          } catch (uploadError) {
+            failures.push(`${selectedFile.name} (${uploadError instanceof Error ? uploadError.message : t("uploadDocumentFailed")})`);
+          }
+        }
+        setUploadProgress(null);
+        if (uploadedNames.length > 0) {
+          recordActivity(user, {
+            action: "UPLOAD_DOCUMENT",
+            location: "ShipmentDetailModal/Documents",
+            detail: `Đã upload file chứng từ ${docId} cho đơn ${shipment.orderCode}; ${uploadedNames.join(", ")}${lastUpload?.containerFolderName ? `; thư mục ${lastUpload.containerFolderName}` : ""}`,
           });
+          // Lần upload sau mặc định vào thư mục ảnh vừa dùng.
+          if (docId === "INSPECTION" && lastUpload?.containerFolderName) setInspectionFolderChoice(lastUpload.containerFolderName);
+          setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
+          await onRefresh?.();
+          try {
+            setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
+            setDocumentProgressError("");
+          } catch (progressError) {
+            setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
+          }
         }
-        recordActivity(user, {
-          action: "UPLOAD_DOCUMENT",
-          location: "ShipmentDetailModal/Documents",
-          detail: `Đã upload file chứng từ ${docId} cho đơn ${shipment.orderCode}; ${files.map((selectedFile) => selectedFile.name).join(", ")}${lastUpload?.containerFolderName ? `; thư mục ${lastUpload.containerFolderName}` : ""}`,
-        });
-        // Lần upload sau mặc định vào thư mục ảnh vừa dùng.
-        if (docId === "INSPECTION" && lastUpload?.containerFolderName) setInspectionFolderChoice(lastUpload.containerFolderName);
-        setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
-        await onRefresh?.();
-        try {
-          setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
-          setDocumentProgressError("");
-        } catch (progressError) {
-          setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
+        if (failures.length === 0) {
+          notify(t("uploadDocumentsSuccess", { count: uploadedNames.length, document: docId }), "success");
+        } else {
+          const message = t("uploadDocumentsPartialFailure", { uploaded: uploadedNames.length, total: files.length, failures: failures.join("; ") });
+          setOcrUploadError(message);
+          notify(message, "error");
         }
-        notify(`Đã upload ${files.length} file chứng từ ${docId}`, "success");
-        files.forEach((selectedFile) => {
-          pendingUploadRequestIds.current.delete(`${shipment.orderCode}:${docId}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`);
-        });
         return;
       }
       setIsOcrSaving(false);
@@ -1915,8 +1941,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadDocId(docId);
       setOcrUploadRequestId(crypto.randomUUID());
       setIsOcrAnalyzing(true);
-      const fileData = await readFileAsBase64(file);
-      setOcrUploadFileData(fileData);
       const result = await analyzeDocument({ documentType, file });
       if (result.data.length === 0) throw new Error(`OCR ${documentType} không trả về dữ liệu`);
       if (result.aiAvailable === false) notify(t("ocrAiUnavailable"), "warning");
@@ -1950,11 +1974,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadError(error instanceof Error ? error.message : "Không thể upload hoặc phân tích chứng từ");
       setOcrUploadFile(null);
       setOcrUploadDocId(null);
-      setOcrUploadFileData("");
-      setOcrUploadRequestId("");
+        setOcrUploadRequestId("");
       setOcrUploadRows([]);
       setPklTargetDetailIds([]);
     } finally {
+      setUploadProgress(null);
       setIsOcrAnalyzing(false);
       setIsOcrSaving(false);
       setSelectedMissingDocIds([]);
@@ -1962,7 +1986,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleConfirmOcrUpload = async () => {
-    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !ocrUploadRequestId || !canUploadDocuments || !canUploadDocumentType(user, ocrUploadDocId) || isOcrSaving) return;
+    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadRequestId || !canUploadDocuments || !canUploadDocumentType(user, ocrUploadDocId) || isOcrSaving) return;
     const documentType = getOcrDocumentType(ocrUploadDocId);
     const missingFields = ocrUploadRows.flatMap((row) => getMissingOcrFields(row, documentType));
     if (documentType === "PKL" && shipment.database?.details.length !== 1
@@ -1983,17 +2007,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setIsOcrSaving(true);
     setOcrUploadError("");
     try {
+      setUploadProgress({ fileName: ocrUploadFile.name, index: 1, total: 1, loaded: 0, size: ocrUploadFile.size });
       await uploadDocument({
-        action: "uploadDocument",
         orderCode: shipment.orderCode,
         documentCode: ocrUploadDocId,
-        fileName: ocrUploadFile.name,
-        fileData: ocrUploadFileData,
-        mimeType: getDocumentMimeType(ocrUploadFile),
+        file: ocrUploadFile,
         requestId: ocrUploadRequestId,
         ...(documentType === "BL" ? { referenceCode: ocrUploadRows[0]?.["BL NO."]?.trim() } : {}),
         ...(documentType === "PKL" ? { idChiTiet: pklTargetDetailIds[0] || "" } : {}),
-      });
+      }, { onProgress: ({ loaded }) => setUploadProgress((current) => (current ? { ...current, loaded } : current)) });
+      setUploadProgress(null);
 
       const data = Object.fromEntries(
       Object.entries(ocrUploadRows[0] || {}).filter(([key, value]) => !key.startsWith("_") && value.trim()),
@@ -2042,14 +2065,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       }
       setOcrUploadFile(null);
       setOcrUploadDocId(null);
-      setOcrUploadFileData("");
-      setOcrUploadRequestId("");
+        setOcrUploadRequestId("");
       setOcrUploadRows([]);
       setPklTargetDetailIds([]);
       notify(`Đã bổ sung và cập nhật chứng từ ${ocrUploadDocId}`, "success");
     } catch (error) {
-      setOcrUploadError(error instanceof Error ? error.message : "Không thể lưu chứng từ");
+      const message = error instanceof Error ? error.message : "Không thể lưu chứng từ";
+      setOcrUploadError(message);
+      notify(message, "error");
     } finally {
+      setUploadProgress(null);
       setIsOcrSaving(false);
     }
   };
@@ -2615,7 +2640,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 )}
                 {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
                 <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadRequestId(""); setOcrUploadRows([]); setPklTargetDetailIds([]); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
+                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadRequestId(""); setOcrUploadRows([]); setPklTargetDetailIds([]); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
                   <button type="button" onClick={handleConfirmOcrUpload} disabled={!canUploadDocuments || isOcrSaving || missingOcrFields.length > 0} title={missingOcrFields.length > 0 ? t("requiredMissing", { fields: missingOcrFields.map((field) => localizeSheetField(field, t)).join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? t("saving") : t("confirmSave")}</button>
                 </div>
               </>
@@ -3633,6 +3658,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
       </div>
     </Modal>
+      {uploadProgress && (
+        <UploadProgressToast
+          fileName={uploadProgress.fileName}
+          loaded={uploadProgress.loaded}
+          size={uploadProgress.size}
+          index={uploadProgress.index}
+          total={uploadProgress.total}
+        />
+      )}
       {previewUrl && !isPreviewCollapsed && (
         <aside className={`fixed right-0 top-0 z-[100000] flex h-screen min-h-0 flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isPreviewMaximized ? "w-full" : "w-[92vw] md:w-1/2"}`}>
           <div className="flex min-h-14 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 py-2 sm:gap-3 sm:px-4 dark:border-gray-700">

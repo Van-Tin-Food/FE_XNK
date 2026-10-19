@@ -18,6 +18,8 @@ import {
 } from "@/services/postgresShipmentApi";
 import type { DriveDocumentFileRecord, DriveDocumentRecord, DriveDocumentValue, NotificationRecord, PostgresShipmentRelations, PostgresShipmentSnapshot, PurchaseRecord } from "@/types/postgresShipment";
 import { type ApiError, createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
+import { getDocumentMimeType } from "@/utils/documentFile";
+import { uploadFileToDriveSession, type UploadProgress } from "@/utils/driveResumableUpload";
 
 export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
 export type DriveFolderLinks = {
@@ -173,7 +175,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = `/api/${path.replace(/^\//, "")}`;
   const scope = path.startsWith("ocr/")
     ? "OCR"
-    : ["uploadDocument", "checkDocumentFileNames", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
+    : ["uploadDocument", "startDocumentUpload", "completeDocumentUpload", "checkDocumentFileNames", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
       ? "Drive"
       : "Backend";
   try {
@@ -540,16 +542,12 @@ export function renameDocumentSync(candidateId: string, fileName: string, docume
   });
 }
 
-export interface UploadDocumentPayload {
-  action: "uploadDocument";
+/** Đích upload của một chứng từ (đơn, mã chứng từ, thư mục container...). */
+export interface DocumentUploadTarget {
   orderCode: string;
   documentCode: string;
-  fileName: string;
-  fileData: string;
-  mimeType: string;
   referenceCode?: string;
   idChiTiet?: string;
-  requestId: string;
   /** Số container, bắt buộc với TRA_CONT và INSPECTION. */
   transportCode?: string;
   /** Ghi chú nối vào tên thư mục container của INSPECTION. */
@@ -557,6 +555,21 @@ export interface UploadDocumentPayload {
   /** Thư mục container đã có, dùng khi upload tiếp vào thư mục cũ. */
   containerFolderName?: string;
 }
+
+export interface UploadDocumentInput extends DocumentUploadTarget {
+  file: File;
+  requestId: string;
+}
+
+export type { UploadProgress };
+
+/** Dung lượng tối đa mỗi file khi upload thẳng lên Google Drive (BE kiểm tra lại). */
+export const MAX_DOCUMENT_UPLOAD_BYTES = 1024 * 1024 * 1024;
+/**
+ * File gửi đi phân tích OCR vẫn qua gateway Vercel (tối đa 4,5 MB mỗi request, tính cả phần đầu multipart),
+ * nên giữ dưới 4 MB.
+ */
+export const MAX_OCR_FILE_BYTES = 4 * 1024 * 1024;
 
 export interface DocumentFileNameCheck {
   fileName: string;
@@ -573,20 +586,59 @@ export interface DocumentFileNameCheckResponse {
 }
 
 /** Kiểm tra tên sẽ lưu trên Drive có trùng không trước khi upload (không ghi gì lên Drive). */
-export function checkDocumentFileNames(payload: Omit<UploadDocumentPayload, "action" | "fileName" | "fileData" | "mimeType" | "requestId"> & { fileNames: string[] }): Promise<DocumentFileNameCheckResponse> {
+export function checkDocumentFileNames(payload: DocumentUploadTarget & { fileNames: string[] }): Promise<DocumentFileNameCheckResponse> {
   return requestJson<DocumentFileNameCheckResponse>("checkDocumentFileNames", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
-export async function uploadDocument(payload: UploadDocumentPayload): Promise<DriveDataResponse> {
+
+interface DocumentUploadSession {
+  uploadUrl: string;
+  uploadToken: string;
+  fileName: string;
+}
+
+function postJson<T>(path: string, body: object): Promise<T> {
+  return requestJson<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Upload chứng từ thẳng lên Google Drive, không qua gateway Vercel (giới hạn 4,5 MB mỗi request):
+ * 1. BE đặt tên, chọn thư mục, kiểm tra trùng và mở phiên upload Drive;
+ * 2. trình duyệt gửi file từng phần tới Google (onProgress báo số byte đã gửi);
+ * 3. BE kiểm tra file trên Drive rồi lưu chung_tu_drive, trả kết quả như upload cũ.
+ */
+export async function uploadDocument(
+  input: UploadDocumentInput,
+  options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal } = {},
+): Promise<DriveDataResponse> {
+  const { file, requestId, ...target } = input;
+  if (file.size <= 0) throw new Error(`File ${file.name} rỗng, không upload được`);
+  if (file.size > MAX_DOCUMENT_UPLOAD_BYTES) throw new Error(`File ${file.name} vượt quá dung lượng tối đa 1 GB`);
   let result: DriveDataResponse;
   try {
-    result = await requestJson<DriveDataResponse>("uploadDocument", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    const session = await postJson<DocumentUploadSession>("startDocumentUpload", {
+      ...target,
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: getDocumentMimeType(file),
+    });
+    if (!session.uploadUrl || !session.uploadToken) throw new Error("Máy chủ chưa mở được phiên upload Google Drive");
+    const uploaded = await uploadFileToDriveSession(session.uploadUrl, file, options);
+    result = await postJson<DriveDataResponse>("completeDocumentUpload", {
+      uploadToken: session.uploadToken,
+      fileId: uploaded.id,
+      documentCode: target.documentCode,
+      referenceCode: target.referenceCode,
+      idChiTiet: target.idChiTiet,
+      transportCode: target.transportCode,
+      requestId,
     });
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error
