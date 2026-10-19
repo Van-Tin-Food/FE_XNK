@@ -106,7 +106,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const isOwner = Boolean(user?.id) && Number(user?.id) === request.userId && can("paymentRequests", "edit");
   // Người tạo, hoặc kế toán (paymentRequestsAll edit) sửa / gửi / hủy được đề nghị của mọi người.
   const canManage = isOwner || (can("paymentRequests", "edit") && can("paymentRequestsAll", "edit"));
-  const sent = Boolean(request.sentAt);
+  const sent = request.sent;
   const cancelled = request.status === -2;
   // Chưa duyệt (nháp / đang chờ) hoặc bị từ chối: sửa hoặc hủy được.
   const canEdit = canManage && (request.status === 0 || request.status === -1);
@@ -251,7 +251,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
             ) : <p className="text-sm text-gray-500">{t("prDraftOther")}</p>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm text-gray-700 dark:text-gray-200">✓ {t("prSentAt", { time: formatDateTime(request.sentAt, language) })}</p>
+              <p className="text-sm text-gray-700 dark:text-gray-200">✓ {t("prSentAt")}</p>
               {canManage && request.status === 0 && (
                 <button type="button" onClick={() => void send()} disabled={busy !== ""} className={BUTTON_SECONDARY}>{busy === "send" ? t("prSending") : t("prResendChat")}</button>
               )}

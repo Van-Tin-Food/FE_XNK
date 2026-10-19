@@ -150,6 +150,10 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Chứng từ không còn trong hồ sơ đề nghị. Vui lòng tải lại.";
     case "INVALID_FILE_ID":
       return "Mã file chứng từ không hợp lệ.";
+    case "PAYMENT_COST_NOT_FOUND":
+      return "Không tìm thấy chi phí của bạn (có thể đã bị xóa). Vui lòng tải lại.";
+    case "PAYMENT_COST_LOCKED":
+      return backendMessage || "Chi phí đã nằm trong đề nghị, không sửa / xóa được.";
     case "PAYMENT_COST_UNAVAILABLE":
       return backendMessage || "Chi phí đã được đưa vào đề nghị khác. Vui lòng tải lại danh sách chi phí.";
     case "GOOGLE_CHAT_NOT_CONFIGURED":

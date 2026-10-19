@@ -107,6 +107,24 @@ const AppSidebar: React.FC = () => {
               </Link>
             </li>
           )}
+          {canViewPaymentRequests && (
+            <li>
+              <Link
+                href="/payment-costs"
+                className={`menu-item group ${
+                  pathname.startsWith("/payment-costs") ? "menu-item-active" : "menu-item-inactive"
+                } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
+              >
+                <span className={pathname.startsWith("/payment-costs") ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="5" width="18" height="14" rx="2" />
+                    <path d="M3 10h18M7 15h3" />
+                  </svg>
+                </span>
+                {showText && <span className="menu-item-text">{t("myCosts")}</span>}
+              </Link>
+            </li>
+          )}
           {/* <li>
             <Link
               href="/user-guide"

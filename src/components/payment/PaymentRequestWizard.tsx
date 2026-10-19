@@ -15,20 +15,19 @@ import { formatAmount, formatMoney, parseAmountLoose, sumAmounts, type PaymentCu
 import { PaymentFlowBadge, formatDueDate } from "./PaymentRequestParts";
 
 // Bước 1 "Tạo đề nghị" dạng hỏi lần lượt: trả lời xong câu nào thì câu tiếp theo mới hiện ra, câu đã trả lời thu lại
-// thành một dòng tóm tắt (bấm "Đổi" để sửa). Thứ tự: nội dung → chi phí → hạn thanh toán → loại tiền (bước cuối).
-// Chi phí: tick các khoản đã nhập sẵn ở tab Chi phí của đơn hàng (nhiều đơn, nhiều cont, nhiều loại phí), hoặc thêm khoản
-// chưa nhập sẵn (lưu vào payment_cost; khoản mã HD như thanh toán quốc tế phải chọn hợp đồng, số tiền điền sẵn bằng tổng
-// tiền hàng). Một đề nghị gồm được nhiều hợp đồng: mục "Thanh toán theo hợp đồng" tick hợp đồng là thêm dòng (mỗi hợp đồng
-// một dòng, số tiền nhập ngay cạnh). Lưu = lưu nháp; gửi Google Chat ở bước 2.
+// thành một dòng tóm tắt (bấm "Đổi" để sửa). Thứ tự: chi phí → nội dung → hạn thanh toán → loại tiền (bước cuối).
+// Chi phí có 2 tab:
+// - Chi phí đơn hàng: tick các khoản nhập sẵn ở tab Chi phí của đơn hàng (của mọi người; phí theo hợp đồng như thanh toán
+//   quốc tế, phí container; nhiều đơn, nhiều cont) — không nhập lại số tiền.
+// - Chi phí vận hành: nhập loại phí + số tiền (không thuộc hợp đồng / container), lưu vào payment_cost cùng lúc lưu đề nghị.
+// Lưu = lưu nháp; gửi Google Chat ở bước 2.
 
 interface OtherRow {
   key: string;
-  /** Có id = khoản không gắn đơn đã thuộc đề nghị này (đang sửa). */
+  /** Có id = phí phát sinh đã thuộc đề nghị này (đang sửa). */
   id?: string;
   categoryId: string;
   amount: string;
-  /** Hợp đồng — bắt buộc với khoản mã HD (thanh toán theo hợp đồng). */
-  contract: string;
 }
 
 interface Props {
@@ -47,15 +46,11 @@ const SECONDARY = "h-11 rounded-lg border border-gray-200 px-4 text-sm font-medi
 
 let seed = 0;
 const newKey = () => `other-${Date.now()}-${seed += 1}`;
-/** Chi phí container nhập sẵn ở tab Chi phí của đơn. */
-const isPrepared = (cost: PaymentCost) => Boolean(cost.container);
-const CONTRACT_CODE = "HD";
+/** Chi phí nhập sẵn ở tab Chi phí của đơn (theo container hoặc theo hợp đồng). */
+const isPrepared = (cost: PaymentCost) => Boolean(cost.container || cost.contract);
+/** Mã phí của chi phí đơn hàng (HD = theo hợp đồng, CONT = theo container): nhập ở tab Chi phí, không nhập tay ở đây. */
+const ORDER_COST_CODES = ["HD", "CONT"];
 const MAX_COSTS = 100;
-/** Số hợp đồng hiện trong danh sách tick (gõ tìm để thấy hợp đồng khác). */
-const HD_LIST_LIMIT = 100;
-const INTERNATIONAL_PAYMENT = "thanh toán quốc tế";
-const isInternationalPayment = (category?: { code: string; name: string }) => Boolean(category)
-  && category?.code.toUpperCase() === CONTRACT_CODE && category?.name.trim().toLowerCase() === INTERNATIONAL_PAYMENT;
 
 /** Ngày (YYYY-MM-DD) theo giờ Việt Nam, cộng thêm số ngày. */
 function vnDate(addDays = 0): string {
@@ -111,7 +106,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [ownPrepared] = useState<PaymentCost[]>(() => (editing ? editing.costs.filter(isPrepared) : []));
   const [selected, setSelected] = useState<string[]>(() => ownPrepared.map((cost) => cost.id));
   const [others, setOthers] = useState<OtherRow[]>(() => (editing ? editing.costs.filter((cost) => !isPrepared(cost)).map((cost) => ({
-    key: newKey(), id: cost.id, categoryId: cost.categoryId, amount: formatAmount(cost.amount, "vi"), contract: cost.contract,
+    key: newKey(), id: cost.id, categoryId: cost.categoryId, amount: formatAmount(cost.amount, "vi"),
   })) : []));
   const [dueDate, setDueDate] = useState(editing?.dueDate || "");
   const [currency, setCurrency] = useState<PaymentCurrency | "">(editing?.currency || "");
@@ -120,9 +115,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [search, setSearch] = useState("");
   const [openGroups, setOpenGroups] = useState<string[]>([]);
   const [othersTouched, setOthersTouched] = useState(false);
-  // Thanh toán theo hợp đồng: khoản HD đang xem + ô tìm hợp đồng.
-  const [hdCategory, setHdCategory] = useState("");
-  const [hdSearch, setHdSearch] = useState("");
+  // Tab của bước chi phí: sửa đề nghị chỉ có chi phí vận hành thì mở sẵn tab đó.
+  const [costTab, setCostTab] = useState<"order" | "operating">(() => (editing && ownPrepared.length === 0 && others.length > 0 ? "operating" : "order"));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -142,7 +136,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     .concat([{ type: "", items: (options?.categories || []).filter((category) => !TYPE_ORDER.includes(category.type)) }])
     .filter((group) => group.items.length > 0), [options]);
   const suppliers = useMemo(() => new Map((options?.contracts || []).map((item) => [item.code, item.supplier])), [options]);
-  const contractsByCode = useMemo(() => new Map((options?.contracts || []).map((item) => [item.code, item])), [options]);
   // Khoản nhập sẵn có thể chọn: chưa thuộc đề nghị nào (+ của chính đề nghị đang sửa), nhóm theo hợp đồng.
   const prepared = useMemo(() => {
     const pool = [...ownPrepared, ...(options?.availableCosts || []).filter((cost) => !ownPrepared.some((own) => own.id === cost.id))];
@@ -161,47 +154,15 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
 
   const selectedCosts = selected.map((id) => preparedById.get(id)).filter((cost): cost is PaymentCost => Boolean(cost));
   const otherAmounts = others.map((row) => parseAmountLoose(row.amount));
-  const needsContract = (row: OtherRow) => categoriesById.get(row.categoryId)?.code.toUpperCase() === CONTRACT_CODE;
-  // Mỗi khoản phí HD của một hợp đồng chỉ nằm trong một đề nghị (như phí container): đề nghị khác đã có thì khoá.
-  const usedBy = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const item of options?.usedContractCosts || []) {
-      if (item.requestId !== editing?.id) map.set(`${item.contract}|${item.categoryId}`, item.requestId);
-    }
-    return map;
-  }, [options, editing?.id]);
-  const contractConflict = (row: OtherRow) => {
-    if (!needsContract(row) || !row.contract) return "";
-    const key = `${row.contract}|${row.categoryId}`;
-    if (usedBy.has(key)) return t("prContractCostUsed", { id: usedBy.get(key) || "" });
-    return others.some((item) => item.key !== row.key && needsContract(item) && `${item.contract}|${item.categoryId}` === key) ? t("prContractCostDuplicate") : "";
-  };
-  // Thanh toán theo hợp đồng (khoản mã HD): tick hợp đồng = thêm một dòng, bỏ tick = xoá. Hợp đồng hiện ra: chưa có khoản
-  // này ở đề nghị khác; thanh toán quốc tế thì thêm điều kiện chưa qua vận chuyển biển (đơn đã giao coi như đã thanh toán).
-  // Hợp đồng đang tick luôn hiện (kể cả khi sửa đề nghị cũ).
-  const hdCategories = useMemo(() => (options?.categories || []).filter((category) => category.code.toUpperCase() === CONTRACT_CODE), [options]);
-  const activeHd = categoriesById.get(hdCategory) || hdCategories.find(isInternationalPayment) || hdCategories[0];
-  const hdRows = useMemo(() => new Map(others.filter((row) => activeHd && row.categoryId === activeHd.id && row.contract).map((row) => [row.contract, row])), [activeHd, others]);
-  const hdList = useMemo(() => {
-    if (!activeHd) return { items: [], more: 0 };
-    const intl = isInternationalPayment(activeHd);
-    const term = hdSearch.trim().toLowerCase();
-    const all = (options?.contracts || [])
-      .filter((item) => hdRows.has(item.code) || (!usedBy.has(`${item.code}|${activeHd.id}`) && !(intl && item.seaPassed)))
-      .filter((item) => !term || item.code.toLowerCase().includes(term) || item.supplier.toLowerCase().includes(term));
-    const items = all.filter((item, index) => index < HD_LIST_LIMIT || hdRows.has(item.code));
-    return { items, more: all.length - items.length };
-  }, [activeHd, hdRows, hdSearch, options, usedBy]);
-  const hdCount = (categoryId: string) => others.filter((row) => row.categoryId === categoryId && row.contract).length;
-  // Khoản nhập tay không gắn hợp đồng: loại phí chọn trong danh sách không có mã HD.
+  // Chi phí vận hành: loại phí không phải mã HD / CONT (hai mã đó là chi phí đơn hàng, nhập ở tab Chi phí).
   const manualGroups = groupedCategories
-    .map((group) => ({ ...group, items: group.items.filter((item) => item.code.toUpperCase() !== CONTRACT_CODE) }))
+    .map((group) => ({ ...group, items: group.items.filter((item) => !ORDER_COST_CODES.includes(item.code.toUpperCase())) }))
     .filter((group) => group.items.length > 0);
-  const otherValid = others.every((row, index) => row.categoryId && otherAmounts[index] !== null && (!needsContract(row) || Boolean(row.contract)) && !contractConflict(row));
+  const otherValid = others.every((row, index) => row.categoryId && otherAmounts[index] !== null);
   const total = sumAmounts([...selectedCosts.map((cost) => cost.amount), ...otherAmounts]);
   const costCount = selectedCosts.length + others.length;
   const money = (value: string | null | undefined) => (currency ? formatMoney(value, currency, language) : formatAmount(value, language));
-  const complete = [Boolean(content.trim()), costCount > 0 && otherValid, /^\d{4}-\d{2}-\d{2}$/.test(dueDate), Boolean(currency)];
+  const complete = [costCount > 0 && otherValid, Boolean(content.trim()), /^\d{4}-\d{2}-\d{2}$/.test(dueDate), Boolean(currency)];
 
   /** Xong một câu: mở câu đầu tiên còn thiếu, đủ hết thì sang bước lưu. justDone: câu vừa trả lời (state chưa kịp cập nhật). */
   const advance = (justDone?: number) => {
@@ -211,22 +172,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     setReached((current) => Math.max(current, target));
   };
 
-  const contractAmount = (code: string) => {
-    const total = contractsByCode.get(code)?.total;
-    return isInternationalPayment(activeHd) && total && Number(total) > 0 ? formatAmount(total, "vi") : "";
-  };
-  const toggleContracts = (codes: string[], on: boolean) => {
-    if (!activeHd) return;
-    if (!on) {
-      setOthers((current) => current.filter((row) => !(row.categoryId === activeHd.id && codes.includes(row.contract))));
-      return;
-    }
-    const fresh = codes.filter((code) => !hdRows.has(code));
-    const room = Math.max(0, MAX_COSTS - costCount);
-    if (fresh.length > room) notify(t("prTooManyCosts"), "error");
-    const rows = fresh.slice(0, room).map((code) => ({ key: newKey(), categoryId: activeHd.id, contract: code, amount: contractAmount(code) }));
-    if (rows.length) setOthers((current) => [...current, ...rows]);
-  };
   const setRowAmount = (key: string, amount: string) => setOthers((current) => current.map((item) => (item.key === key ? { ...item, amount } : item)));
 
   const toggle = (ids: string[], on: boolean) => setSelected((current) => (on ? [...new Set([...current, ...ids])] : current.filter((id) => !ids.includes(id))));
@@ -243,7 +188,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         dueDate,
         costs: [
           ...selectedCosts.map((cost) => ({ id: cost.id, categoryId: cost.categoryId, amount: cost.amount, container: cost.container, contract: cost.contract })),
-          ...others.map((row, index) => ({ id: row.id, categoryId: row.categoryId, amount: otherAmounts[index] as string, contract: needsContract(row) ? row.contract : "" })),
+          ...others.map((row, index) => ({ id: row.id, categoryId: row.categoryId, amount: otherAmounts[index] as string })),
         ],
       };
       const saved = editing ? await updatePaymentRequest(editing.id, input) : await createPaymentRequest(input);
@@ -257,7 +202,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   };
 
   const stepState = (index: number) => (active === index ? "active" : "done");
-  const titles = [t("prStepContent"), t("prStepCosts"), t("prStepDueDate"), t("prStepCurrency")];
+  const titles = [t("prStepCosts"), t("prStepContent"), t("prStepDueDate"), t("prStepCurrency")];
 
   return (
     <div className="space-y-3">
@@ -268,24 +213,26 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         </div>
       )}
 
-      {/* 1. Nội dung */}
-      <StepCard index={0} title={titles[0]} state={stepState(0)} summary={content} onChange={() => setActive(0)}>
-        <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={3} autoFocus placeholder={t("prContentPlaceholder")}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
-        <div className="mt-3 flex justify-end">
-          <button type="button" className={`${PRIMARY} w-full sm:w-auto`} disabled={!content.trim()} onClick={() => advance()}>{t("prContinue")}</button>
-        </div>
-      </StepCard>
-
-      {/* 2. Chi phí */}
-      {reached >= 1 && (
-        <StepCard index={1} title={titles[1]} state={stepState(1)} onChange={() => setActive(1)}
-          summary={t("prCostsSummary", { count: costCount, total: money(total) })}>
+      {/* 1. Chi phí: tab Chi phí đơn hàng (tick) / Chi phí vận hành (nhập) */}
+      <StepCard index={0} title={titles[0]} state={stepState(0)} onChange={() => setActive(0)}
+        summary={t("prCostsSummary", { count: costCount, total: money(total) })}>
           {options && options.categories.length === 0 && (
             <p className="mb-3 rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("prNoCategories")}</p>
           )}
 
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prPickByOrder")}</h3>
+          <div role="tablist" aria-label={titles[0]} className="grid grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
+            {([["order", t("prTabOrderCosts"), selectedCosts.length], ["operating", t("prTabOperatingCosts"), others.length]] as const).map(([key, label, count]) => (
+              <button key={key} type="button" role="tab" aria-selected={costTab === key} onClick={() => setCostTab(key)}
+                className={`flex min-h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium ${costTab === key ? "bg-white text-brand-700 shadow-theme-xs dark:bg-gray-900 dark:text-brand-300" : "text-gray-600 hover:text-gray-800 dark:text-gray-300"}`}>
+                <span className="truncate">{label}</span>
+                {count > 0 && <span className="shrink-0 rounded-full bg-brand-500 px-1.5 text-xs text-white">{count}</span>}
+              </button>
+            ))}
+          </div>
+
+          {costTab === "order" && (
+          <div className="mt-3">
+          <p className="text-xs text-gray-500">{t("prOrderCostsHint")}</p>
           {!options && !optionsError && <div className="mt-2 h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />}
           {options && prepared.length === 0 && <p className="mt-2 rounded-lg border border-dashed border-gray-200 px-3 py-3 text-sm text-gray-500 dark:border-gray-700">{t("prNoPrepared")}</p>}
           {options && prepared.length > 0 && (
@@ -345,82 +292,18 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
             </>
           )}
 
-          {/* Thanh toán theo hợp đồng (mã HD): tick hợp đồng là thêm dòng, số tiền nhập ngay cạnh */}
-          {hdCategories.length > 0 && activeHd && (
-            <>
-              <h3 className="mt-5 text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prByContract")}</h3>
-              <p className="text-xs text-gray-500">{isInternationalPayment(activeHd) ? t("prIntlContractHint") : t("prByContractHint")}</p>
-              {hdCategories.length > 1 && (
-                <div className="mt-2 flex flex-wrap gap-2" role="tablist" aria-label={t("prByContract")}>
-                  {hdCategories.map((item) => {
-                    const count = hdCount(item.id);
-                    const on = item.id === activeHd.id;
-                    return (
-                      <button key={item.id} type="button" role="tab" aria-selected={on} onClick={() => { setHdCategory(item.id); setHdSearch(""); }}
-                        className={`h-9 max-w-full rounded-full border px-3 text-sm font-medium ${on ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 text-gray-700 hover:border-brand-300 dark:border-gray-700 dark:text-gray-200"}`}>
-                        <span className="truncate">{item.name}</span>{count > 0 && <span className="ml-1.5 rounded-full bg-brand-500 px-1.5 text-xs text-white">{count}</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              <input type="search" value={hdSearch} onChange={(event) => setHdSearch(event.target.value)} placeholder={t("prSearchContract")} aria-label={t("prSearchContract")} className={`mt-2 ${INPUT}`} />
-              {!options && !optionsError && <div className="mt-2 h-16 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />}
-              {options && hdList.items.length === 0 && (
-                <p className="mt-2 rounded-lg border border-dashed border-gray-200 px-3 py-3 text-sm text-gray-500 dark:border-gray-700">{t("prNoContractsLeft")}</p>
-              )}
-              {hdList.items.length > 0 && (
-                <div className="mt-2 rounded-xl border border-gray-200 dark:border-gray-700">
-                  <label className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-gray-100 px-3 text-sm font-medium text-gray-700 dark:border-gray-800 dark:text-gray-200">
-                    <input type="checkbox" className="h-4 w-4 shrink-0"
-                      checked={hdList.items.every((item) => hdRows.has(item.code))}
-                      ref={(input) => { if (input) input.indeterminate = hdList.items.some((item) => hdRows.has(item.code)) && !hdList.items.every((item) => hdRows.has(item.code)); }}
-                      onChange={(event) => toggleContracts(hdList.items.map((item) => item.code), event.target.checked)} />
-                    <span className="min-w-0 flex-1">{t("prSelectAll")} ({hdList.items.length})</span>
-                    {hdCount(activeHd.id) > 0 && <span className="shrink-0 text-xs text-brand-600 dark:text-brand-400">{t("prContractsPicked", { count: hdCount(activeHd.id) })}</span>}
-                  </label>
-                  <ul className="max-h-[28rem] divide-y divide-gray-100 overflow-y-auto custom-scrollbar dark:divide-gray-800">
-                    {hdList.items.map((item) => {
-                      const row = hdRows.get(item.code);
-                      const rowIndex = row ? others.findIndex((other) => other.key === row.key) : -1;
-                      const amountInvalid = Boolean(row) && othersTouched && otherAmounts[rowIndex] === null;
-                      const conflict = row ? contractConflict(row) : "";
-                      return (
-                        <li key={item.code} className={`px-3 py-1.5 ${row ? "bg-brand-50/50 dark:bg-brand-500/5" : ""}`}>
-                          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
-                            <label className="flex min-h-10 min-w-0 flex-1 cursor-pointer items-center gap-3">
-                              <input type="checkbox" className="h-4 w-4 shrink-0" checked={Boolean(row)} onChange={(event) => toggleContracts([item.code], event.target.checked)} />
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate font-mono text-sm font-semibold text-gray-800 dark:text-white">{item.code}</span>
-                                {item.supplier && <span className="block truncate text-xs text-gray-500">{item.supplier}</span>}
-                              </span>
-                              {!row && isInternationalPayment(activeHd) && Number(item.total) > 0 && (
-                                <span className="shrink-0 text-sm tabular-nums text-gray-500">{formatAmount(item.total, language)}</span>
-                              )}
-                            </label>
-                            {row && (
-                              <input inputMode="decimal" value={row.amount} placeholder="1.250.000" aria-label={`${t("prCostAmount")} ${item.code}`}
-                                onChange={(event) => setRowAmount(row.key, event.target.value)}
-                                className={`${INPUT} text-right tabular-nums sm:w-44 ${amountInvalid ? "border-error-400" : ""}`} />
-                            )}
-                          </div>
-                          {conflict && <p className="pb-1 text-xs text-error-600">{conflict}</p>}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {hdList.more > 0 && <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500 dark:border-gray-800">{t("prMoreContracts", { count: hdList.more })}</p>}
-                </div>
-              )}
-            </>
+          </div>
           )}
 
-          <h3 className="mt-5 text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prOtherCosts")}</h3>
+          {costTab === "operating" && (
+          <div className="mt-3">
           <p className="text-xs text-gray-500">{t("prOtherHint")}</p>
-          {others.some((row) => !needsContract(row)) && (
+          {options && manualGroups.length === 0 && (
+            <p className="mt-2 rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("prNoOperatingCategories")}</p>
+          )}
+          {others.length > 0 && (
             <ul className="mt-2 space-y-2">
               {others.map((row, index) => {
-                if (needsContract(row)) return null;
                 const category = categoriesById.get(row.categoryId);
                 const amountInvalid = othersTouched && otherAmounts[index] === null;
                 return (
@@ -447,16 +330,29 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
               })}
             </ul>
           )}
-          <button type="button" className={`${SECONDARY} mt-2 w-full sm:w-auto`} disabled={!options || costCount >= MAX_COSTS}
-            onClick={() => setOthers((current) => [...current, { key: newKey(), categoryId: "", amount: "", contract: "" }])}>+ {t("prAddOtherCost")}</button>
+          <button type="button" className={`${SECONDARY} mt-2 w-full sm:w-auto`} disabled={!options || costCount >= MAX_COSTS || manualGroups.length === 0}
+            onClick={() => setOthers((current) => [...current, { key: newKey(), categoryId: "", amount: "" }])}>+ {t("prAddOtherCost")}</button>
+          </div>
+          )}
 
           <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-3 sm:flex-row sm:items-center sm:justify-between dark:border-gray-800">
             <p className="text-sm text-gray-600 dark:text-gray-300">{t("prSelectedCount", { count: costCount, total: money(total) })}</p>
             <button type="button" className={PRIMARY} disabled={costCount === 0}
-              onClick={() => { setOthersTouched(true); if (otherValid) advance(); }}>{t("prContinue")}</button>
+              onClick={() => { setOthersTouched(true); if (otherValid) advance(); else setCostTab("operating"); }}>{t("prContinue")}</button>
+          </div>
+      </StepCard>
+
+      {/* 2. Nội dung */}
+      {reached >= 1 && (
+        <StepCard index={1} title={titles[1]} state={stepState(1)} summary={content} onChange={() => setActive(1)}>
+          <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={3} autoFocus placeholder={t("prContentPlaceholder")}
+            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+          <div className="mt-3 flex justify-end">
+            <button type="button" className={`${PRIMARY} w-full sm:w-auto`} disabled={!content.trim()} onClick={() => advance()}>{t("prContinue")}</button>
           </div>
         </StepCard>
       )}
+
 
       {/* 3. Hạn thanh toán */}
       {reached >= 2 && (

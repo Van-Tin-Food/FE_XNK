@@ -54,7 +54,8 @@ export interface PaymentRequest {
   /** Link thư mục Drive hồ sơ (có sau lần upload chứng từ đầu tiên). */
   link: string;
   /** Lúc gửi lên Google Chat; rỗng = nháp. */
-  sentAt: string;
+  /** Đã gửi lên Google Chat (false = nháp). */
+  sent: boolean;
   status: PaymentRequestStatus;
   rejectReason: string;
   hasRed: boolean;
@@ -64,13 +65,10 @@ export interface PaymentRequest {
 
 export interface PaymentRequestOptions {
   categories: PaymentCategory[];
-  /** total: tổng tiền hàng (chỉ có khi được xem tiền hàng) để điền sẵn thanh toán quốc tế. */
-  /** seaPassed: đơn đã qua giai đoạn vận chuyển biển (đã giao) — không tạo thanh toán quốc tế nữa. */
-  contracts: Array<{ code: string; date: string; supplier: string; total: string; seaPassed: boolean }>;
+  contracts: Array<{ code: string; date: string; supplier: string }>;
   containers: Array<{ code: string; contract: string }>;
+  /** Chi phí nhập sẵn ở tab Chi phí (container / hợp đồng) chưa thuộc đề nghị nào. */
   availableCosts: PaymentCost[];
-  /** Khoản phí HD × hợp đồng đã nằm trong đề nghị chưa hủy (mỗi khoản chỉ một đề nghị). */
-  usedContractCosts: Array<{ contract: string; categoryId: string; requestId: string }>;
 }
 
 export interface PaymentCostInput {
@@ -191,7 +189,7 @@ function normalizeRequest(row: unknown): PaymentRequest | null {
     updatedAt: str(row.ngay_cap_nhat),
     dueDate: str(row.han_thanh_toan),
     link: str(row.link),
-    sentAt: str(row.ngay_gui),
+    sent: row.da_gui === true,
     status: (PAYMENT_STATUSES as readonly number[]).includes(status) ? status as PaymentRequestStatus : 0,
     rejectReason: str(row.ly_do_tu_choi),
     hasRed: row.has_red === true,
@@ -251,14 +249,9 @@ export async function getPaymentRequestOptions(signal?: AbortSignal): Promise<Pa
       flow: flowOf(row.vung_phi),
       name: str(row.noi_dung),
     })).filter((row) => row.id),
-    contracts: list(data.contracts).map((row) => ({
-      code: str(row.ma_hop_dong), date: str(row.ngay_hop_dong), supplier: str(row.ten_ncc), total: str(row.tong_tien_hang), seaPassed: row.qua_van_chuyen_bien === true,
-    })).filter((row) => row.code),
+    contracts: list(data.contracts).map((row) => ({ code: str(row.ma_hop_dong), date: str(row.ngay_hop_dong), supplier: str(row.ten_ncc) })).filter((row) => row.code),
     containers: list(data.containers).map((row) => ({ code: str(row.ma_container), contract: str(row.ma_hop_dong) })).filter((row) => row.code),
     availableCosts: list(data.availableCosts).map(normalizeCost).filter((cost): cost is PaymentCost => cost !== null),
-    usedContractCosts: list(data.usedContractCosts)
-      .map((row) => ({ contract: str(row.id_mua_hang), categoryId: str(row.id_payment_category), requestId: str(row.id_payment_request) }))
-      .filter((row) => row.contract && row.categoryId && row.requestId),
   };
 }
 

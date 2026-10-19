@@ -157,7 +157,7 @@ function PaymentRequestsContent() {
                     className="flex h-full w-full min-w-0 flex-col gap-2 rounded-xl border border-gray-200 p-4 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/30 dark:border-gray-700 dark:hover:border-brand-500/50">
                     <span className="flex w-full items-center justify-between gap-2">
                       <span className="font-mono text-sm font-semibold text-brand-600 dark:text-brand-400">{request.id}</span>
-                      <PaymentStatusBadge status={request.status} draft={!request.sentAt} />
+                      <PaymentStatusBadge status={request.status} draft={!request.sent} />
                     </span>
                     <span className="line-clamp-2 break-words text-sm font-medium text-gray-800 dark:text-white/90">{request.content}</span>
                     <span className="flex flex-wrap items-center gap-2">
@@ -201,7 +201,7 @@ function PaymentRequestsContent() {
                       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{money(request)}</td>
                       <td className={`px-4 py-3 text-sm ${dueClass(request)}`}>{formatDueDate(request.dueDate)}</td>
                       <td className="px-4 py-3">
-                        <PaymentStatusBadge status={request.status} draft={!request.sentAt} />
+                        <PaymentStatusBadge status={request.status} draft={!request.sent} />
                         {request.approverName && <p className="mt-1 truncate text-xs text-gray-500" title={request.approverName}>{request.approverName}</p>}
                       </td>
                     </tr>

@@ -56,6 +56,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   PAYMENT_REQUEST_UPLOAD: "logPaymentUpload",
   PAYMENT_REQUEST_DOCUMENT_REMOVE: "logPaymentDocRemove",
   PAYMENT_COST_UPDATE: "logPaymentCostUpdate",
+  PAYMENT_COST_DELETE: "logPaymentCostDelete",
   PAYMENT_REQUEST_CANCEL: "logPaymentCancel",
 };
 const ROLES = ["admin", "it", "logistic", "van_chuyen", "ke_toan"];

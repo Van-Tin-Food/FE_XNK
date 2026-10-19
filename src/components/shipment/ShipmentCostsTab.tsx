@@ -7,16 +7,22 @@ import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { getOrderCosts, saveOrderCosts, type CostCategory, type OrderCost, type OrderCosts } from "@/services/paymentCostApi";
 import { formatAmount, parseAmountLoose, sumAmounts } from "@/utils/paymentRequest";
 
-// Tab "Chi phí" của đơn hàng: nhập trước chi phí container để khi tạo đề nghị thanh toán chọn ra (thanh toán quốc tế
-// của hợp đồng nhập khi tạo đề nghị). Mỗi container là một thẻ: danh sách khoản đã nhập + dòng thêm khoản (sổ xuống chọn
-// khoản phí, nhập số tiền). Chỉ nhập số (loại tiền chọn khi tạo đề nghị). Khoản đã đưa vào đề nghị hiện mã đề nghị, khoá.
+// Tab "Chi phí" của đơn hàng: nhập trước chi phí để khi tạo đề nghị thanh toán chỉ tick chọn, không nhập lại số tiền.
+// Một thẻ "phí theo hợp đồng" (mã HD: thanh toán quốc tế, thuế nhập khẩu...) + mỗi container một thẻ (phí container).
+// Mỗi thẻ: danh sách khoản đã nhập + dòng thêm khoản (sổ xuống chọn khoản phí, nhập số tiền; thanh toán quốc tế điền sẵn
+// tổng tiền hàng). Chỉ nhập số (loại tiền chọn khi tạo đề nghị). Khoản đã đưa vào đề nghị hiện mã đề nghị, khoá.
+// Đơn đã qua vận chuyển biển (đã giao) không nhập thêm thanh toán quốc tế.
 
 interface Props {
   contract: string;
 }
 
-/** Số container. */
+/** Số container; CONTRACT_TARGET = phí theo hợp đồng. */
 type Target = string;
+const CONTRACT_TARGET = "";
+const CONTRACT_CODE = "HD";
+const isInternationalPayment = (category: CostCategory) => category.code.toUpperCase() === CONTRACT_CODE
+  && category.name.trim().toLowerCase() === "thanh toán quốc tế";
 
 const cellKey = (target: Target, categoryId: string) => `${target}|${categoryId}`;
 const INPUT = "h-10 min-w-0 rounded-lg border bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:bg-gray-50 disabled:text-gray-500 dark:bg-gray-900 dark:text-white dark:disabled:bg-gray-800";
@@ -76,18 +82,20 @@ export default function ShipmentCostsTab({ contract }: Props) {
     ...(lockedByTarget.get(target) || []).map((cost) => cost.amount),
   ]);
 
-  // Khoản phí của container: mã CONT (danh mục chưa có mã CONT thì cho chọn mọi khoản).
-  const containerCategories = useMemo(() => {
-    const all = data?.categories || [];
-    const cont = all.filter((category) => category.code.toUpperCase() === "CONT");
-    return cont.length ? cont : all;
-  }, [data]);
+  // Khoản phí theo hợp đồng: mã HD; khoản phí của container: mọi mã khác.
+  const contractCategories = useMemo(() => (data?.categories || []).filter((category) => category.code.toUpperCase() === CONTRACT_CODE), [data]);
+  const containerCategories = useMemo(() => (data?.categories || []).filter((category) => category.code.toUpperCase() !== CONTRACT_CODE), [data]);
 
-  /** Danh sách sổ xuống: nhóm theo mã chi phí, bỏ khoản cont này đã nhập. */
+  /** Danh sách sổ xuống: nhóm theo mã chi phí, bỏ khoản đã nhập ở hợp đồng / cont này. */
   const optionGroups = (target: Target) => {
     const groups = new Map<string, CostCategory[]>();
-    for (const category of containerCategories) {
-      if (isShown(cellKey(target, category.id))) continue;
+    // Mỗi khoản phí chỉ một dòng trên một cont / hợp đồng: khoản đã vào đề nghị cũng không nhập thêm.
+    const lockedCategories = new Set((lockedByTarget.get(target) || []).map((cost) => cost.categoryId));
+    const forContract = target === CONTRACT_TARGET;
+    for (const category of forContract ? contractCategories : containerCategories) {
+      if (isShown(cellKey(target, category.id)) || lockedCategories.has(category.id)) continue;
+      // Đơn đã giao coi như đã thanh toán quốc tế.
+      if (forContract && data?.seaPassed && isInternationalPayment(category)) continue;
       groups.set(category.code, [...(groups.get(category.code) || []), category]);
     }
     return [...groups.entries()];
@@ -163,7 +171,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
     return (
       <div key={target} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
         <div className="flex items-center justify-between gap-2">
-          <p className="min-w-0 truncate font-mono text-sm font-semibold text-gray-800 dark:text-white">{title}</p>
+          <p className={`min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-white ${target === CONTRACT_TARGET ? "" : "font-mono"}`}>{title}</p>
           <p className="shrink-0 text-sm font-bold tabular-nums text-gray-900 dark:text-white">{t("pcTotal")}: {formatAmount(targetTotal(target), language)}</p>
         </div>
 
@@ -198,7 +206,12 @@ export default function ShipmentCostsTab({ contract }: Props) {
         {editable && (
           <div className="mt-2 grid grid-cols-1 gap-2 border-t border-dashed border-gray-200 pt-2 sm:grid-cols-[minmax(0,1fr)_9rem_auto] dark:border-gray-700">
             <select value={entry.categoryId} aria-label={t("pcSelectFee")}
-              onChange={(event) => setNewEntry((current) => ({ ...current, [target]: { ...entry, categoryId: event.target.value } }))}
+              onChange={(event) => {
+                const categoryId = event.target.value;
+                const category = categoriesById.get(categoryId);
+                const fill = !entry.amount.trim() && category && isInternationalPayment(category) && Number(data?.goodsTotal) > 0;
+                setNewEntry((current) => ({ ...current, [target]: { categoryId, amount: fill ? formatAmount(data?.goodsTotal, "vi") : entry.amount } }));
+              }}
               className={`${INPUT} w-full border-gray-200 dark:border-gray-700`}>
               <option value="">{t("pcSelectFee")}</option>
               {groups.map(([code, items]) => (
@@ -228,6 +241,16 @@ export default function ShipmentCostsTab({ contract }: Props) {
         <Link href="/payment-requests/new" className="shrink-0 font-semibold text-brand-600 hover:underline dark:text-brand-400">{t("pcCreateRequest")} →</Link>
       </div>
       {data.categories.length === 0 && <p className="text-sm text-gray-500">{t("pcNoGroups")}</p>}
+
+      {data.categories.length > 0 && data.access.container.view && contractCategories.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-sm font-semibold text-gray-800 dark:text-white">
+            {t("pcContractSection")}{!canEditContainer && <span className="ml-2 text-xs font-normal text-gray-400">({t("pcReadOnly")})</span>}
+          </h3>
+          {costCard(CONTRACT_TARGET, `${t("prContract")} ${data.contract}`, canEditContainer)}
+          {data.seaPassed && <p className="mt-2 text-xs text-gray-500">{t("pcSeaPassedHint")}</p>}
+        </section>
+      )}
 
       {data.categories.length > 0 && data.access.container.view && (
         <section>
