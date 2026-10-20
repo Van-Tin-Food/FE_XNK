@@ -414,7 +414,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         </div>
       </div>
 
-      {/* Dạng thẻ dưới 1280px (2 cột từ 768px); bảng 7 cột cần đủ chiều ngang khi sidebar mở. */}
+      {/* Dạng thẻ dưới 1280px (2 cột từ 768px); bảng 8 cột cần đủ chiều ngang khi sidebar mở. */}
       <div className="space-y-3 p-4 xl:hidden">
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1">
@@ -461,16 +461,17 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         )}
       </div>
 
-      {/* Bảng từ 1280px, luôn đủ 7 cột. 1280–1535px (có sidebar) không đủ chỗ thì cuộn ngang trong khung bảng, không ẩn cột. */}
+      {/* Bảng từ 1280px, luôn đủ 8 cột. 1280–1535px (có sidebar) không đủ chỗ thì cuộn ngang trong khung bảng, không ẩn cột. */}
       <div className="hidden w-full xl:block xl:max-2xl:overflow-x-auto xl:max-2xl:overscroll-x-contain xl:max-2xl:custom-scrollbar">
           <table className="w-full min-w-0 table-fixed border-separate border-spacing-0 [&_td]:overflow-hidden [&_th]:overflow-hidden xl:max-2xl:min-w-[1240px]">
             <thead className="border-b border-gray-100 dark:border-gray-800">
             <tr>
+              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[4%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("sequence")}</th>
               {/* Số HĐ + ngày HĐ chung một cột; bấm tiêu đề sắp xếp theo ngày hợp đồng. */}
               <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("contractDate")} title={t("sortByContractDate")}>
                 <div className="flex items-center gap-1.5">{t("orderNumber")} <SortIcon col="contractDate" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[29%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[25%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
                 <div className="flex items-center gap-1.5">{t("productAndFactory")} <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[15%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400" title={t("trackingColumnHint")}>{t("billContainerColumn")}</th>
@@ -491,7 +492,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
             {paged.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-16 text-center text-sm text-gray-400">
+                <td colSpan={8} className="py-16 text-center text-sm text-gray-400">
                   <div className="flex flex-col items-center gap-2">
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
                       <circle cx="11" cy="11" r="8"/>
@@ -502,16 +503,22 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                 </td>
               </tr>
             ) : (
-              paged.map((shipment) => {
+              paged.map((shipment, rowIdx) => {
                 const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
                 const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.buying;
                 const statusLabel = t(sc.labelKey);
+                // Số thứ tự đếm tiếp qua các trang (trang 2 bắt đầu từ pageSize + 1).
+                const rowNum = (safePage - 1) * pageSize + rowIdx + 1;
                 return (
                   <tr
                     key={shipment.id}
                     onClick={() => { if (!hasTextSelection()) onRowClick(shipment); }}
                     className="group cursor-pointer hover:bg-brand-50/40 dark:hover:bg-brand-500/5 transition-colors duration-150"
                   >
+                    {/* Row number */}
+                    <td className="py-3.5 px-4">
+                      <span className="text-xs text-gray-400 tabular-nums">{rowNum}</span>
+                    </td>
 
                     {/* Order code + contract date */}
                     <td className="py-3.5 px-4">
