@@ -59,7 +59,7 @@ const FLOW_STAGE_LABELS: Record<NonNullable<Shipment["flowStageKey"]>, string> =
   declared: "Khai báo hải quan",
   fifteenb: "Mẫu 15B",
   customs: "Thông quan",
-  delivered: "Giao hàng / Trả công",
+  delivered: "Giao hàng / Hạ rỗng",
 };
 
 export const SUMMARY_FIELDS = [
