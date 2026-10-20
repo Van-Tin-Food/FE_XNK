@@ -146,16 +146,18 @@ const FLOW_STAGES: ShipmentFlowStage[] = [
   { key: "declared", label: "Khai báo hải quan", shortLabel: "BB_LM / PHI_TK / THUE_NK / TK" },
   { key: "fifteenb", label: "Mẫu 15B", shortLabel: "15B" },
   { key: "customs", label: "Thông quan", shortLabel: "QDTQ / MV" },
-  { key: "delivered", label: "Giao hàng / Trả công", shortLabel: "TRA_CONT" },
+  { key: "delivered", label: "Giao hàng / Hạ rỗng", shortLabel: "TRA_CONT" },
 ];
 
-const STAGE_DOC_GROUPS: Record<Exclude<ShipmentFlowStage["key"], "delivered">, string[]> = {
+// Chứng từ của từng giai đoạn: còn thiếu thì thanh tiến trình ghi "Thiếu: ..." (giai đoạn cuối = hạ rỗng TRA_CONT).
+const STAGE_DOC_GROUPS: Record<ShipmentFlowStage["key"], string[]> = {
   buying: ["INV", "PKL"],
   shipping: ["BL", "CO", "HC"],
   arrived: ["DON_KD"],
   declared: ["BB_LM", "PHI_TK", "THUE_NK", "TK"],
   fifteenb: ["15B"],
   customs: ["QDTQ", "MV"],
+  delivered: ["TRA_CONT"],
 };
 
 const DOCUMENT_DISPLAY_ORDER = [
@@ -1599,25 +1601,30 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     customs: "stageCustoms",
     delivered: "stageDelivered",
   };
+  // Hoàn thành = đủ mọi chứng từ bắt buộc (kể cả hạ rỗng TRA_CONT). Chỉ còn thiếu hạ rỗng thì đơn vẫn ở bước
+  // "Giao hàng / Hạ rỗng" (đang làm), không phải "Giao hàng thành công".
+  const isShipmentComplete = !isCancelled && shipment.status === "completed";
   const flowLabel = isCancelled
     ? t("cancelledStatus")
-    : shipment.flowStageKey
-      ? t(stageLabelKeys[shipment.flowStageKey])
-      : t({ cancelled: "cancelledStatus", shipping: "shipping", completed: "completed", missing_docs: "missingDocumentsStatus" }[shipment.status] || "status");
+    : isShipmentComplete
+      ? t("delivered")
+      : shipment.flowStageKey
+        ? t(stageLabelKeys[shipment.flowStageKey])
+        : t({ cancelled: "cancelledStatus", shipping: "shipping", completed: "completed", missing_docs: "missingDocumentsStatus" }[shipment.status] || "status");
   const localizedFlowStages = FLOW_STAGES.map((stage) => ({
     ...stage,
     label: t(stageLabelKeys[stage.key]),
   }));
   const flowColor = isCancelled
     ? "text-error-600 bg-error-50 dark:bg-error-500/10 dark:text-error-400"
-    : shipment.flowStageKey === "delivered"
+    : isShipmentComplete
       ? "text-success-600 bg-success-50 dark:bg-success-500/10"
       : shipment.flowStageKey === "buying"
         ? "text-amber-700 bg-amber-50 dark:bg-amber-500/10"
         : "text-blue-light-600 bg-blue-light-50 dark:bg-blue-light-500/10";
   const flowDotColor = isCancelled
     ? "bg-error-500"
-    : shipment.flowStageKey === "delivered"
+    : isShipmentComplete
       ? "bg-success-500"
       : shipment.flowStageKey === "buying"
         ? "bg-amber-500"
@@ -1727,7 +1734,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   );
   const documentsReadyForArchive = !isArchiveStateLoading
     && (documentProgress ? documentProgress.currentStage === null : isDocumentsComplete);
-  const activeStageDocs = shipment.flowStageKey && shipment.flowStageKey !== "delivered"
+  const activeStageDocs = shipment.flowStageKey && !isShipmentComplete
     ? STAGE_DOC_GROUPS[shipment.flowStageKey]
     : [];
   const activeMissingDocCodes = missingDocs
@@ -2728,8 +2735,8 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
       </button>
     <section className="flex min-w-0 flex-col rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
       {/* Header */}
-      <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-4 pb-3 pt-4 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pb-4 sm:pt-6">
-        <div className="min-w-0 flex flex-col gap-1">
+      <div className="flex shrink-0 flex-row items-start justify-between gap-3 border-b border-gray-100 px-4 pb-3 pt-4 dark:border-gray-800 sm:px-6 sm:pb-4 sm:pt-6">
+        <div className="min-w-0 flex flex-1 flex-col gap-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
             <h1 className="min-w-0 break-all text-base font-bold tracking-wide text-gray-900 dark:text-white sm:text-lg font-mono">
               {shipment.orderCode}
@@ -2749,7 +2756,17 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
           <p className="truncate text-xs text-gray-400 sm:whitespace-normal sm:break-words" title={shipment.supplier}>{t("supplierPrefix", { supplier: shipment.supplier })}</p>
         </div>
 
-        {/* Missing docs badge */}
+        {/* Đóng chi tiết đơn, về danh sách ở trang chủ (đang sửa dở thì hỏi trước như nút "Danh sách đơn hàng").
+            Kiểu nút giống nút đóng của modal cũ: góc phải, ngang hàng mã đơn. */}
+        <button
+          type="button"
+          onClick={() => void handleBack()}
+          aria-label={t("backToShipmentList")}
+          title={t("backToShipmentList")}
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-800 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-white sm:h-11 sm:w-11"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+        </button>
       </div>
 
       {/* Tabs: dính dưới header app khi cuộn trang. */}
@@ -2772,16 +2789,6 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
           </button>
         ))}
       </div>
-        {/* Đóng chi tiết đơn, về danh sách ở trang chủ (đang sửa dở thì hỏi trước như nút "Danh sách đơn hàng"). */}
-        <button
-          type="button"
-          onClick={() => void handleBack()}
-          aria-label={t("backToShipmentList")}
-          title={t("backToShipmentList")}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-        </button>
       </div>
 
       <input id="shipment-document-upload" type="file" className="hidden" accept={DOCUMENT_FILE_ACCEPT} multiple={allowMultipleUpload} onChange={handleUploadSelected} />
@@ -2984,6 +2991,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
                     activeStage={shipment.flowStageKey || "buying"}
                     stages={localizedFlowStages}
                     activeStageMessage={activeStageMessage}
+                    isComplete={isShipmentComplete}
                   />
                 </div>
               </>

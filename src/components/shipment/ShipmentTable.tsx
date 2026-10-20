@@ -43,7 +43,10 @@ const STATUS_CONFIG: Record<string, { labelKey: string; color: string; bg: strin
   declared: { labelKey: "stageDeclared", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
   fifteenb: { labelKey: "stageFifteenB", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
   customs: { labelKey: "stageCustoms", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
-  delivered: { labelKey: "delivered", color: "text-success-600", bg: "bg-success-50 dark:bg-success-500/10", dot: "bg-success-500" },
+  // Đang ở bước giao hàng: chỉ còn thiếu hạ rỗng (TRA_CONT), chưa phải thành công.
+  delivered: { labelKey: "stageDelivered", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
+  // Đủ mọi chứng từ bắt buộc (kể cả hạ rỗng).
+  completed: { labelKey: "delivered", color: "text-success-600", bg: "bg-success-50 dark:bg-success-500/10", dot: "bg-success-500" },
 };
 
 const PROCESS_ORDER: Record<string, number> = {
@@ -54,8 +57,16 @@ const PROCESS_ORDER: Record<string, number> = {
   fifteenb: 5,
   customs: 6,
   delivered: 7,
+  completed: 8,
   cancelled: 99,
 };
+
+/** Trạng thái hiển thị: hủy / hoàn thành (đủ chứng từ) / giai đoạn đang chạy. */
+function shipmentStatusKey(shipment: Shipment): string {
+  if (shipment.status === "cancelled") return "cancelled";
+  if (shipment.status === "completed") return "completed";
+  return shipment.flowStageKey || "buying";
+}
 
 type SortKey = "orderCode" | "contractDate" | "shipName" | "supplier" | "factory" | "eta" | "status" | "receivedDocs";
 type SortDir = "asc" | "desc";
@@ -235,7 +246,7 @@ function ShipmentCard({
   t: (key: string, variables?: Record<string, string | number>) => string;
   language: "vi" | "en";
 }) {
-  const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
+  const statusKey = shipmentStatusKey(shipment);
   const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.buying;
   const statusLabel = t(sc.labelKey);
 
@@ -353,8 +364,8 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         return sortDir === "asc" ? cmp : -cmp;
       }
       if (sortKey === "status") {
-        const statusA = a.status === "cancelled" ? "cancelled" : a.flowStageKey || "buying";
-        const statusB = b.status === "cancelled" ? "cancelled" : b.flowStageKey || "buying";
+        const statusA = shipmentStatusKey(a);
+        const statusB = shipmentStatusKey(b);
         const orderA = PROCESS_ORDER[statusA] ?? 98;
         const orderB = PROCESS_ORDER[statusB] ?? 98;
         const cmp = orderA < orderB ? -1 : orderA > orderB ? 1 : 0;
@@ -504,7 +515,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
               </tr>
             ) : (
               paged.map((shipment, rowIdx) => {
-                const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
+                const statusKey = shipmentStatusKey(shipment);
                 const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.buying;
                 const statusLabel = t(sc.labelKey);
                 // Số thứ tự đếm tiếp qua các trang (trang 2 bắt đầu từ pageSize + 1).

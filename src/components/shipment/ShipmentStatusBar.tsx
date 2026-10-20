@@ -21,6 +21,8 @@ interface ShipmentStatusBarProps {
   activeStage: ShipmentFlowStageKey;
   stages: ShipmentFlowStage[];
   activeStageMessage?: string;
+  /** Đủ mọi chứng từ (kể cả hạ rỗng TRA_CONT): bước cuối hiện `Thành công`. Thiếu hạ rỗng thì bước cuối vẫn đang làm. */
+  isComplete?: boolean;
 }
 
 const STAGE_ICON: Record<ShipmentFlowStageKey, React.ReactNode> = {
@@ -30,16 +32,16 @@ const STAGE_ICON: Record<ShipmentFlowStageKey, React.ReactNode> = {
   declared: <span className="text-[9px] font-bold">TK</span>,
   fifteenb: <span className="text-[10px] font-bold">15B</span>,
   customs: <span className="flex flex-col text-[7px] font-bold leading-[7px]"><span>QDTQ</span><span>MV</span></span>,
-  delivered: <span className="flex flex-col text-[7px] font-bold leading-[7px]"><span>TRA</span><span>CONG</span></span>,
+  delivered: <span className="flex flex-col text-[7px] font-bold leading-[7px]"><span>TRA</span><span>CONT</span></span>,
 };
 
-export default function ShipmentStatusBar({ activeStage, stages, activeStageMessage }: ShipmentStatusBarProps) {
+export default function ShipmentStatusBar({ activeStage, stages, activeStageMessage, isComplete = false }: ShipmentStatusBarProps) {
   const { t } = useLanguage();
   const activeIndex = Math.max(0, stages.findIndex((s) => s.key === activeStage));
 
   const getTone = (index: number) => {
     if (index < activeIndex) return "success";
-    if (index === activeIndex) return activeStage === "delivered" ? "success" : "primary";
+    if (index === activeIndex) return isComplete ? "success" : "primary";
     return "muted";
   };
 
@@ -75,7 +77,7 @@ export default function ShipmentStatusBar({ activeStage, stages, activeStageMess
         <div className="relative z-10 grid grid-cols-7 gap-2">
           {stages.map((stage, index) => {
             const tone = getTone(index);
-            const completed = index < activeIndex || (index === activeIndex && activeStage === "delivered");
+            const completed = index < activeIndex || (index === activeIndex && isComplete);
             return (
               <div key={stage.key} className="flex min-w-0 flex-col items-center text-center">
                 <div
