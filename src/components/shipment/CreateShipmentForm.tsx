@@ -13,6 +13,7 @@ import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@
 import UploadProgressToast from "@/components/common/UploadProgressToast";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
+import OcrLoadingCard from "./OcrLoadingCard";
 
 // Trang /shipments/new (trước là modal: bấm ra ngoài / nút Back của trình duyệt làm mất form đang nhập).
 interface CreateShipmentFormProps {
@@ -359,7 +360,7 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
           {file ? file.name : t("selectPi")}
         </button>
 
-        {isAnalyzing && <p className="text-center text-sm text-gray-500">{t("analyzingPi")}</p>}
+        {isAnalyzing && <OcrLoadingCard title={t("analyzingPi")} fileName={file?.name} />}
         {duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{t("duplicateOrder", { orderCode: fields.orderCode.trim() })}</p>}
         {error && !duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{error}</p>}
 

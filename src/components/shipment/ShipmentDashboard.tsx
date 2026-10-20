@@ -15,19 +15,38 @@ import { useLanguage } from "@/context/LanguageContext";
 import { getDefaultEtaRange } from "@/utils/shipmentDateFilter";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { CREATE_SHIPMENT_PATH, shipmentDetailPath } from "@/utils/shipmentRoutes";
+import {
+  SHIPMENT_FILTER_STATE_KEY,
+  SHIPMENT_LIST_RESET_EVENT,
+  SHIPMENT_SCROLL_STATE_KEY,
+  finishShipmentListRestore,
+  markShipmentListRestore,
+  prepareShipmentListState,
+} from "@/utils/shipmentListState";
 
-// Bộ lọc và vị trí cuộn của danh sách: giữ lại khi mở trang chi tiết đơn rồi quay về.
-const FILTER_STATE_KEY = "xnk.shipmentDashboard";
-const SCROLL_STATE_KEY = "xnk.shipmentDashboard.scrollY";
-
+// Bộ lọc và vị trí cuộn của danh sách: chỉ giữ lại khi mở trang chi tiết / tạo đơn rồi quay về (xem shipmentListState).
 function readSavedFilter(): { filter?: ShipmentFilter; metric?: ShipmentStatus | "all" } {
-  if (typeof window === "undefined") return {};
+  if (typeof window === "undefined" || !prepareShipmentListState()) return {};
   try {
-    const parsed = JSON.parse(window.sessionStorage.getItem(FILTER_STATE_KEY) || "{}");
+    const parsed = JSON.parse(window.sessionStorage.getItem(SHIPMENT_FILTER_STATE_KEY) || "{}");
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
+}
+
+// Mặc định mở thẻ "Đang vận chuyển" (đơn đang theo dõi hằng ngày) trong khoảng ETA mặc định.
+function defaultShipmentFilter(etaRange: { dateFrom?: string; dateTo?: string }): ShipmentFilter {
+  return {
+    status: "shipping",
+    search: "",
+    dateFrom: etaRange.dateFrom,
+    dateTo: etaRange.dateTo,
+    dateField: "eta",
+    supplier: undefined,
+    port: undefined,
+    vessel: undefined,
+  };
 }
 
 function matchesFilterValue(source?: string, selected?: string): boolean {
@@ -119,33 +138,44 @@ export default function ShipmentDashboard() {
   const [activeMetricFilter, setActiveMetricFilter] = useState<ShipmentStatus | "all">(() => savedFilter.metric || "shipping");
   const defaultEtaRange = useMemo(() => getDefaultEtaRange(), []);
   const [filter, setFilter] = useState<ShipmentFilter>(() => ({
-    status: "shipping",
-    search: "",
-    dateFrom: defaultEtaRange.dateFrom,
-    dateTo: defaultEtaRange.dateTo,
-    dateField: "eta",
-    supplier: undefined,
-    port: undefined,
-    vessel: undefined,
+    ...defaultShipmentFilter(defaultEtaRange),
     ...(savedFilter.filter && typeof savedFilter.filter === "object" ? savedFilter.filter : {}),
   }));
+  // Đổi key để bảng mount lại với sắp xếp / trang mặc định khi bấm logo / menu lúc đang ở danh sách.
+  const [tableResetKey, setTableResetKey] = useState(0);
 
   const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
+    finishShipmentListRestore();
+  }, []);
+
+  useEffect(() => {
     try {
-      window.sessionStorage.setItem(FILTER_STATE_KEY, JSON.stringify({ filter, metric: activeMetricFilter }));
+      window.sessionStorage.setItem(SHIPMENT_FILTER_STATE_KEY, JSON.stringify({ filter, metric: activeMetricFilter }));
     } catch {
       // Trình duyệt chặn lưu trữ: chỉ mất phần nhớ bộ lọc.
     }
   }, [activeMetricFilter, filter]);
 
+  // Bấm logo / menu "Mua hàng & ETA" khi đang ở danh sách: về bộ lọc, sắp xếp, trang mặc định và lên đầu trang.
+  useEffect(() => {
+    const handleReset = () => {
+      setActiveMetricFilter("shipping");
+      setFilter(defaultShipmentFilter(getDefaultEtaRange()));
+      setTableResetKey((key) => key + 1);
+      window.scrollTo({ top: 0 });
+    };
+    window.addEventListener(SHIPMENT_LIST_RESET_EVENT, handleReset);
+    return () => window.removeEventListener(SHIPMENT_LIST_RESET_EVENT, handleReset);
+  }, []);
+
   // Quay về từ trang chi tiết: cuộn lại đúng chỗ đang xem (chỉ khi danh sách đã hiện từ cache).
   useEffect(() => {
     let savedScroll: number | null = null;
     try {
-      const raw = window.sessionStorage.getItem(SCROLL_STATE_KEY);
-      window.sessionStorage.removeItem(SCROLL_STATE_KEY);
+      const raw = window.sessionStorage.getItem(SHIPMENT_SCROLL_STATE_KEY);
+      window.sessionStorage.removeItem(SHIPMENT_SCROLL_STATE_KEY);
       savedScroll = raw == null ? null : Number(raw);
     } catch {
       savedScroll = null;
@@ -286,10 +316,11 @@ export default function ShipmentDashboard() {
 
   const handleRowClick = (shipment: Shipment) => {
     try {
-      window.sessionStorage.setItem(SCROLL_STATE_KEY, String(window.scrollY));
+      window.sessionStorage.setItem(SHIPMENT_SCROLL_STATE_KEY, String(window.scrollY));
     } catch {
       // Không lưu được thì quay về đầu trang.
     }
+    markShipmentListRestore();
     router.push(shipmentDetailPath(shipment.orderCode));
   };
 
@@ -323,7 +354,7 @@ export default function ShipmentDashboard() {
         </div>
         <div className="flex items-center gap-3">
         {canCreateShipment && (
-          <Link href={CREATE_SHIPMENT_PATH} className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600">
+          <Link href={CREATE_SHIPMENT_PATH} onClick={markShipmentListRestore} className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600">
             {t("createShipment")}
           </Link>
         )}
@@ -399,7 +430,7 @@ export default function ShipmentDashboard() {
           </div>
         </div>
       ) : (
-        <ShipmentTable shipments={filteredShipments} onRowClick={handleRowClick} />
+        <ShipmentTable key={tableResetKey} shipments={filteredShipments} onRowClick={handleRowClick} />
       )}
     </div>
   );

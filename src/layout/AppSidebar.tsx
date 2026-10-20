@@ -10,6 +10,7 @@ import { useAuth } from "../context/AuthContext";
 import { useSidebar } from "../context/SidebarContext";
 import { GridIcon, HorizontaLDots } from "../icons/index";
 import { useLanguage } from "../context/LanguageContext";
+import { useShipmentListResetLinks } from "../utils/shipmentListState";
 
 const MARKET_RESEARCH_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbx9gxbHB-b5UMbF6x9NrdDmc-abshieQ5pZfhFQRbHXhLGw-Cxv91kkssrmz0hZBabNXA/exec";
 const LEGACY_ETA_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbwlTy4uv4eGx5beJfLKRwJj-VW0H5uFxSeRbhGOstoGn4bPjjJ2-0E0xqwghxvB3R3_7g/exec";
@@ -25,6 +26,8 @@ const AppSidebar: React.FC = () => {
   const [supportOpen, setSupportOpen] = useState(pathname === "/email" || pathname === "/document-sync");
   const [catalogOpen, setCatalogOpen] = useState(pathname === "/master-data");
   const [logsOpen, setLogsOpen] = useState(pathname === "/activity-logs");
+  // Bấm logo (sidebar, header) hoặc menu "Mua hàng & ETA": danh sách đơn về bộ lọc mặc định.
+  useShipmentListResetLinks();
   // Menu hiện theo quyền thực tế của tài khoản (mức view trở lên), không theo tên role.
   const canViewLogs = can("activityLogs");
   const canViewEmailTools = can("email");
@@ -74,6 +77,7 @@ const AppSidebar: React.FC = () => {
           <li>
             <Link
               href="/"
+              data-shipment-list-reset=""
               className={`menu-item group ${
                 isShipmentsActive ? "menu-item-active" : "menu-item-inactive"
               } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
