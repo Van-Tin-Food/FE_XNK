@@ -156,6 +156,8 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return backendMessage || "Chi phí đã nằm trong đề nghị, không sửa / xóa được.";
     case "PAYMENT_COST_UNAVAILABLE":
       return backendMessage || "Chi phí đã được đưa vào đề nghị khác. Vui lòng tải lại danh sách chi phí.";
+    case "GOODS_PAYMENT_MISMATCH":
+      return backendMessage || "Cọc hàng + thanh toán tiền còn lại phải bằng tiền hàng của hợp đồng.";
     case "GOOGLE_CHAT_NOT_CONFIGURED":
       return "Google Chat chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
     case "GOOGLE_CHAT_REQUEST_FAILED":

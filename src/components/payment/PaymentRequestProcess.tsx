@@ -9,11 +9,13 @@ import { useSystemNotification } from "@/context/SystemNotificationContext";
 import {
   cancelPaymentRequest,
   confirmPaymentRequestDocuments,
+  fetchPaymentRequestPrintHtml,
+  PAYMENT_METHOD_LABEL_KEYS,
   getPaymentRequest,
   sendPaymentRequest,
   type PaymentRequest,
 } from "@/services/paymentRequestApi";
-import { formatMoney } from "@/utils/paymentRequest";
+import { formatMoney, splitVat } from "@/utils/paymentRequest";
 import PaymentDocumentsPanel from "./PaymentDocumentsPanel";
 import PaymentRequestWizard from "./PaymentRequestWizard";
 import { PaymentFlowBadge, PaymentStatusBadge, RedFlowBadge, formatDateTime, formatDueDate, isOverdue } from "./PaymentRequestParts";
@@ -74,7 +76,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel">("");
+  const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "download">("");
   const [fileCount, setFileCount] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -125,6 +127,29 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const startEdit = () => {
     setEditing(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  /** Mở bản in Giấy đề nghị thanh toán ở tab mới (xem trước → In / Lưu PDF). Mở tab ngay khi bấm để không bị chặn popup. */
+  const openPrint = async () => {
+    if (busy) return;
+    const preview = window.open("", "_blank");
+    if (!preview) {
+      notify(t("prPrintBlocked"), "error");
+      return;
+    }
+    preview.document.write(`<p style="font-family:sans-serif;padding:24px">${t("prPrintLoading")}</p>`);
+    setBusy("download");
+    try {
+      const html = await fetchPaymentRequestPrintHtml(request.id);
+      preview.document.open();
+      preview.document.write(html);
+      preview.document.close();
+    } catch (printError) {
+      preview.close();
+      notify(printError instanceof Error ? printError.message : String(printError), "error");
+    } finally {
+      setBusy("");
+    }
   };
 
   const send = async () => {
@@ -211,18 +236,37 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
             <div className="space-y-3">
               <p className="text-xs text-gray-500">{t("prCreatedBy", { name: request.creatorName || "—", time: formatDateTime(request.createdAt, language) })}</p>
               <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-                <div><dt className="text-gray-500">{t("prCurrency")}</dt><dd className="font-medium text-gray-800 dark:text-white/90">{request.currency}</dd></div>
-                <div><dt className="text-gray-500">{t("prDueDate")}</dt><dd className={`font-medium ${isOverdue(request.dueDate, request.status) ? "text-error-600" : "text-gray-800 dark:text-white/90"}`}>{formatDueDate(request.dueDate)}</dd></div>
+                {/* Hạn thanh toán · loại tiền · hình thức: chung một ô */}
+                <div className="col-span-2 sm:col-span-1"><dt className="text-gray-500">{t("prPaymentLineLabel")}</dt>
+                  <dd className="font-medium text-gray-800 dark:text-white/90">
+                    <span className={isOverdue(request.dueDate, request.status) ? "text-error-600" : ""}>{formatDueDate(request.dueDate)}</span>
+                    {` · ${request.currency} · ${request.paymentMethod ? t(PAYMENT_METHOD_LABEL_KEYS[request.paymentMethod]) : "—"}`}
+                  </dd>
+                </div>
                 <div><dt className="text-gray-500">{t("prTotal")}</dt><dd className="font-bold tabular-nums text-gray-900 dark:text-white">{money(request.total)}</dd></div>
+                {request.costs[0] && (
+                  <div><dt className="text-gray-500">{t("prCostTypeLabel")} / {t("prCostCodeLabel")}</dt><dd className="font-medium text-gray-800 dark:text-white/90">{t(`prType_${request.costs[0].type}`)} · {request.costs[0].code}</dd></div>
+                )}
+                {request.paymentMethod === "chuyen_khoan" && (
+                  <div className="col-span-2 sm:col-span-3"><dt className="text-gray-500">{t("prTransferInfo")}</dt>
+                    <dd className="whitespace-pre-line break-words font-medium text-gray-800 dark:text-white/90">{request.transferInfo || "—"}</dd></div>
+                )}
               </dl>
               <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
                 {request.costs.map((cost) => (
                   <li key={cost.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2.5">
                     <div className="min-w-0 flex-1">
-                      <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-white/90">{cost.code} <PaymentFlowBadge flow={cost.flow} /></p>
-                      <p className="truncate text-xs text-gray-500" title={cost.categoryName}>
-                        {cost.categoryName} · {cost.container ? `${t("prContainer")} ${cost.container}` : cost.contract ? `${t("prContract")} ${cost.contract}` : t("prNoTarget")}
+                      <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-white/90">
+                        <span className="break-words">{cost.categoryName}{cost.note && <span className="font-normal text-gray-600 dark:text-gray-300"> — {cost.note}</span>}</span>
+                        <PaymentFlowBadge flow={cost.flow} />
                       </p>
+                      <p className="truncate text-xs text-gray-500">
+                        {cost.code} · {cost.container ? `${t("prContainer")} ${cost.container} · ${t("prContract")} ${cost.contract}` : cost.contract ? `${t("prContract")} ${cost.contract}` : t("prNoTarget")}
+                      </p>
+                      {cost.vat && (() => {
+                        const { base, tax } = splitVat(cost.amount, String(Number(cost.vat)), request.currency);
+                        return <p className="text-xs text-gray-500">{t("prVatLine", { base: money(base), rate: String(Number(cost.vat)), tax: money(tax) })}</p>;
+                      })()}
                     </div>
                     <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{money(cost.amount)}</span>
                   </li>
@@ -233,7 +277,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
           )}
         </NodeCard>
 
-        {/* 2. Gửi đề nghị */}
+        {/* 2. Gửi đề nghị (kèm nút in / lưu PDF Giấy đề nghị thanh toán) */}
         <NodeCard index={1} title={titles[1]} state={states[1]}>
           {!sent ? (
             canManage && !cancelled ? (
@@ -257,6 +301,16 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
               )}
             </div>
           )}
+          <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+            <button type="button" onClick={() => void openPrint()} disabled={busy !== ""} title={t("prDownloadHint")}
+              className="inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium text-brand-600 hover:bg-brand-50 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-500/10">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2" />
+                <rect x="6" y="14" width="12" height="7" />
+              </svg>
+              {busy === "download" ? t("prDownloading") : t("prDownload")}
+            </button>
+          </div>
         </NodeCard>
 
         {/* 3. Duyệt / từ chối */}

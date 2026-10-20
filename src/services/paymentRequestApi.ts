@@ -24,6 +24,8 @@ export interface PaymentCategory {
   code: string;
   flow: PaymentFlow;
   name: string;
+  /** Danh mục có thuế: tạo đề nghị phải nhập % VAT (số tiền luôn là số đã gồm VAT). */
+  taxed: boolean;
 }
 
 export interface PaymentCost {
@@ -34,11 +36,22 @@ export interface PaymentCost {
   flow: PaymentFlow;
   categoryName: string;
   amount: string;
+  /** Nội dung / diễn giải khoản (ví dụ "tháng 10"). */
+  note: string;
+  /** Khoản thuộc danh mục có thuế. */
+  taxed: boolean;
+  /** % VAT (rỗng = không thuế / chưa nhập); amount đã gồm VAT. */
+  vat: string;
   container: string;
   contract: string;
   requestId: string;
   createdAt: string;
 }
+
+/** Hình thức thanh toán: tiền mặt / chuyển khoản. */
+export const PAYMENT_METHODS = ["chuyen_khoan", "tien_mat"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+export const PAYMENT_METHOD_LABEL_KEYS: Record<PaymentMethod, string> = { chuyen_khoan: "prMethod_chuyen_khoan", tien_mat: "prMethod_tien_mat" };
 
 export interface PaymentRequest {
   id: string;
@@ -46,6 +59,10 @@ export interface PaymentRequest {
   creatorName: string;
   content: string;
   currency: PaymentCurrency;
+  /** Hình thức thanh toán; rỗng = đề nghị cũ chưa có. */
+  paymentMethod: PaymentMethod | "";
+  /** Chuyển khoản: thông tin người thụ hưởng (nhiều dòng: tên tài khoản, ngân hàng, số tài khoản, nội dung CK...). */
+  transferInfo: string;
   total: string;
   approverName: string;
   createdAt: string;
@@ -53,7 +70,6 @@ export interface PaymentRequest {
   dueDate: string;
   /** Link thư mục Drive hồ sơ (có sau lần upload chứng từ đầu tiên). */
   link: string;
-  /** Lúc gửi lên Google Chat; rỗng = nháp. */
   /** Đã gửi lên Google Chat (false = nháp). */
   sent: boolean;
   status: PaymentRequestStatus;
@@ -78,11 +94,17 @@ export interface PaymentCostInput {
   amount: string;
   container?: string;
   contract?: string;
+  /** Nội dung / diễn giải khoản (chi phí vận hành nhập tay). */
+  note?: string;
+  /** % VAT (khoản có thuế). */
+  vat?: string;
 }
 
 export interface PaymentRequestInput {
   content: string;
   currency: PaymentCurrency;
+  paymentMethod: PaymentMethod;
+  transferInfo: string;
   dueDate: string;
   costs: PaymentCostInput[];
 }
@@ -164,8 +186,11 @@ function normalizeCost(row: unknown): PaymentCost | null {
     type: str(row.loai_phi),
     code: str(row.ma_phi),
     flow: flowOf(row.vung_phi),
-    categoryName: str(row.ten_phi ?? row.noi_dung),
+    categoryName: str(row.ten_phi),
     amount: str(row.so_tien),
+    note: str(row.noi_dung),
+    taxed: row.co_thue === true,
+    vat: str(row.phan_tram_vat),
     container: str(row.id_container),
     contract: str(row.id_mua_hang),
     requestId: str(row.id_payment_request),
@@ -183,6 +208,8 @@ function normalizeRequest(row: unknown): PaymentRequest | null {
     creatorName: str(row.creator_name) || str(row.creator_username),
     content: str(row.noi_dung),
     currency: row.loai_tien === "USD" ? "USD" : "VND",
+    paymentMethod: (PAYMENT_METHODS as readonly string[]).includes(str(row.hinh_thuc_thanh_toan)) ? str(row.hinh_thuc_thanh_toan) as PaymentMethod : "",
+    transferInfo: str(row.thong_tin_chuyen_khoan),
     total: str(row.tong_tien),
     approverName: str(row.approver_name) || str(row.approver_username),
     createdAt: str(row.ngay_tao),
@@ -207,6 +234,8 @@ function requireRequest(payload: unknown): PaymentRequest {
 const toBody = (input: PaymentRequestInput) => ({
   noi_dung: input.content,
   loai_tien: input.currency,
+  hinh_thuc_thanh_toan: input.paymentMethod,
+  thong_tin_chuyen_khoan: input.paymentMethod === "chuyen_khoan" ? input.transferInfo : null,
   han_thanh_toan: input.dueDate,
   costs: input.costs.map((cost) => ({
     ...(cost.id ? { id_payment_cost: cost.id } : {}),
@@ -214,6 +243,8 @@ const toBody = (input: PaymentRequestInput) => ({
     so_tien: cost.amount,
     id_container: cost.container || null,
     id_mua_hang: cost.contract || null,
+    noi_dung: cost.note || null,
+    phan_tram_vat: cost.vat || null,
   })),
 });
 
@@ -248,6 +279,7 @@ export async function getPaymentRequestOptions(signal?: AbortSignal): Promise<Pa
       code: str(row.ma_phi),
       flow: flowOf(row.vung_phi),
       name: str(row.noi_dung),
+      taxed: row.co_thue === true,
     })).filter((row) => row.id),
     contracts: list(data.contracts).map((row) => ({ code: str(row.ma_hop_dong), date: str(row.ngay_hop_dong), supplier: str(row.ten_ncc) })).filter((row) => row.code),
     containers: list(data.containers).map((row) => ({ code: str(row.ma_container), contract: str(row.ma_hop_dong) })).filter((row) => row.code),
@@ -323,4 +355,26 @@ export async function uploadPaymentDocument(id: string, file: { name: string; ty
   const uploaded = normalizeDocumentFile(data.file);
   if (!uploaded) throw new Error("Phản hồi upload chứng từ không hợp lệ");
   return uploaded;
+}
+
+/** Bản in Giấy đề nghị thanh toán (Mẫu 05-TT, layout công ty): trang HTML để xem trước rồi "In / Lưu PDF". */
+export async function fetchPaymentRequestPrintHtml(id: string): Promise<string> {
+  const apiPath = `/api/payment-requests/${encodeURIComponent(id)}/print`;
+  const token = getStoredUser()?.token?.trim();
+  let response: Response;
+  try {
+    response = await fetch(backendApiUrl(apiPath), {
+      headers: { Accept: "text/html, application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw createNetworkApiError(SCOPE, "GET", apiPath, error);
+    throw error;
+  }
+  if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event("xnk:auth-expired"));
+    const { data, nonJsonPreview } = await parseApiResponse(response);
+    throw createHttpApiError(SCOPE, "GET", apiPath, response, data, nonJsonPreview);
+  }
+  return response.text();
 }

@@ -4,7 +4,7 @@ import { createHttpApiError, createInvalidResponseError, createNetworkApiError, 
 import type { PaymentFlow, PaymentRequestStatus } from "@/services/paymentRequestApi";
 
 // Tab "Chi phí" của đơn hàng (BE: /api/payment-costs): chi phí theo container và theo hợp đồng (mã HD), mỗi ô = một dòng
-// payment_cost (container trống = phí theo hợp đồng). Kèm trạng thái thanh toán quốc tế của hợp đồng cho tab Tổng quan.
+// payment_cost (container trống = phí theo hợp đồng). Kèm trạng thái thanh toán tiền hàng (cọc / còn lại) của hợp đồng cho tab Tổng quan.
 
 export interface CostCategory {
   id: string;
@@ -12,6 +12,8 @@ export interface CostCategory {
   code: string;
   flow: PaymentFlow;
   name: string;
+  /** Danh mục có thuế: tạo đề nghị phải nhập % VAT. */
+  taxed: boolean;
 }
 
 export interface OrderCost {
@@ -20,6 +22,10 @@ export interface OrderCost {
   container: string;
   categoryId: string;
   amount: string;
+  /** Nội dung / diễn giải khoản. */
+  note: string;
+  /** % VAT (rỗng = không thuế / chưa nhập); số tiền đã gồm VAT. */
+  vat: string;
   requestId: string;
   requestStatus: PaymentRequestStatus | null;
 }
@@ -27,9 +33,9 @@ export interface OrderCost {
 export interface OrderCosts {
   contract: string;
   cancelled: boolean;
-  /** Đơn đã qua vận chuyển biển (đã giao): không nhập thêm thanh toán quốc tế. */
+  /** Đơn đã qua vận chuyển biển (đã giao): không nhập thêm cọc / thanh toán còn lại. */
   seaPassed: boolean;
-  /** Tổng tiền hàng (chỉ có khi được xem tiền hàng) để điền sẵn thanh toán quốc tế. */
+  /** Tổng tiền hàng (chỉ có khi được xem tiền hàng) để tính sẵn thanh toán còn lại = tiền hàng - cọc. */
   goodsTotal: string;
   containers: string[];
   categories: CostCategory[];
@@ -43,6 +49,8 @@ export interface OrderCostChange {
   categoryId: string;
   /** null = xoá ô. */
   amount: string | null;
+  /** Nội dung / diễn giải khoản (trống = không ghi). */
+  note?: string;
 }
 
 const SCOPE = "Chi phí đơn hàng";
@@ -94,12 +102,15 @@ function normalize(payload: unknown): OrderCosts {
       code: str(row.ma_phi),
       flow: row.vung_phi === "do" || row.vung_phi === "vang" ? row.vung_phi : "xanh",
       name: str(row.noi_dung),
+      taxed: row.co_thue === true,
     })).filter((row) => row.id),
     costs: list(data.costs).map((row) => ({
       id: str(row.id_payment_cost),
       container: str(row.id_container),
       categoryId: str(row.id_payment_category),
       amount: str(row.so_tien),
+      note: str(row.noi_dung),
+      vat: str(row.phan_tram_vat),
       requestId: str(row.id_payment_request),
       requestStatus: row.request_status === null || row.request_status === undefined ? null : Number(row.request_status) as PaymentRequestStatus,
     })),
@@ -118,23 +129,47 @@ export async function saveOrderCosts(contract: string, changes: OrderCostChange[
       id_container: change.container || null,
       id_payment_category: change.categoryId,
       so_tien: change.amount,
+      noi_dung: change.note || null,
     })),
   }));
 }
 
-export interface InternationalPaymentStatus {
-  /** delivered: chưa có đề nghị duyệt nhưng đơn đã qua vận chuyển biển (đã giao) — coi như đã thanh toán. */
-  status: "approved" | "delivered" | "not_approved";
-  requests: Array<{ id: string; status: PaymentRequestStatus }>;
+/**
+ * Thanh toán tiền hàng (quốc tế) chia 2 đợt, mã HD, nhận theo đúng tên trong danh mục (khớp GOODS_PAYMENTS ở BE):
+ * Cọc hàng + Thanh toán tiền còn lại = tiền hàng của hợp đồng.
+ */
+export type GoodsPaymentKind = "deposit" | "balance";
+const GOODS_PAYMENT_NAMES: Record<GoodsPaymentKind, string> = { deposit: "cọc hàng", balance: "thanh toán tiền còn lại" };
+export function goodsPaymentKind(category: { code: string; name: string } | null | undefined): GoodsPaymentKind | null {
+  if (!category || category.code.trim().toUpperCase() !== "HD") return null;
+  const name = category.name.trim().toLowerCase();
+  return (Object.keys(GOODS_PAYMENT_NAMES) as GoodsPaymentKind[]).find((kind) => GOODS_PAYMENT_NAMES[kind] === name) || null;
 }
 
-/** Hợp đồng đã được duyệt thanh toán quốc tế chưa (tab Tổng quan, không có số tiền). */
+/** delivered: chưa có đề nghị duyệt nhưng đơn đã qua vận chuyển biển (đã giao) — coi như đã thanh toán. */
+export type GoodsPaymentState = "approved" | "delivered" | "not_approved";
+type RequestRef = { id: string; status: PaymentRequestStatus };
+
+export interface InternationalPaymentStatus {
+  /** Trạng thái chung = đợt thanh toán còn lại (đã trả đủ tiền hàng). */
+  status: GoodsPaymentState;
+  requests: RequestRef[];
+  /** Từng đợt: cọc hàng, thanh toán tiền còn lại. */
+  items: Array<{ key: GoodsPaymentKind; status: GoodsPaymentState; requests: RequestRef[] }>;
+}
+
+/** Hợp đồng đã được duyệt thanh toán tiền hàng (cọc / còn lại) chưa (tab Tổng quan, không có số tiền). */
 export async function getInternationalPaymentStatus(contract: string): Promise<InternationalPaymentStatus> {
   const payload = await request("GET", `/international-payment?contract=${encodeURIComponent(contract)}`);
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
+  const state = (value: unknown): GoodsPaymentState => (value === "approved" || value === "delivered" ? value : "not_approved");
+  const refs = (value: unknown): RequestRef[] => (Array.isArray(value) ? value : []).filter(isRecord).map((row) => ({ id: str(row.id), status: Number(row.status) as PaymentRequestStatus }));
   return {
-    status: data.status === "approved" || data.status === "delivered" ? data.status : "not_approved",
-    requests: (Array.isArray(data.requests) ? data.requests : []).filter(isRecord).map((row) => ({ id: str(row.id), status: Number(row.status) as PaymentRequestStatus })),
+    status: state(data.status),
+    requests: refs(data.requests),
+    items: (Array.isArray(data.items) ? data.items : []).filter(isRecord)
+      .filter((row) => row.key === "deposit" || row.key === "balance")
+      .map((row) => ({ key: row.key as GoodsPaymentKind, status: state(row.status), requests: refs(row.requests) })),
   };
 }
 
@@ -149,6 +184,10 @@ export interface MyCost {
   container: string;
   categoryId: string;
   categoryName: string;
+  /** Nội dung / diễn giải khoản. */
+  note: string;
+  /** % VAT (rỗng = không thuế); số tiền đã gồm VAT. */
+  vat: string;
   code: string;
   amount: string;
   createdAt: string;
@@ -177,6 +216,8 @@ export async function listMyCosts(params: { scope: MyCostScope; q?: string; limi
       container: str(row.id_container),
       categoryId: str(row.id_payment_category),
       categoryName: str(row.ten_phi),
+      note: str(row.noi_dung),
+      vat: str(row.phan_tram_vat),
       code: str(row.ma_phi),
       amount: str(row.so_tien),
       createdAt: str(row.ngay_tao),
@@ -189,9 +230,9 @@ export async function listMyCosts(params: { scope: MyCostScope; q?: string; limi
   };
 }
 
-/** Sửa số tiền chi phí của mình (chưa thuộc đề nghị nào). */
-export async function updateMyCost(id: string, amount: string): Promise<void> {
-  await request("PUT", `/mine/${encodeURIComponent(id)}`, { so_tien: amount });
+/** Sửa số tiền + nội dung chi phí của mình (chưa thuộc đề nghị nào). */
+export async function updateMyCost(id: string, amount: string, note: string): Promise<void> {
+  await request("PUT", `/mine/${encodeURIComponent(id)}`, { so_tien: amount, noi_dung: note });
 }
 
 /** Xóa chi phí của mình (chỉ khi chưa thuộc đề nghị nào). */

@@ -104,3 +104,41 @@ export function amountForInput(value: string | null | undefined, currency: Payme
   if (currency === "VND" || fraction === "00") return integer;
   return `${integer}.${fraction}`;
 }
+
+// ---------- VAT: số tiền lưu luôn là số ĐÃ GỒM VAT; % VAT lưu riêng (payment_cost.phan_tram_vat) ----------
+
+/** "8", "8,5", "10%" → "8" / "8.5" / "10"; ngoài 0 - 100 hoặc quá 2 chữ số thập phân → null. Trống → null. */
+export function parseVatInput(value: string): string | null {
+  const raw = String(value ?? "").replace(/\s+/g, "").replace(/%$/, "").replace(",", ".");
+  if (!/^\d{1,3}(\.\d{1,2})?$/.test(raw) || Number(raw) > 100) return null;
+  return String(Number(raw));
+}
+
+/** % VAT → phần vạn (8.5% → 850n). */
+const vatBasis = (vat: string) => BigInt(Math.round(Number(vat) * 100));
+/** Chia làm tròn nửa lên cho số không âm. */
+const roundDiv = (a: bigint, b: bigint) => (a * BigInt(2) + b) / (b * BigInt(2));
+const centsToAmount = (cents: bigint) => `${cents / BigInt(100)}.${(cents % BigInt(100)).toString().padStart(2, "0")}`;
+/** Bước làm tròn theo loại tiền: VND tròn đồng, USD (hoặc chưa biết) tròn xu. */
+const roundStep = (currency?: PaymentCurrency | "") => BigInt(currency === "VND" ? 100 : 1);
+
+/** Tách số tiền đã gồm VAT: trước thuế = tổng / (1 + %VAT), VAT = tổng - trước thuế. */
+export function splitVat(amount: string, vat: string, currency?: PaymentCurrency | ""): { base: string; tax: string } {
+  const total = amountToCents(amount);
+  if (!vat) return { base: centsToAmount(total), tax: "0.00" };
+  const step = roundStep(currency);
+  const base = roundDiv(total * BigInt(10000), (BigInt(10000) + vatBasis(vat)) * step) * step;
+  return { base: centsToAmount(base), tax: centsToAmount(total - base) };
+}
+
+/** Tổng gồm VAT từ tiền trước thuế: trước thuế × (1 + %VAT). */
+export function addVat(base: string, vat: string, currency?: PaymentCurrency | ""): string {
+  const step = roundStep(currency);
+  return centsToAmount(roundDiv(amountToCents(base) * (BigInt(10000) + vatBasis(vat || "0")), BigInt(10000) * step) * step);
+}
+
+/** a - b (chuỗi số tiền), không sai số dấu phẩy động; âm → null. */
+export function subtractAmounts(a: string | null | undefined, b: string | null | undefined): string | null {
+  const cents = amountToCents(a) - amountToCents(b);
+  return cents < BigInt(0) ? null : centsToAmount(cents);
+}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { amountForInput, amountToCents, formatAmount, formatMoney, parseAmountInput, parseAmountLoose, sumAmounts } from "../src/utils/paymentRequest.ts";
+import { addVat, amountForInput, amountToCents, formatAmount, formatMoney, parseAmountInput, parseAmountLoose, parseVatInput, splitVat, subtractAmounts, sumAmounts } from "../src/utils/paymentRequest.ts";
 
 test("đọc số tiền khi chưa biết loại tiền: phân biệt dấu nghìn và phần lẻ", () => {
   assert.equal(parseAmountLoose("1.250.000"), "1250000");
@@ -48,4 +48,22 @@ test("hiển thị tiền theo loại tiền và ngôn ngữ", () => {
   assert.equal(amountForInput("1250000.00", "VND"), "1250000");
   assert.equal(amountForInput("18500.50", "USD"), "18500.50");
   assert.equal(amountForInput("100.00", "USD"), "100");
+});
+
+test("VAT: số tiền đã gồm VAT tách ra trước thuế / VAT, tính ngược tổng từ trước thuế", () => {
+  assert.deepEqual(splitVat("1080000", "8", "VND"), { base: "1000000.00", tax: "80000.00" });
+  assert.deepEqual(splitVat("1080000", "8.5", "VND"), { base: "995392.00", tax: "84608.00" }, "VND làm tròn đồng");
+  assert.deepEqual(splitVat("100", "10", "USD"), { base: "90.91", tax: "9.09" });
+  assert.deepEqual(splitVat("500000", "", "VND"), { base: "500000.00", tax: "0.00" }, "không thuế");
+  assert.equal(addVat("1000000", "8", "VND"), "1080000.00");
+  assert.equal(addVat("90.91", "10", "USD"), "100.00");
+  assert.equal(parseVatInput("8,5%"), "8.5");
+  assert.equal(parseVatInput("0"), "0");
+  assert.equal(parseVatInput("101"), null);
+  assert.equal(parseVatInput(""), null);
+});
+
+test("cọc + còn lại: còn lại = tiền hàng - cọc, cọc vượt tiền hàng thì null", () => {
+  assert.equal(subtractAmounts("40500.00", "12150"), "28350.00");
+  assert.equal(subtractAmounts("100", "100.01"), null);
 });

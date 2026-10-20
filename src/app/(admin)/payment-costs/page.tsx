@@ -39,7 +39,7 @@ export default function MyCostsPage() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [reloadKey, setReloadKey] = useState(0);
   // Khoản đang sửa số tiền (id -> giá trị đang gõ).
-  const [editing, setEditing] = useState<{ id: string; amount: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; amount: string; note: string } | null>(null);
   const [busy, setBusy] = useState("");
 
   useEffect(() => {
@@ -90,7 +90,7 @@ export default function MyCostsPage() {
     if (amount === null) return notify(t("pcAmountRequired"), "error");
     setBusy(cost.id);
     try {
-      await updateMyCost(cost.id, amount);
+      await updateMyCost(cost.id, amount, editing.note.trim());
       notify(t("mcSaved"), "success");
       setEditing(null);
       reload();
@@ -120,10 +120,23 @@ export default function MyCostsPage() {
   /** Số tiền (hoặc ô sửa) + nút thao tác của một khoản; dùng chung cho thẻ (điện thoại) và bảng (màn lớn). */
   const amountCell = (cost: MyCost) => (editing?.id === cost.id ? (
     <input inputMode="decimal" autoFocus value={editing.amount} aria-label={t("prCostAmount")}
-      onChange={(event) => setEditing({ id: cost.id, amount: event.target.value })}
+      onChange={(event) => setEditing({ ...editing, amount: event.target.value })}
       onKeyDown={(event) => { if (event.key === "Enter") void saveAmount(cost); if (event.key === "Escape") setEditing(null); }}
       className={`${INPUT} text-right tabular-nums`} />
-  ) : <span className="font-semibold tabular-nums text-gray-900 dark:text-white">{formatAmount(cost.amount, language)}</span>);
+  ) : (
+    <span className="font-semibold tabular-nums text-gray-900 dark:text-white">
+      {formatAmount(cost.amount, language)}
+      {cost.vat && <span className="block text-[11px] font-normal text-gray-500">{t("prVatIncludedRate", { rate: String(Number(cost.vat)) })}</span>}
+    </span>
+  ));
+
+  /** Nội dung (diễn giải) của khoản: đang sửa thì là ô nhập. */
+  const noteCell = (cost: MyCost) => (editing?.id === cost.id ? (
+    <input value={editing.note} maxLength={500} placeholder={t("pcNotePlaceholder")} aria-label={t("prCostNote")}
+      onChange={(event) => setEditing({ ...editing, note: event.target.value })}
+      onKeyDown={(event) => { if (event.key === "Enter") void saveAmount(cost); if (event.key === "Escape") setEditing(null); }}
+      className={`${INPUT} mt-1`} />
+  ) : cost.note ? <p className="break-words text-xs text-gray-600 dark:text-gray-300">{cost.note}</p> : null);
 
   const actions = (cost: MyCost) => {
     if (cost.requestId) {
@@ -144,7 +157,7 @@ export default function MyCostsPage() {
     }
     return (
       <span className="flex gap-2">
-        <button type="button" onClick={() => setEditing({ id: cost.id, amount: formatAmount(cost.amount, "vi") })} disabled={Boolean(busy)}
+        <button type="button" onClick={() => setEditing({ id: cost.id, amount: formatAmount(cost.amount, "vi"), note: cost.note })} disabled={Boolean(busy)}
           className={`${ACTION} border border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800`}>✎ {t("mcEdit")}</button>
         <button type="button" onClick={() => void remove(cost)} disabled={Boolean(busy)}
           className={`${ACTION} border border-error-200 text-error-600 hover:bg-error-50 dark:border-error-500/30 dark:text-error-400 dark:hover:bg-error-500/10`}>{busy === cost.id ? t("prSaving") : t("mcDelete")}</button>
@@ -197,6 +210,7 @@ export default function MyCostsPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="break-words text-sm font-medium text-gray-800 dark:text-white/90">{cost.categoryName}</p>
+                      {noteCell(cost)}
                       <p className="truncate text-xs text-gray-500">{kindLabel(cost)}{targetLabel(cost) ? ` · ${targetLabel(cost)}` : ""}</p>
                     </div>
                     {editing?.id !== cost.id && <span className="shrink-0 text-base">{amountCell(cost)}</span>}
@@ -227,6 +241,7 @@ export default function MyCostsPage() {
                     <tr key={cost.id} className="align-middle">
                       <td className="px-4 py-3">
                         <p className="truncate text-sm font-medium text-gray-800 dark:text-white/90" title={cost.categoryName}>{cost.categoryName}</p>
+                        {noteCell(cost)}
                         <p className="text-xs text-gray-400">{cost.code}</p>
                       </td>
                       <td className="px-4 py-3">
