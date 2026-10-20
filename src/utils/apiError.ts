@@ -162,6 +162,20 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Google Chat chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
     case "GOOGLE_CHAT_REQUEST_FAILED":
       return "Không gửi được lên Google Chat. Vui lòng thử lại sau.";
+    // Lỗi ràng buộc PostgreSQL từ API bảng nghiệp vụ: BE đã ghi rõ trường + giá trị sai (databaseErrorMessage.js).
+    case "23505":
+      return backendMessage || "Dữ liệu bị trùng với bản ghi đã có. Vui lòng nhập giá trị khác.";
+    case "23503":
+      return backendMessage || "Dữ liệu liên kết không hợp lệ (danh mục không có hoặc đang được dùng).";
+    case "23502":
+      return backendMessage || "Còn trường bắt buộc chưa nhập.";
+    case "23514":
+    case "22001":
+    case "22003":
+    case "22P02":
+    case "22007":
+    case "22008":
+      return backendMessage || "Có giá trị chưa đúng định dạng hoặc quá giới hạn. Vui lòng kiểm tra lại.";
     default:
       break;
   }

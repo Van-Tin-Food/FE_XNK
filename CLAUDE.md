@@ -35,14 +35,24 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
 - `src/i18n/translations.js` — chuỗi giao diện, hai ngôn ngữ `vi` và `en`, dùng `t("key", { biến })`.
 - `src/utils/apiError.ts` — `getFriendlyMessage` đổi mã lỗi BE thành câu cho người dùng. Mã lỗi BE mới
   phải thêm ở đây, nếu không người dùng chỉ thấy câu chung chung theo HTTP status.
-- `src/components/shipment/ShipmentDetailModal.tsx` (~3.600 dòng) — chi tiết đơn, tab chứng từ, OCR,
-  trả cont. Sửa cục bộ, không tái cấu trúc khi không được yêu cầu.
+- Đơn hàng là các trang riêng, không dùng modal (bấm ra ngoài / nút Back trình duyệt làm mất form):
+  danh sách `/` (`ShipmentDashboard`), chi tiết `/shipments/<mã đơn>?tab=...` (`app/(admin)/shipments/[orderCode]`),
+  tạo đơn `/shipments/new`. Đường dẫn lấy từ `utils/shipmentRoutes.ts`. `getCachedShipments()` giữ lần tải danh sách
+  gần nhất để chuyển qua lại hiện ngay; bộ lọc / trang / sắp xếp của danh sách lưu sessionStorage.
+  Đang sửa / chờ xác nhận OCR / đang upload: `hooks/useLeaveGuard` hỏi trước khi rời trang (nút Back trình duyệt, link
+  trong app, đóng tab); tự chuyển trang sau khi đã hỏi / đã lưu thì gọi `allowLeave()` trước. Mở khung xem file (từ md) thì như modal cũ:
+  nền mờ phủ trang, nội dung đơn nổi ở nửa trái, file (trình xem Google Drive) ở nửa phải.
+- `src/components/shipment/ShipmentDetailView.tsx` (~3.800 dòng) — chi tiết đơn: chứng từ, OCR (“Lưu và cập nhật”
+  hoặc “Chỉ lưu file”), tab Chi tiết nhập tay số kiện / NET / tiền / B/L / container, trả cont. Sửa cục bộ, không tái
+  cấu trúc khi không được yêu cầu. Mã vị trí nhật ký vẫn là `ShipmentDetailModal/...` (log cũ dùng mã này).
+- Tracking hãng tàu: bấm số B/L / container (`TrackingCodeButton`, link hãng ở `utils/carrierTracking.ts`), không còn tab
+  Hành trình. Quyền `tracking`.
 
 ## Nghiệp vụ chứng từ (dễ làm sai)
 
 - Danh sách mã chứng từ lặp ở nhiều nơi, phải sửa đồng bộ với BE (`be/src/config/documentStages.js`,
   `googleDrive.js`): `DOCUMENT_CODES` + `DOCUMENT_FIELD_MAP` (`shipmentApi.ts`), `DRIVE_DOCUMENT_FIELD_MAP`
-  (`postgresShipmentApi.ts`), `DOCUMENT_DISPLAY_ORDER` / `FLOW_STAGES` (`ShipmentDetailModal.tsx`),
+  (`postgresShipmentApi.ts`), `DOCUMENT_DISPLAY_ORDER` / `FLOW_STAGES` (`ShipmentDetailView.tsx`),
   trang `user-guide`.
 - Mã `TRA_CONT` ↔ cột DB `tra_cong`. `TRA_CONT` và `INSPECTION` bắt buộc chọn số container (hoặc thư mục
   ảnh đã có với INSPECTION) trước khi upload; file nằm trong thư mục container trên Drive.
@@ -52,6 +62,9 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
   file thẳng lên Google Drive (`utils/driveResumableUpload.ts`, từng phần 8 MB), BE xác nhận rồi lưu DB. Không gửi file
   base64 qua gateway: gateway chạy trên Vercel, giới hạn 4,5 MB mỗi request. Tối đa 1 GB/file
   (`MAX_DOCUMENT_UPLOAD_BYTES`); file OCR vẫn qua gateway nên tối đa `MAX_OCR_FILE_BYTES` (4 MB).
+- Mỗi lượt upload truyền `batch: createUploadBatch(số file)` để BE gửi **một** thông báo Google Chat cho cả lượt; có file
+  lỗi thì gọi `finishDocumentUploadBatch` để gửi phần đã lưu. Upload chứng từ mới phải truyền batch, nếu không BE gom theo
+  thời gian chờ.
 - Upload PI cần `shipments:edit`, chứng từ khác cần `documents:edit` (`canUploadDocumentType`); tab Chi tiết sửa theo
   `shipments:edit`, hủy đơn theo `shipmentCancel:edit`.
 - Tiền hàng theo chức năng `purchaseAmounts`, liên hệ nhà cung cấp theo `supplierContact` (BE cũng ẩn cột khi thiếu quyền).

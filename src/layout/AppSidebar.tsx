@@ -20,6 +20,8 @@ const AppSidebar: React.FC = () => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const showText = isExpanded || isHovered || isMobileOpen;
+  // Danh sách đơn ở trang chủ; chi tiết / tạo đơn ở /shipments/...
+  const isShipmentsActive = pathname === "/" || pathname.startsWith("/shipments/");
   const [supportOpen, setSupportOpen] = useState(pathname === "/email" || pathname === "/document-sync");
   const [catalogOpen, setCatalogOpen] = useState(pathname === "/master-data");
   const [logsOpen, setLogsOpen] = useState(pathname === "/activity-logs");
@@ -74,12 +76,12 @@ const AppSidebar: React.FC = () => {
             <Link
               href="/"
               className={`menu-item group ${
-                pathname === "/" ? "menu-item-active" : "menu-item-inactive"
+                isShipmentsActive ? "menu-item-active" : "menu-item-inactive"
               } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
             >
               <span
                 className={
-                  pathname === "/"
+                  isShipmentsActive
                     ? "menu-item-icon-active"
                     : "menu-item-icon-inactive"
                 }

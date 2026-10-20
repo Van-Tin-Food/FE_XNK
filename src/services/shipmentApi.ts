@@ -175,7 +175,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = `/api/${path.replace(/^\//, "")}`;
   const scope = path.startsWith("ocr/")
     ? "OCR"
-    : ["uploadDocument", "startDocumentUpload", "completeDocumentUpload", "checkDocumentFileNames", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
+    : ["uploadDocument", "startDocumentUpload", "completeDocumentUpload", "finishDocumentUploadBatch", "checkDocumentFileNames", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
       ? "Drive"
       : "Backend";
   try {
@@ -260,7 +260,25 @@ function driveDocumentMap(rows: DriveDocumentRecord[]): Map<string, DriveDocumen
   return map;
 }
 
-export async function fetchShipments(): Promise<{ shipments: Shipment[]; lastUpdated: string; updatedBy: string }> {
+export type ShipmentListResult = { shipments: Shipment[]; lastUpdated: string; updatedBy: string };
+
+// Lần tải danh sách gần nhất: danh sách đơn và trang chi tiết đơn (/shipments/<mã>) hiện ngay khi chuyển qua lại,
+// rồi mới tải lại ngầm. Khoá theo token để đổi tài khoản không thấy dữ liệu (đã lọc theo quyền) của người trước.
+let shipmentListCache: { token: string; result: ShipmentListResult } | null = null;
+
+export function getCachedShipments(): ShipmentListResult | null {
+  const token = getStoredUser()?.token || "";
+  return shipmentListCache && shipmentListCache.token === token ? shipmentListCache.result : null;
+}
+
+export async function fetchShipments(): Promise<ShipmentListResult> {
+  const token = getStoredUser()?.token || "";
+  const result = await loadShipmentList();
+  shipmentListCache = { token, result };
+  return result;
+}
+
+async function loadShipmentList(): Promise<ShipmentListResult> {
   const database = await fetchPostgresShipmentListSnapshot();
   const totalMap = database.driveDocuments ? driveDocumentMap(database.driveDocuments) : await fetchDriveDocumentMap();
   const index = buildRelationIndex(database);
@@ -556,9 +574,37 @@ export interface DocumentUploadTarget {
   containerFolderName?: string;
 }
 
+/**
+ * Lượt upload để BE gom thông báo Google Chat: chọn 20 ảnh một lần = một tin "đã upload 20 file".
+ * batchTotal = số file của lượt; có file lỗi thì gọi finishDocumentUploadBatch để gửi phần đã lưu.
+ */
+export interface DocumentUploadBatch {
+  batchId: string;
+  batchTotal: number;
+}
+
 export interface UploadDocumentInput extends DocumentUploadTarget {
   file: File;
   requestId: string;
+  batch?: DocumentUploadBatch;
+}
+
+/** Tạo lượt upload mới cho số file người dùng vừa chọn. */
+export function createUploadBatch(batchTotal: number): DocumentUploadBatch {
+  return { batchId: crypto.randomUUID(), batchTotal };
+}
+
+/** Lượt upload có file lỗi: báo BE gửi ngay thông báo Google Chat cho các file đã lưu. Lỗi ở đây bỏ qua. */
+export async function finishDocumentUploadBatch(batch: DocumentUploadBatch, documentCode: string): Promise<void> {
+  try {
+    await requestJson("finishDocumentUploadBatch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uploadBatchId: batch.batchId, documentCode }),
+    });
+  } catch {
+    // Thông báo Chat không quan trọng bằng upload; BE tự gửi sau một thời gian chờ.
+  }
 }
 
 export type { UploadProgress };
@@ -618,7 +664,7 @@ export async function uploadDocument(
   input: UploadDocumentInput,
   options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal } = {},
 ): Promise<DriveDataResponse> {
-  const { file, requestId, ...target } = input;
+  const { file, requestId, batch, ...target } = input;
   if (file.size <= 0) throw new Error(`File ${file.name} rỗng, không upload được`);
   if (file.size > MAX_DOCUMENT_UPLOAD_BYTES) throw new Error(`File ${file.name} vượt quá dung lượng tối đa 1 GB`);
   let result: DriveDataResponse;
@@ -639,6 +685,7 @@ export async function uploadDocument(
       idChiTiet: target.idChiTiet,
       transportCode: target.transportCode,
       requestId,
+      ...(batch ? { uploadBatchId: batch.batchId, uploadBatchTotal: batch.batchTotal } : {}),
     });
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error

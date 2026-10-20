@@ -1,9 +1,10 @@
 "use client";
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import type { Shipment } from "@/types/shipment";
 import { useLanguage } from "@/context/LanguageContext";
 import { paginateItems } from "@/utils/pagination";
 import PaginationControls from "@/components/common/PaginationControls";
+import { BillContainerTrackingList, hasTextSelection } from "./TrackingCodeButton";
 
 interface ShipmentTableProps {
   shipments: Shipment[];
@@ -11,6 +12,28 @@ interface ShipmentTableProps {
 }
 
 const DEFAULT_PAGE_SIZE = 15;
+// Sắp xếp / trang đang xem: giữ lại khi mở chi tiết đơn rồi quay về danh sách.
+const TABLE_STATE_KEY = "xnk.shipmentTable";
+const LIST_CONTAINER_LIMIT = 3;
+
+type TableState = { sortKey: SortKey; sortDir: SortDir; page: number; pageSize: number };
+
+/** Chỉ nhận giá trị hợp lệ; trang này chỉ render ở trình duyệt sau khi đăng nhập nên đọc được ngay lúc khởi tạo state. */
+function readTableState(): Partial<TableState> {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(TABLE_STATE_KEY) || "{}") as Partial<TableState>;
+    if (!parsed || typeof parsed !== "object") return {};
+    return {
+      ...(parsed.sortKey && SORT_OPTIONS.some((option) => option.value === parsed.sortKey) ? { sortKey: parsed.sortKey } : {}),
+      ...(parsed.sortDir === "asc" || parsed.sortDir === "desc" ? { sortDir: parsed.sortDir } : {}),
+      ...(Number.isInteger(parsed.page) && Number(parsed.page) > 0 ? { page: Number(parsed.page) } : {}),
+      ...(Number.isInteger(parsed.pageSize) && Number(parsed.pageSize) > 0 ? { pageSize: Number(parsed.pageSize) } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
 
 const STATUS_CONFIG: Record<string, { labelKey: string; color: string; bg: string; dot: string }> = {
   cancelled: { labelKey: "cancelledStatus", color: "text-error-600 dark:text-error-400", bg: "bg-error-50 dark:bg-error-500/10", dot: "bg-error-500" },
@@ -97,6 +120,27 @@ function formatContractDate(value: unknown): string {
 
 function formatProductNames(value: string): string {
   return value.split(/\s*,\s*/).filter(Boolean).join("\n");
+}
+
+function factoryNameOf(shipment: Shipment): string {
+  return String(shipment.summaryFields?.["Tên nhà máy"] || shipment.factoryCode || "").trim();
+}
+
+/** Tên hàng (mỗi mặt hàng một dòng), tên nhà máy ngay bên dưới. */
+function ProductFactoryText({ shipment, className = "" }: { shipment: Shipment; className?: string }) {
+  const factory = factoryNameOf(shipment);
+  return (
+    <div className={`min-w-0 ${className}`}>
+      <p className="w-full whitespace-pre-line break-words text-sm font-medium text-gray-800 dark:text-white/90" title={shipment.shipName}>
+        {formatProductNames(shipment.shipName) || "—"}
+      </p>
+      {factory && (
+        <p className="mt-0.5 break-words text-xs text-gray-500 dark:text-gray-400" title={factory}>
+          {factory}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function parseDateStart(value: string | undefined): number | null {
@@ -215,29 +259,25 @@ function ShipmentCard({
           <p className="truncate font-mono text-sm font-semibold text-brand-600 dark:text-brand-400" title={shipment.orderCode}>
             {shipment.orderCode}
           </p>
-          <p className="mt-1 whitespace-pre-line break-words text-sm font-medium text-gray-800 dark:text-white/90" title={shipment.shipName}>
-            {formatProductNames(shipment.shipName)}
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            {t("contractDate")}: {formatContractDate(shipment.database?.purchase?.ngay_hop_dong)}
           </p>
+          <ProductFactoryText shipment={shipment} className="mt-2" />
         </div>
       </div>
 
-      <div className="my-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-100 pt-3 dark:border-gray-700">
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("contractDate")}</p>
-          <p className="mt-0.5 truncate text-xs font-medium text-gray-700 dark:text-gray-300">
-            {formatContractDate(shipment.database?.purchase?.ngay_hop_dong)}
-          </p>
+      {(shipment.database?.bills.length || 0) > 0 && (
+        <div className="mt-3 min-w-0 border-t border-gray-100 pt-3 dark:border-gray-700">
+          <p className="mb-1 text-[10px] uppercase tracking-wide text-gray-400">{t("billContainerColumn")}</p>
+          <BillContainerTrackingList bills={shipment.database?.bills || []} maxContainers={LIST_CONTAINER_LIMIT} />
         </div>
+      )}
+
+      <div className="my-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-100 pt-3 dark:border-gray-700">
         <div className="min-w-0">
           <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("supplier")}</p>
           <p className="mt-0.5 truncate text-xs font-medium text-gray-700 dark:text-gray-300" title={shipment.supplier}>
             {shipment.supplier || "—"}
-          </p>
-        </div>
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("factoryName")}</p>
-          <p className="mt-0.5 truncate text-xs font-medium text-gray-700 dark:text-gray-300" title={shipment.summaryFields?.["Tên nhà máy"] || shipment.factoryCode || ""}>
-            {shipment.summaryFields?.["Tên nhà máy"] || shipment.factoryCode || "—"}
           </p>
         </div>
         <div className="min-w-0">
@@ -268,10 +308,20 @@ function ShipmentCard({
 
 export default function ShipmentTable({ shipments, onRowClick }: ShipmentTableProps) {
   const { language, t } = useLanguage();
-  const [sortKey, setSortKey] = useState<SortKey>("eta");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  // Đọc ngay ở lần render đầu (không đợi effect) để quay về từ chi tiết đơn thì đúng trang trước khi cuộn về chỗ cũ.
+  const [savedState] = useState(() => readTableState());
+  const [sortKey, setSortKey] = useState<SortKey>(() => savedState.sortKey || "eta");
+  const [sortDir, setSortDir] = useState<SortDir>(() => savedState.sortDir || "asc");
+  const [page, setPage] = useState(() => savedState.page || 1);
+  const [pageSize, setPageSize] = useState(() => savedState.pageSize || DEFAULT_PAGE_SIZE);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(TABLE_STATE_KEY, JSON.stringify({ sortKey, sortDir, page, pageSize } satisfies TableState));
+    } catch {
+      // Trình duyệt chặn lưu trữ: chỉ mất phần nhớ trang / sắp xếp.
+    }
+  }, [page, pageSize, sortDir, sortKey]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -364,7 +414,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         </div>
       </div>
 
-      {/* Dạng thẻ dưới 1280px (2 cột từ 768px); bảng 9 cột cần đủ chiều ngang khi sidebar mở. */}
+      {/* Dạng thẻ dưới 1280px (2 cột từ 768px); bảng 7 cột cần đủ chiều ngang khi sidebar mở. */}
       <div className="space-y-3 p-4 xl:hidden">
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1">
@@ -402,7 +452,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
               <ShipmentCard
                 key={shipment.id}
                 shipment={shipment}
-                onClick={() => onRowClick(shipment)}
+                onClick={() => { if (!hasTextSelection()) onRowClick(shipment); }}
                 t={t}
                 language={language}
               />
@@ -411,34 +461,29 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         )}
       </div>
 
-      {/* Bảng từ 1280px, luôn đủ 9 cột. 1280–1535px (có sidebar) không đủ chỗ thì cuộn ngang trong khung bảng, không ẩn cột. */}
+      {/* Bảng từ 1280px, luôn đủ 7 cột. 1280–1535px (có sidebar) không đủ chỗ thì cuộn ngang trong khung bảng, không ẩn cột. */}
       <div className="hidden w-full xl:block xl:max-2xl:overflow-x-auto xl:max-2xl:overscroll-x-contain xl:max-2xl:custom-scrollbar">
           <table className="w-full min-w-0 table-fixed border-separate border-spacing-0 [&_td]:overflow-hidden [&_th]:overflow-hidden xl:max-2xl:min-w-[1240px]">
             <thead className="border-b border-gray-100 dark:border-gray-800">
             <tr>
-              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[4%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("sequence")}</th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("orderCode")}>
-                <div className="flex items-center gap-1.5">{t("orderNumber")} <SortIcon col="orderCode" sortKey={sortKey} sortDir={sortDir} /></div>
+              {/* Số HĐ + ngày HĐ chung một cột; bấm tiêu đề sắp xếp theo ngày hợp đồng. */}
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("contractDate")} title={t("sortByContractDate")}>
+                <div className="flex items-center gap-1.5">{t("orderNumber")} <SortIcon col="contractDate" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[9%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("contractDate")}>
-                <div className="flex items-center gap-1.5">{t("contractDate")} <SortIcon col="contractDate" sortKey={sortKey} sortDir={sortDir} /></div>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[29%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
+                <div className="flex items-center gap-1.5">{t("productAndFactory")} <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[20%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
-                <div className="flex items-center gap-1.5">{t("productName")} <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
-              </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
+              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[15%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400" title={t("trackingColumnHint")}>{t("billContainerColumn")}</th>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[13%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
                 <div className="flex items-center gap-1.5">{t("supplier")} <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
-              </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("factory")}>
-                <div className="flex items-center gap-1.5">{t("factoryName")} <SortIcon col="factory" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
                 <div className="flex items-center gap-1.5">{t("arrivalDuration")} <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
                 <div className="flex items-center gap-1.5">{t("status")} <SortIcon col="status" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
                 <div className="flex items-center gap-1.5">{t("documents")} <SortIcon col="receivedDocs" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
             </tr>
@@ -446,7 +491,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
             {paged.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-16 text-center text-sm text-gray-400">
+                <td colSpan={7} className="py-16 text-center text-sm text-gray-400">
                   <div className="flex flex-col items-center gap-2">
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
                       <circle cx="11" cy="11" r="8"/>
@@ -457,51 +502,37 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                 </td>
               </tr>
             ) : (
-              paged.map((shipment, rowIdx) => {
+              paged.map((shipment) => {
                 const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
                 const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.buying;
                 const statusLabel = t(sc.labelKey);
-                const rowNum = (safePage - 1) * pageSize + rowIdx + 1;
                 return (
                   <tr
                     key={shipment.id}
-                    onClick={() => onRowClick(shipment)}
+                    onClick={() => { if (!hasTextSelection()) onRowClick(shipment); }}
                     className="group cursor-pointer hover:bg-brand-50/40 dark:hover:bg-brand-500/5 transition-colors duration-150"
                   >
-                    {/* Row number */}
-                    <td className="py-3.5 px-4">
-                      <span className="text-xs text-gray-400 tabular-nums">{rowNum}</span>
-                    </td>
 
-                    {/* Order code */}
+                    {/* Order code + contract date */}
                     <td className="py-3.5 px-4">
                       <div className="flex flex-col gap-0.5">
                         <span className="truncate font-mono text-sm font-semibold text-brand-600 group-hover:text-brand-700 dark:text-brand-400" title={shipment.orderCode}>
                           {shipment.orderCode}
                         </span>
+                        <span className="truncate text-xs text-gray-500 dark:text-gray-400">
+                          {formatContractDate(shipment.database?.purchase?.ngay_hop_dong)}
+                        </span>
                       </div>
                     </td>
 
-                    {/* Contract date */}
+                    {/* Product + factory */}
                     <td className="py-3.5 px-4">
-                      <span className="block truncate text-xs font-medium text-gray-700 dark:text-gray-300">
-                        {formatContractDate(shipment.database?.purchase?.ngay_hop_dong)}
-                      </span>
+                      <ProductFactoryText shipment={shipment} />
                     </td>
 
-                    {/* Ship name */}
+                    {/* B/L · container: bấm để tracking, không mở chi tiết đơn */}
                     <td className="py-3.5 px-4">
-                      <div className="flex flex-col gap-0.5">
-                        {/* <p className="text-sm font-medium text-gray-800 dark:text-white/90 max-w-[200px] truncate" title={shipment.shipName}>
-                          {shipment.shipName}
-                        </p> */}
-                        <p
-                          className="w-full whitespace-pre-line break-words text-sm font-medium text-gray-800 dark:text-white/90"
-                          title={shipment.shipName}
-                        >
-                          {formatProductNames(shipment.shipName)}
-                        </p>
-                      </div>
+                      <BillContainerTrackingList bills={shipment.database?.bills || []} maxContainers={LIST_CONTAINER_LIMIT} />
                     </td>
 
                     {/* Supplier */}
@@ -519,15 +550,6 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                       </div>
                     </td>
 
-                    {/* Factory */}
-                    <td className="py-3.5 px-4">
-                      <span
-                        className="block truncate text-xs font-medium text-gray-700 dark:text-gray-300"
-                        title={shipment.summaryFields?.["Tên nhà máy"] || shipment.factoryCode || ""}
-                      >
-                        {shipment.summaryFields?.["Tên nhà máy"] || shipment.factoryCode || "—"}
-                      </span>
-                    </td>
 
                     {/* Arrival status */}
                     <td className="py-3.5 px-4">
