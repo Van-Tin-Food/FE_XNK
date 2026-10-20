@@ -5,7 +5,7 @@ import type React from "react";
 
 /**
  * Logo XNK: bấm là tải lại trang chủ (đọc lại dữ liệu và role / phân quyền mới nhất), không chuyển trang
- * kiểu SPA. Ctrl/Cmd/Shift + bấm hoặc chuột giữa vẫn mở tab mới như link thường.
+ * kiểu SPA; danh sách đơn về bộ lọc mặc định. Ctrl/Cmd/Shift + bấm hoặc chuột giữa vẫn mở tab mới như link thường.
  */
 export default function ReloadHomeLink({ className, title, ariaLabel, children }: {
   className?: string;
@@ -20,7 +20,7 @@ export default function ReloadHomeLink({ className, title, ariaLabel, children }
   };
 
   return (
-    <Link href="/" onClick={handleClick} className={className} title={title} aria-label={ariaLabel}>
+    <Link href="/" onClick={handleClick} data-shipment-list-reset="" className={className} title={title} aria-label={ariaLabel}>
       {children}
     </Link>
   );

@@ -5,6 +5,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { paginateItems } from "@/utils/pagination";
 import PaginationControls from "@/components/common/PaginationControls";
 import { BillContainerTrackingList, hasTextSelection } from "./TrackingCodeButton";
+import { SHIPMENT_TABLE_STATE_KEY } from "@/utils/shipmentListState";
 
 interface ShipmentTableProps {
   shipments: Shipment[];
@@ -12,8 +13,9 @@ interface ShipmentTableProps {
 }
 
 const DEFAULT_PAGE_SIZE = 15;
-// Sắp xếp / trang đang xem: giữ lại khi mở chi tiết đơn rồi quay về danh sách.
-const TABLE_STATE_KEY = "xnk.shipmentTable";
+// Sắp xếp / trang đang xem: giữ lại khi mở chi tiết đơn rồi quay về danh sách; vào danh sách kiểu khác thì
+// ShipmentDashboard đã xoá trước khi bảng khởi tạo (shipmentListState), bảng về mặc định.
+const TABLE_STATE_KEY = SHIPMENT_TABLE_STATE_KEY;
 const LIST_CONTAINER_LIMIT = 3;
 
 type TableState = { sortKey: SortKey; sortDir: SortDir; page: number; pageSize: number };

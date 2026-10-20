@@ -32,6 +32,7 @@ import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@
 import UploadProgressToast from "@/components/common/UploadProgressToast";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import ShipmentCostsTab from "./ShipmentCostsTab";
+import OcrLoadingCard, { InlineSpinner } from "./OcrLoadingCard";
 import InternationalPaymentStatus from "./InternationalPaymentStatus";
 
 interface ShipmentDetailViewProps {
@@ -2816,9 +2817,13 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
 
         {canUploadDocuments && (isOcrAnalyzing || ocrUploadFile || ocrUploadError) && (
           <div id="ocr-review" className="mb-5 scroll-mt-36">
-            <p className="text-sm font-semibold text-brand-700 dark:text-brand-300">
-              {isOcrAnalyzing ? t("analyzingDocument") : t("reviewBeforeSave", { document: ocrUploadDocId || "" })}
-            </p>
+            {isOcrAnalyzing ? (
+              <OcrLoadingCard title={t("analyzingDocument")} fileName={ocrUploadFile?.name} />
+            ) : (
+              <p className="text-sm font-semibold text-brand-700 dark:text-brand-300">
+                {t("reviewBeforeSave", { document: ocrUploadDocId || "" })}
+              </p>
+            )}
             {ocrUploadFile && !isOcrAnalyzing && (
               <>
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -3191,7 +3196,8 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
                         {isPassed ? t("passed") : t({ ok: "available", missing: "missing", pending: "pending", expired: "expired" }[doc.status] || "status")}
                       </span>
                       {!isArchived && canUploadDocuments && canUploadDocumentType(user, doc.id) && (
-                        <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={(event) => { event.stopPropagation(); handlePickUpload(doc.id, true); }} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                        <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={(event) => { event.stopPropagation(); handlePickUpload(doc.id, true); }} className="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                          {isOcrAnalyzing && ocrUploadDocId === doc.id && <InlineSpinner />}
                           {isOcrAnalyzing && ocrUploadDocId === doc.id ? t("analyzingDocument") : doc.status === "ok" ? t("uploadAnother") : localUploads[doc.id] ? t("uploadAnother") : t("uploadDocument")}
                         </button>
                       )}
