@@ -31,7 +31,7 @@ Frontend là giao diện người dùng của phần mềm quản lý xuất nh�
 | **Chứng từ** | Bộ chứng từ trên Google Drive (PI, INV, B/L, PKL, CO…), theo dõi tiến độ | `ShipmentDashboard` |
 | **OCR chứng từ** | Tải lên PDF/ảnh → tự bóc tách dữ liệu bằng OCR + AI | dùng trong form chứng từ |
 | **Email** | Gửi email liên hệ nhà cung cấp, lưu lịch sử gửi | `email` |
-| **Tra cứu hãng tàu** | Tra cứu vị trí container theo số B/L với 9 hãng tàu | Tab "Hành trình" trong chi tiết đơn |
+| **Tra cứu hãng tàu** | Bấm số B/L / số container để mở trang tracking của hãng tàu | Cột B/L · Container ở bảng đơn, tab Tổng quan và tab Chi tiết |
 | **Chatbox AI** | Hỏi đáp tiếng Việt / tiếng Anh về đơn hàng (chỉ đọc dữ liệu) | Nút nổi góc phải dưới |
 | **Đồng bộ chứng từ** | Quét Google Drive, tiếp nhận file chưa có trong DB | `document-sync` |
 | **Quản trị** | Tài khoản & phân quyền, nhật ký hoạt động, hướng dẫn sử dụng | `account-management`, `activity-logs`, `user-guide` |

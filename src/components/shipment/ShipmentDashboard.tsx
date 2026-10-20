@@ -1,19 +1,34 @@
 "use client";
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Shipment, ShipmentFilter, ShipmentStatus, ShipmentFilterStatus } from "@/types/shipment";
-import { fetchShipments, computeMetrics, exportEtaRows } from "@/services/shipmentApi";
+import { fetchShipments, computeMetrics, exportEtaRows, getCachedShipments } from "@/services/shipmentApi";
 import { returnItemsFromRelations } from "@/services/postgresShipmentApi";
 import { buildEtaRows, getEtaHeaders } from "@/services/shipmentExcelExport";
 import ShipmentMetrics from "./ShipmentMetrics";
 import DashboardInfoBar from "./DashboardInfoBar";
 import ShipmentFilters from "./ShipmentFilters";
 import ShipmentTable from "./ShipmentTable";
-import ShipmentDetailModal from "./ShipmentDetailModal";
-import CreateShipmentModal from "./CreateShipmentModal";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { getDefaultEtaRange } from "@/utils/shipmentDateFilter";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
+import { CREATE_SHIPMENT_PATH, shipmentDetailPath } from "@/utils/shipmentRoutes";
+
+// Bộ lọc và vị trí cuộn của danh sách: giữ lại khi mở trang chi tiết đơn rồi quay về.
+const FILTER_STATE_KEY = "xnk.shipmentDashboard";
+const SCROLL_STATE_KEY = "xnk.shipmentDashboard.scrollY";
+
+function readSavedFilter(): { filter?: ShipmentFilter; metric?: ShipmentStatus | "all" } {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(FILTER_STATE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 function matchesFilterValue(source?: string, selected?: string): boolean {
   if (!selected) return true;
@@ -88,15 +103,23 @@ export default function ShipmentDashboard() {
   const canCreateShipment = can("shipments", "edit");
   const canExportShipments = can("exportShipments");
   const canViewPurchaseAmounts = can("purchaseAmounts");
-  const [shipments, setShipments] = useState<Shipment[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
-  const [updatedBy, setUpdatedBy] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
+  // Đã tải danh sách trong phiên này (vd vừa xem chi tiết đơn quay về): hiện ngay, tải lại ngầm.
+  const [cachedList] = useState(() => getCachedShipments());
+  const [shipments, setShipments] = useState<Shipment[]>(() => cachedList?.shipments || []);
+  const [lastUpdated, setLastUpdated] = useState<string>(() => cachedList?.lastUpdated || new Date().toISOString());
+  const [updatedBy, setUpdatedBy] = useState<string>(() => cachedList?.updatedBy || "");
+  const [isLoading, setIsLoading] = useState(!cachedList);
+  const hasShipmentsRef = useRef(Boolean(cachedList));
   const [apiError, setApiError] = useState<string | null>(null);
-  const [activeMetricFilter, setActiveMetricFilter] = useState<ShipmentStatus | "all">("all");
+  // Bộ lọc đã chọn trong phiên (quay về từ chi tiết đơn) đọc ngay ở lần render đầu, để danh sách hiện đúng trước khi
+  // cuộn về chỗ cũ. Trang này chỉ render ở trình duyệt sau khi đăng nhập (layout admin chặn trước), không lệch hydrate.
+  const [savedFilter] = useState(() => readSavedFilter());
+  // Mặc định mở thẻ "Đang vận chuyển" (đơn đang theo dõi hằng ngày); bấm "Tổng đơn hàng" để xem tất cả.
+  const [activeMetricFilter, setActiveMetricFilter] = useState<ShipmentStatus | "all">(() => savedFilter.metric || "shipping");
   const defaultEtaRange = useMemo(() => getDefaultEtaRange(), []);
-  const [filter, setFilter] = useState<ShipmentFilter>({
-    status: "all",
+  const [filter, setFilter] = useState<ShipmentFilter>(() => ({
+    status: "shipping",
     search: "",
     dateFrom: defaultEtaRange.dateFrom,
     dateTo: defaultEtaRange.dateTo,
@@ -104,12 +127,33 @@ export default function ShipmentDashboard() {
     supplier: undefined,
     port: undefined,
     vessel: undefined,
-  });
+    ...(savedFilter.filter && typeof savedFilter.filter === "object" ? savedFilter.filter : {}),
+  }));
 
-  const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(FILTER_STATE_KEY, JSON.stringify({ filter, metric: activeMetricFilter }));
+    } catch {
+      // Trình duyệt chặn lưu trữ: chỉ mất phần nhớ bộ lọc.
+    }
+  }, [activeMetricFilter, filter]);
+
+  // Quay về từ trang chi tiết: cuộn lại đúng chỗ đang xem (chỉ khi danh sách đã hiện từ cache).
+  useEffect(() => {
+    let savedScroll: number | null = null;
+    try {
+      const raw = window.sessionStorage.getItem(SCROLL_STATE_KEY);
+      window.sessionStorage.removeItem(SCROLL_STATE_KEY);
+      savedScroll = raw == null ? null : Number(raw);
+    } catch {
+      savedScroll = null;
+    }
+    if (!cachedList || savedScroll == null || !Number.isFinite(savedScroll)) return;
+    const frame = window.requestAnimationFrame(() => window.scrollTo({ top: savedScroll }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [cachedList]);
 
   const loadData = useCallback(async () => {
     // Không có quyền xem đơn hàng: không gọi API (BE cũng trả 403) và bỏ dữ liệu đang giữ.
@@ -118,15 +162,14 @@ export default function ShipmentDashboard() {
       setIsLoading(false);
       return;
     }
-    setIsLoading(true);
+    // Đang có danh sách thì tải lại ngầm, không thay bảng bằng vòng xoay (mất vị trí đang xem).
+    if (!hasShipmentsRef.current) setIsLoading(true);
     setApiError(null);
 
     try {
       const result = await fetchShipments();
+      hasShipmentsRef.current = true;
       setShipments(result.shipments);
-      setSelectedShipment((current) => current
-        ? result.shipments.find((item) => item.orderCode === current.orderCode) || current
-        : current);
       setLastUpdated(result.lastUpdated);
       setUpdatedBy(result.updatedBy || "");
     } catch (error) {
@@ -242,8 +285,12 @@ export default function ShipmentDashboard() {
   const metrics = useMemo(() => computeMetrics(metricScopeShipments), [metricScopeShipments]);
 
   const handleRowClick = (shipment: Shipment) => {
-    setSelectedShipment(shipment);
-    setIsModalOpen(true);
+    try {
+      window.sessionStorage.setItem(SCROLL_STATE_KEY, String(window.scrollY));
+    } catch {
+      // Không lưu được thì quay về đầu trang.
+    }
+    router.push(shipmentDetailPath(shipment.orderCode));
   };
 
   if (!canViewShipments) {
@@ -276,9 +323,9 @@ export default function ShipmentDashboard() {
         </div>
         <div className="flex items-center gap-3">
         {canCreateShipment && (
-          <button type="button" onClick={() => setIsCreateModalOpen(true)} className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600">
+          <Link href={CREATE_SHIPMENT_PATH} className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600">
             {t("createShipment")}
-          </button>
+          </Link>
         )}
         {isLoading && (
           <div className="flex items-center gap-2 text-xs text-gray-400">
@@ -354,20 +401,6 @@ export default function ShipmentDashboard() {
       ) : (
         <ShipmentTable shipments={filteredShipments} onRowClick={handleRowClick} />
       )}
-
-      {/* Detail modal */}
-      <ShipmentDetailModal
-        shipment={selectedShipment}
-        isOpen={isModalOpen}
-        onRefresh={loadData}
-        onClose={() => { setIsModalOpen(false); setSelectedShipment(null); }}
-      />
-      <CreateShipmentModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        onCreated={loadData}
-        existingOrderCodes={shipments.map((shipment) => shipment.orderCode)}
-      />
     </div>
   );
 }

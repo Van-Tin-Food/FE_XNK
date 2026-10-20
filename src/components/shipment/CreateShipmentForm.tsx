@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Modal } from "@/components/ui/modal";
-import { analyzeDocument, checkDocumentFileNames, MAX_OCR_FILE_BYTES, uploadDocument } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentFileNames, createUploadBatch, MAX_OCR_FILE_BYTES, uploadDocument } from "@/services/shipmentApi";
 import { createDatabaseRow, databaseEndpoints, listCatalogRows } from "@/services/postgresShipmentApi";
 import type { PurchaseRecord, SupplierRecord } from "@/types/postgresShipment";
 import { useAuth } from "@/context/AuthContext";
@@ -12,11 +11,15 @@ import { useLanguage } from "@/context/LanguageContext";
 import { findBestCatalogMatch } from "@/utils/masterDataMatching";
 import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@/utils/documentFile";
 import UploadProgressToast from "@/components/common/UploadProgressToast";
+import { useLeaveGuard } from "@/hooks/useLeaveGuard";
+import { useSystemConfirm } from "@/context/SystemConfirmContext";
 
-interface CreateShipmentModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onCreated: () => Promise<void>;
+// Trang /shipments/new (trước là modal: bấm ra ngoài / nút Back của trình duyệt làm mất form đang nhập).
+interface CreateShipmentFormProps {
+  /** Về danh sách đơn. */
+  onCancel: () => void;
+  /** Đã tạo đơn (kể cả khi PI chưa lên Drive): mở chi tiết đơn vừa tạo. */
+  onCreated: (orderCode: string) => void;
   existingOrderCodes: string[];
 }
 
@@ -78,9 +81,10 @@ function mapOcrFields(data: Record<string, string>): ReviewFields {
   };
 }
 
-export default function CreateShipmentModal({ isOpen, onClose, onCreated, existingOrderCodes }: CreateShipmentModalProps) {
+export default function CreateShipmentForm({ onCancel, onCreated, existingOrderCodes }: CreateShipmentFormProps) {
   const { user, can } = useAuth();
   const { notify } = useSystemNotification();
+  const { confirm } = useSystemConfirm();
   const { t } = useLanguage();
   // Tạo đơn = quyền sửa Đơn hàng (gồm cả upload PI của đơn mới).
   const canCreateShipment = can("shipments", "edit");
@@ -98,19 +102,35 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   const [error, setError] = useState("");
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
 
+  // Mở trang là hỏi chọn file PI luôn (trình duyệt có thể chặn nếu không vừa bấm; khi đó bấm nút chọn PI).
   useEffect(() => {
-    if (isOpen && !file) {
-      const timer = window.setTimeout(() => inputRef.current?.click(), 150);
-      return () => window.clearTimeout(timer);
-    }
-  }, [isOpen, file]);
+    const timer = window.setTimeout(() => inputRef.current?.click(), 150);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
     void listCatalogRows<SupplierRecord>(databaseEndpoints.suppliers)
       .then(setSuppliers)
       .catch((loadError) => setError(loadError instanceof Error ? loadError.message : t("supplierLoadError")));
-  }, [isOpen, t]);
+  }, [t]);
+
+  // Đã chọn PI (kể cả lúc đang tạo): rời trang (Back, link, đóng tab) sẽ mất form nên hỏi trước.
+  const confirmLeavePage = React.useCallback(() => confirm({
+    title: t("unsavedChangesTitle"),
+    message: t("unsavedChangesMessage"),
+    confirmText: t("leavePage"),
+    cancelText: t("stayOnPage"),
+    tone: "danger",
+  }), [confirm, t]);
+  const { allowLeave } = useLeaveGuard(Boolean(file), confirmLeavePage);
+  // Đang xem PI ở nửa phải (từ md): form nổi ở nửa trái như modal cũ, khoá cuộn trang phía sau.
+  const isSplitPreview = Boolean(isFilePanelOpen && filePreviewUrl && !isFilePanelMaximized);
+  useEffect(() => {
+    if (!isFilePanelOpen || !filePreviewUrl) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [filePreviewUrl, isFilePanelOpen]);
 
   useEffect(() => {
     if (suppliers.length === 0) return;
@@ -150,9 +170,12 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     setIsSaving(false);
   };
 
-  const handleClose = () => {
+  const handleClose = async () => {
+    if (isSaving) return;
+    if (file && !(await confirmLeavePage())) return;
+    allowLeave();
     reset();
-    onClose();
+    onCancel();
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -271,23 +294,26 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         documentCode: "PI",
         file,
         requestId: uploadRequestIdRef.current || (uploadRequestIdRef.current = crypto.randomUUID()),
+        batch: createUploadBatch(1),
       }, { onProgress: ({ loaded }) => setUploadedBytes(loaded) });
-      recordActivity(user, {  
+      recordActivity(user, {
         action: "CREATE_SHIPMENT",
         location: "ShipmentDashboard/CreateShipmentModal",
         detail: `Tạo đơn hàng ${fields.orderCode.trim()}`,
       });
-      await onCreated();
       notify(t("shipmentCreated", { orderCode: fields.orderCode.trim() }), "success");
-      handleClose();
+      allowLeave();
+      reset();
+      onCreated(normalizedOrderCode);
     } catch (err) {
       const reason = err instanceof Error ? err.message : t("createShipmentError");
       if (shipmentCreated) {
         // Đơn đã ghi DB nhưng PI chưa lên Drive: báo rõ để upload lại PI ở chi tiết đơn, không tạo đơn lần nữa.
         const message = t("shipmentCreatedPiUploadFailed", { orderCode: normalizedOrderCode, reason });
         notify(message, "error");
-        await onCreated();
-        handleClose();
+        allowLeave();
+        reset();
+        onCreated(normalizedOrderCode);
         return;
       }
       setError(reason);
@@ -308,17 +334,26 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
 
   return (
     <>
-      <Modal
-        isOpen={isOpen}
-        onClose={handleClose}
-        contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
-        className={`mx-2 my-2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl flex-col overflow-hidden transition-[width,transform] duration-300 sm:mx-4 sm:my-4 sm:max-h-[94vh] sm:w-full ${isFilePanelOpen && !isFilePanelMaximized ? "md:w-[calc(50vw-1.5rem)] md:max-w-none md:-translate-x-1/2" : ""}`}
+      {/* Đang xem PI (từ md): như modal cũ — nền mờ phủ cả trang, form nổi ở nửa trái, file ở nửa phải. */}
+      {isSplitPreview && <div className="fixed inset-0 z-[100000] hidden bg-gray-400/50 backdrop-blur-[32px] md:block" aria-hidden="true" />}
+      <div className={isSplitPreview
+        ? "mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-3 custom-scrollbar md:fixed md:bottom-4 md:left-4 md:top-4 md:z-[100000] md:mx-0 md:w-[calc(50vw-1.5rem)] md:max-w-none md:overflow-y-auto md:overscroll-contain md:rounded-3xl md:bg-white md:p-4 md:shadow-2xl dark:md:bg-gray-900"
+        : "mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-3"}>
+      <button
+        type="button"
+        onClick={() => void handleClose()}
+        disabled={isSaving}
+        className="inline-flex min-h-9 w-fit items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-gray-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-60 dark:text-gray-400 dark:hover:text-brand-300"
       >
-      <div className="border-b border-gray-100 px-6 pb-4 pt-6 dark:border-gray-800">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("createNewShipment")}</h2>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+        {t("backToShipmentList")}
+      </button>
+      <section className="flex min-w-0 flex-col rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+      <div className="border-b border-gray-100 px-4 pb-4 pt-5 dark:border-gray-800 sm:px-6 sm:pt-6">
+        <h1 className="text-lg font-semibold text-gray-900 dark:text-white">{t("createNewShipment")}</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("selectPiDescription")}</p>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-6 py-5 custom-scrollbar">
+      <div className="flex min-w-0 flex-col gap-4 px-4 py-5 sm:px-6">
         <input ref={inputRef} type="file" accept={DOCUMENT_FILE_ACCEPT} className="hidden" onChange={handleFileChange} />
         <button type="button" onClick={() => inputRef.current?.click()} disabled={!canCreateShipment || isAnalyzing || isSaving} className="rounded-xl border border-dashed border-brand-300 bg-brand-50 px-4 py-5 text-sm font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300">
           {file ? file.name : t("selectPi")}
@@ -365,18 +400,22 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
           </>
         )}
       </div>
-      <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 px-6 py-4 dark:border-gray-800">
+      <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 px-4 py-4 dark:border-gray-800 sm:px-6">
         {filePreviewUrl && <button type="button" onClick={() => setIsFilePanelOpen(true)} className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">{t("viewPiFile")}</button>}
-        <button type="button" onClick={handleClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
+        <button type="button" onClick={() => void handleClose()} disabled={isSaving} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
         <button type="button" onClick={handleConfirm} disabled={!canCreateShipment || !file || isAnalyzing || isSaving || duplicateOrderCode || hasMissingRequiredFields} title={hasMissingRequiredFields ? t("requiredMissing", { fields: missingRequiredFields.join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? t("saving") : t("confirmCreate")}</button>
       </div>
-    </Modal>
+      </section>
+      </div>
       {uploadedBytes !== null && file && <UploadProgressToast fileName={file.name} loaded={uploadedBytes} size={file.size} />}
       {isFilePanelOpen && filePreviewUrl && (
         <aside className={`fixed right-0 top-0 z-[100000] flex h-screen min-h-0 flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isFilePanelMaximized ? "w-full" : "w-[92vw] md:w-1/2"}`}>
           <div className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">
             <p className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-white">{file?.name || "File PI"}</p>
             <button type="button" onClick={() => setIsFilePanelMaximized((current) => !current)} className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{isFilePanelMaximized ? t("minimize") : t("maximize")}</button>
+            <button type="button" onClick={() => { setIsFilePanelOpen(false); setIsFilePanelMaximized(false); }} aria-label={t("closePiFile")} title={t("closePiFile")} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-error-50 hover:text-error-600 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-error-500/10 dark:hover:text-error-400">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+            </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
             <iframe title={t("viewFileTitle", { file: file?.name || "PI" })} src={filePreviewUrl} className="block h-[calc(100vh-4.5rem)] min-h-[720px] w-full rounded-lg bg-white" />

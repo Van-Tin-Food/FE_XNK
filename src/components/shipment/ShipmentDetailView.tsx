@@ -1,18 +1,16 @@
-﻿"use client";
+"use client";
 import React, { useEffect, useState } from "react";
-import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, MAX_DOCUMENT_UPLOAD_BYTES, MAX_OCR_FILE_BYTES, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, createUploadBatch, finishDocumentUploadBatch, MAX_DOCUMENT_UPLOAD_BYTES, MAX_OCR_FILE_BYTES, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listCatalogRows, passDriveDocument, returnItemsFromRelations, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
-import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
+import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord, XnkRecord } from "@/types/postgresShipment";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useLanguage } from "@/context/LanguageContext";
-import { submitEvergreenTracking } from "@/utils/evergreenTracking";
 import { getMissingArchiveDetailFields, getMissingArchiveTransportFields } from "@/utils/shipmentArchiveValidation";
 import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
 import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCatalogOptions";
@@ -32,15 +30,19 @@ import {
 } from "@/utils/internationalNumber";
 import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@/utils/documentFile";
 import UploadProgressToast from "@/components/common/UploadProgressToast";
+import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 
-interface ShipmentDetailModalProps {
-  shipment: Shipment | null;
-  isOpen: boolean;
-  onClose: () => void;
+interface ShipmentDetailViewProps {
+  shipment: Shipment;
+  /** Về danh sách đơn (nút quay lại, sau khi hủy đơn). */
+  onBack: () => void;
   onRefresh?: () => Promise<void>;
 }
 
-type ModalTab = "overview" | "journey" | "documents" | "return" | "details" | "folder";
+// Chi tiết đơn là trang riêng /shipments/<mã> (trước là modal: bấm ra ngoài / nút Back của trình duyệt làm mất form).
+// Mã vị trí ghi nhật ký vẫn giữ "ShipmentDetailModal/..." để trang Nhật ký đọc được cả log cũ.
+type ModalTab = "overview" | "documents" | "return" | "details" | "folder";
+const DETAIL_TABS: ModalTab[] = ["overview", "documents", "return", "details", "folder"];
 /** Một file trong khung xem bên phải. Chứng từ nhiều file xem lần lượt bằng ‹ › hoặc phím ← →. */
 type PreviewItem = { url: string; name: string; label?: string; meta?: string; downloadUrl?: string; fileName?: string };
 
@@ -54,17 +56,6 @@ const TAB_LIST: { key: ModalTab; labelKey: string; icon: React.ReactNode }[] = [
         <rect x="14" y="3" width="7" height="7"/>
         <rect x="14" y="14" width="7" height="7"/>
         <rect x="3" y="14" width="7" height="7"/>
-      </svg>
-    ),
-  },
-  {
-    key: "journey",
-    labelKey: "journey",
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="2" y1="12" x2="22" y2="12"/>
-        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
       </svg>
     ),
   },
@@ -196,124 +187,6 @@ const OPTIONAL_DOCUMENT_COLORS: Record<string, { badge: string; dot: string }> =
   INSPECTION: { badge: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300", dot: "bg-violet-500" },
   PS: { badge: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300", dot: "bg-rose-500" },
 };
-
-type CarrierTrackingLink = {
-  name: string;
-  aliases: string[];
-  trackingType?: "CONTAINER";
-  requiresManualCode: boolean;
-  buildUrl?: (trackingCode: string) => string;
-};
-
-function buildMscTrackingUrl(trackingCode: string): string {
-  const params = btoa(`trackingNumber=${trackingCode}&trackingMode=0`);
-  return `https://www.msc.com/en/track-a-shipment?params=${encodeURIComponent(params)}`;
-}
-
-function buildCmaTrackingUrl(reference: string): string {
-  const normalizedReference = reference.trim().toUpperCase();
-  const params = new URLSearchParams({ Reference: normalizedReference, SearchBy: "Container" });
-  return `https://www.cma-cgm.com/ebusiness/tracking?${params.toString()}`;
-}
-
-// Chỉ hiển thị link cho các hãng đã được cấu hình. Có thể bổ sung URL tại đây
-// khi có thêm danh sách tracking chính thức từ các hãng tàu.
-const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
-  {
-    name: "Hapag-Lloyd",
-    aliases: ["happ","hapag", "hapag-lloyd", "hapag lloyd"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container=${encodeURIComponent(trackingCode)}`,
-  },
-  {
-    name: "Maersk",
-    aliases: ["maersk", "a.p. moller", "apm"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.maersk.com/tracking/${encodeURIComponent(trackingCode)}`,
-  },
-  {
-    name: "MSC",
-    aliases: ["msc", "mediterranean shipping"],
-    requiresManualCode: false,
-    buildUrl: buildMscTrackingUrl,
-  },
-  {
-    name: "CMA CGM",
-    aliases: ["cma", "cma cgm"],
-    requiresManualCode: false,
-    buildUrl: buildCmaTrackingUrl,
-  },
-  {
-    name: "COSCO",
-    aliases: ["cosco", "cosco shipping"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=CONTAINER&number=${encodeURIComponent(trackingCode)}`,
-  },
-  {
-    name: "HMM",
-    aliases: ["hmm", "hyundai merchant marine"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.hmm21.com/e-service/search/index.do?query=${encodeURIComponent(trackingCode)}`,
-  },
-  {
-    name: "FESCO",
-    aliases: ["fesco"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://my.fesco.com/tracking?tab=${encodeURIComponent(trackingCode)}`,
-  },
-  {
-    name: "Yang Ming",
-    aliases: ["yang ming", "yangming", "yml"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.yangming.com/en/esolution/cargo_tracking?service=${encodeURIComponent(trackingCode)}`,
-  },
-  {
-    name: "CK LINE",
-    aliases: ["ck line", "ckline", "ck"],
-    trackingType: "CONTAINER",
-    requiresManualCode: false,
-    buildUrl: () => "https://es.ckline.co.kr/",
-  },
-  {
-    name: "EVERGREEN",
-    aliases: ["evergreen", "evergreen marine", "ever", "emc", "shipmentlink"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do?CNTR=${encodeURIComponent(trackingCode)}`,
-  },
-  {
-    name: "ONE",
-    aliases: ["one",
-      "ONE", "one cargo"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam=${encodeURIComponent(trackingCode)}&trakNoTpCdParam=C`,
-  },
-  {
-    name: "OOCL",
-    aliases: ["oocl", "oocl shipping"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.oocl.com/Pages/ExpressLink.aspx?eltype=ct&businessType=containerNumber&businessNumber=${encodeURIComponent(trackingCode)}&language=en`,
-  },
-  {
-    name: "PIL",
-    aliases: ["pil", "pacific international lines"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://www.pilship.com/digital-solutions/?tab=customer&id=track-trace&label=containerTandT&module=TrackTraceBL&refNo=${encodeURIComponent(trackingCode)}`,
-  },
-  {
-    name: "SINOKOR",
-    aliases: ["sinokor", "sinokor shipping"],
-    requiresManualCode: false,
-    buildUrl: (trackingCode) => `https://ebiz.sinokor.co.kr/BLDetail?containerNo=${encodeURIComponent(trackingCode)}`,
-  }
-];
-
-function findCarrierTrackingLink(vessel?: string): CarrierTrackingLink | null {
-  const normalizedVessel = (vessel || "").toLowerCase().trim();
-  if (!normalizedVessel) return null;
-  return CARRIER_TRACKING_LINKS.find((carrier) =>
-    carrier.aliases.some((alias) => normalizedVessel.includes(alias))
-  ) || null;
-}
 
 function InfoRow({ label, value, mono = false }: { label: string; value?: string; mono?: boolean }) {
   if (!value) return null;
@@ -527,11 +400,6 @@ function DateFieldInput({
       </button>
     </div>
   );
-}
-
-function formatDateTime(iso?: string): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function formatUploadDateTime(value: string | null | undefined, language: string): string {
@@ -868,19 +736,19 @@ function PurchaseDetailsTable({
   /** false: ẩn cột đơn giá với role không được xem tiền hàng. */
   showAmounts: boolean;
 }) {
-  const tableRows = details.flatMap<{ detail: PurchaseDetailWithItems; item: PurchaseItemCodeRecord | null; itemIndex: number }>((detail) => (
+  const tableRows = details.flatMap<{ detail: PurchaseDetailWithItems; detailIndex: number; item: PurchaseItemCodeRecord | null; itemIndex: number; itemCount: number }>((detail, detailIndex) => (
     detail.itemCodes.length > 0
-      ? detail.itemCodes.map((item, itemIndex) => ({ detail, item, itemIndex }))
-      : [{ detail, item: null, itemIndex: 0 }]
+      ? detail.itemCodes.map((item, itemIndex) => ({ detail, detailIndex, item, itemIndex, itemCount: detail.itemCodes.length }))
+      : [{ detail, detailIndex, item: null, itemIndex: 0, itemCount: 1 }]
   ));
 
-  const getItemPackageCount = (detail: PurchaseDetailWithItems, item: PurchaseItemCodeRecord | null): string => {
+  // Số kiện đã xếp vào container của từng Item Code (chỉ để đối chiếu, sửa ở bảng Chi tiết hàng trong container).
+  const getAllocatedPackages = (item: PurchaseItemCodeRecord | null): string => {
     if (!item) return "";
     const allocations = containerDetails.filter((allocation) => allocation.id_item_code === item.id_item_code);
-    if (allocations.length > 0) {
-      return formatPackageQuantity(allocations.reduce((total, allocation) => total + packageAmount(allocation.so_kien), 0));
-    }
-    return detail.itemCodes.length === 1 ? formatPackageQuantity(detail.so_kien) : "";
+    return allocations.length > 0
+      ? formatPackageQuantity(allocations.reduce((total, allocation) => total + packageAmount(allocation.so_kien), 0))
+      : "";
   };
 
   return (
@@ -894,28 +762,36 @@ function PurchaseDetailsTable({
         {editing && <button type="button" onClick={onAddRow} className="ml-auto shrink-0 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 dark:border-brand-500/30 dark:bg-gray-900 dark:text-brand-300">{translate("addRow")}</button>}
       </div>
       <div className="lg:overflow-x-auto">
-        <table className={`w-full table-fixed text-left lg:min-w-[780px] xl:min-w-0 ${STACK_TABLE}`}>
+        <table className={`w-full table-fixed text-left lg:min-w-[900px] xl:min-w-0 ${STACK_TABLE}`}>
           <colgroup>
-            <col className="w-[6%]" />
-            <col className={showAmounts ? "w-[32%]" : "w-[40%]"} />
-            <col className={showAmounts ? "w-[28%]" : "w-[36%]"} />
-            {showAmounts && <col className="w-[18%]" />}
-            <col className={showAmounts ? "w-[16%]" : "w-[18%]"} />
+            <col className="w-[5%]" />
+            <col className={showAmounts ? "w-[21%]" : "w-[29%]"} />
+            <col className={showAmounts ? "w-[24%]" : "w-[32%]"} />
+            <col className={showAmounts ? "w-[13%]" : "w-[17%]"} />
+            <col className={showAmounts ? "w-[13%]" : "w-[17%]"} />
+            {showAmounts && <col className="w-[12%]" />}
+            {showAmounts && <col className="w-[12%]" />}
           </colgroup>
           <thead className={`bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400 ${STACK_HEAD}`}>
             <tr>
               <th className="px-4 py-3">#</th>
               <th className="px-4 py-3">{translate("productName")}</th>
               <th className="px-4 py-3">{translate("itemCode")} / {translate("factoryCode")} / {translate("factoryName")}</th>
+              <th className="px-4 py-3">{translate("packageCount")}</th>
+              <th className="px-4 py-3">{translate("netWeight")}</th>
               {showAmounts && <th className="px-4 py-3">{translate("unitPrice")}</th>}
-              <th className="px-4 py-3">{translate("itemPackageCount")}</th>
+              {showAmounts && <th className="px-4 py-3">{translate("totalAmount")}</th>}
             </tr>
           </thead>
           <tbody className={`divide-y divide-gray-100 dark:divide-gray-800 ${STACK_BODY}`}>
-            {tableRows.map(({ detail, item, itemIndex }, rowIndex) => (
+            {tableRows.map(({ detail, detailIndex, item, itemIndex, itemCount }, rowIndex) => {
+              // Trường của mặt hàng (tên, số kiện, NET, tiền) gộp dòng theo các Item Code của mặt hàng: một ô nhập duy nhất.
+              const isFirstItemRow = itemIndex === 0;
+              const allocatedPackages = getAllocatedPackages(item);
+              return (
               <tr key={item?.id_item_code || `${detail.id_chi_tiet}-without-item-${rowIndex}`} className={`align-top bg-white hover:bg-gray-50/60 dark:bg-transparent dark:hover:bg-white/[0.02] ${STACK_ROW}`}>
-                <td data-label="#" className={`px-4 py-3 text-xs font-bold text-gray-500 ${STACK_CELL}`}>{rowIndex + 1}</td>
-                <EditableTableCell label={translate("productName")} value={detail.ten_hang} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet, "ten_hang", value)} />
+                {isFirstItemRow && <td rowSpan={itemCount} data-label="#" className={`px-4 py-3 text-xs font-bold text-gray-500 ${STACK_CELL}`}>{detailIndex + 1}</td>}
+                {isFirstItemRow && <EditableTableCell rowSpan={itemCount} label={translate("productName")} value={detail.ten_hang} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet, "ten_hang", value)} />}
                 <td data-label={translate("itemCode")} className={`px-4 py-3 ${STACK_CELL}`}>
                   <div className="space-y-2">
                     {item && (editing ? (
@@ -931,6 +807,9 @@ function PurchaseDetailsTable({
                         {item.ten_nha_may && <span className="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">{item.ten_nha_may}</span>}
                       </div>
                     ) : null)}
+                    {allocatedPackages && itemCount > 1 && (
+                      <p className="text-[11px] text-gray-400">{translate("itemPackageCount")}: {allocatedPackages}{detail.don_vi_kien ? ` ${detail.don_vi_kien}` : ""}</p>
+                    )}
                     {editing && itemIndex === 0 && (
                       <button type="button" onClick={() => onAddItem(detail.id_chi_tiet)} className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-300">
                         {translate("addItemCode")}
@@ -938,8 +817,31 @@ function PurchaseDetailsTable({
                     )}
                   </div>
                 </td>
-                {showAmounts && (
+                {isFirstItemRow && (
                   <EditableTableCell
+                    rowSpan={itemCount}
+                    label={translate("packageCount")}
+                    value={detail.so_kien}
+                    editing={editing}
+                    onChange={(value) => onChange(detail.id_chi_tiet, "so_kien", value)}
+                    displayFormatter={formatPackageQuantity}
+                    suffix={detail.don_vi_kien}
+                  />
+                )}
+                {isFirstItemRow && (
+                  <EditableTableCell
+                    rowSpan={itemCount}
+                    label={translate("netWeight")}
+                    value={detail.net_weight}
+                    editing={editing}
+                    onChange={(value) => onChange(detail.id_chi_tiet, "net_weight", value)}
+                    displayFormatter={formatNetWeight}
+                    suffix="KG"
+                  />
+                )}
+                {showAmounts && isFirstItemRow && (
+                  <EditableTableCell
+                    rowSpan={itemCount}
                     label={translate("unitPrice")}
                     value={detail.don_gia}
                     editing={editing}
@@ -947,12 +849,20 @@ function PurchaseDetailsTable({
                     displayFormatter={formatMoney}
                   />
                 )}
-                <td data-label={translate("itemPackageCount")} className={`px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300 ${STACK_CELL}`}>
-                  {getItemPackageCount(detail, item) || ""}{getItemPackageCount(detail, item) && detail.don_vi_kien ? ` ${detail.don_vi_kien}` : ""}
-                </td>
+                {showAmounts && isFirstItemRow && (
+                  <EditableTableCell
+                    rowSpan={itemCount}
+                    label={translate("totalAmount")}
+                    value={detail.tong_gia}
+                    editing={editing}
+                    onChange={(value) => onChange(detail.id_chi_tiet, "tong_gia", value)}
+                    displayFormatter={formatMoney}
+                  />
+                )}
               </tr>
-            ))}
-            {tableRows.length === 0 && <tr className="max-lg:block"><td colSpan={showAmounts ? 5 : 4} className="px-4 py-8 text-center text-sm text-gray-400 max-lg:block">{translate("noPurchaseDetails")}</td></tr>}
+              );
+            })}
+            {tableRows.length === 0 && <tr className="max-lg:block"><td colSpan={showAmounts ? 7 : 5} className="px-4 py-8 text-center text-sm text-gray-400 max-lg:block">{translate("noPurchaseDetails")}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -960,11 +870,11 @@ function PurchaseDetailsTable({
   );
 }
 
-function EditableTableCell({ label, value, editing, onChange, suffix, displayFormatter }: { label?: string; value: unknown; editing: boolean; onChange: (value: string) => void; suffix?: string | null; displayFormatter?: (value: unknown) => string }) {
+function EditableTableCell({ label, value, editing, onChange, suffix, displayFormatter, rowSpan }: { label?: string; value: unknown; editing: boolean; onChange: (value: string) => void; suffix?: string | null; displayFormatter?: (value: unknown) => string; rowSpan?: number }) {
   const text = value == null ? "" : String(value);
   const displayText = displayFormatter ? displayFormatter(value) : text;
   return (
-    <td data-label={label} className={`px-4 py-3 ${STACK_CELL}`}>
+    <td rowSpan={rowSpan} data-label={label} className={`px-4 py-3 ${STACK_CELL}`}>
       {editing ? (
         <input
           value={text}
@@ -1090,6 +1000,144 @@ function ContainerCargoDetailsTable({
   );
 }
 
+// B/L và container nhập tay ở tab Chi tiết (OCR có thể sai số liệu nên cho sửa trực tiếp). Chỉ thêm / sửa mã,
+// không xoá: BE chưa có API xoá và container có thể đã gắn hàng, vận chuyển, chi phí.
+const NEW_BILL_PREFIX = "new-bill-";
+const NEW_BILL_CONTAINER_PREFIX = "new-bl-container-";
+
+type BillForm = {
+  id_xnk: string;
+  ma_bl: string;
+  carrierName: string;
+  containers: Array<{ id_bl_container: string; ma_container: string }>;
+};
+
+function billFormsFromDatabase(database?: PostgresShipmentRelations): BillForm[] {
+  return (database?.bills || []).map((bill) => ({
+    id_xnk: bill.id_xnk,
+    ma_bl: bill.ma_bl || "",
+    carrierName: bill.carrier?.ten_hang_tau || "",
+    containers: bill.containers.map((container) => ({ id_bl_container: container.id_bl_container, ma_container: container.ma_container || "" })),
+  }));
+}
+
+function normalizeBillCode(value: string | null | undefined): string {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizeContainerCode(value: string | null | undefined): string {
+  return String(value || "").replace(/\s+/g, "").toUpperCase();
+}
+
+function BillContainerEditor({
+  bills,
+  editing,
+  inputId,
+  onChange,
+  translate,
+}: {
+  bills: BillForm[];
+  editing: boolean;
+  inputId: string;
+  onChange: (bills: BillForm[]) => void;
+  translate: (key: string, variables?: Record<string, string | number>) => string;
+}) {
+  const inputClass = "h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 font-mono text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
+  const updateBill = (billId: string, update: (bill: BillForm) => BillForm) => onChange(bills.map((bill) => bill.id_xnk === billId ? update(bill) : bill));
+
+  if (!editing) {
+    const visibleBills = bills.filter((bill) => bill.ma_bl.trim() || bill.containers.some((container) => container.ma_container.trim()));
+    // Mỗi B/L một hàng: số B/L | các số container (chữ thường, bôi đen copy được; tracking bấm ở bảng danh sách đơn).
+    return (
+      <div id={inputId} className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+        <table className="w-full table-fixed text-left">
+          <thead className="bg-gray-100/80 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900 dark:text-gray-400">
+            <tr>
+              <th className="w-2/5 border-r border-gray-200 px-3 py-2.5 sm:w-1/3 sm:px-4 dark:border-gray-700">{translate("billNumber")}</th>
+              <th className="px-3 py-2.5 sm:px-4">{translate("containerCode")}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 bg-white dark:divide-gray-800 dark:bg-white/[0.02]">
+            {visibleBills.length > 0 ? visibleBills.map((bill) => {
+              const containers = bill.containers.map((container) => container.ma_container.trim()).filter(Boolean);
+              return (
+                <tr key={bill.id_xnk}>
+                  <td className="border-r border-gray-100 px-3 py-2.5 align-top sm:px-4 dark:border-gray-800">
+                    {bill.ma_bl.trim()
+                      ? <span className="break-all font-mono text-sm font-semibold text-gray-800 dark:text-gray-200">{bill.ma_bl.trim()}</span>
+                      : <span className="text-sm text-gray-400">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 align-top sm:px-4">
+                    {containers.length > 0 ? (
+                      <span className="break-all font-mono text-sm font-semibold text-cyan-700 dark:text-cyan-300">{containers.join(", ")}</span>
+                    ) : <span className="text-sm text-gray-400">{translate("noContainersForBill")}</span>}
+                  </td>
+                </tr>
+              );
+            }) : (
+              <tr><td colSpan={2} className="px-4 py-5 text-center text-sm text-gray-400">—</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // Sửa: số B/L bên trái, các số container bên phải cùng một hàng (màn nhỏ xếp dọc).
+  return (
+    <div id={inputId} className="flex flex-col gap-2">
+      {bills.map((bill, billIndex) => (
+        <div key={bill.id_xnk} className="grid grid-cols-1 gap-2 rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-700 dark:bg-white/[0.02] md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:gap-3">
+          <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-gray-600 dark:text-gray-300">
+            <span>{translate("billNumber")} {billIndex + 1}</span>
+            <input
+              value={bill.ma_bl}
+              onChange={(event) => updateBill(bill.id_xnk, (current) => ({ ...current, ma_bl: event.target.value }))}
+              placeholder={translate("billNumberPlaceholder")}
+              className={inputClass}
+            />
+          </label>
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">{translate("containerCode")}</span>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {bill.containers.map((container) => (
+                <input
+                  key={container.id_bl_container}
+                  value={container.ma_container}
+                  aria-label={translate("containerCode")}
+                  onChange={(event) => updateBill(bill.id_xnk, (current) => ({
+                    ...current,
+                    containers: current.containers.map((item) => item.id_bl_container === container.id_bl_container ? { ...item, ma_container: event.target.value } : item),
+                  }))}
+                  placeholder={translate("containerCodePlaceholder")}
+                  className={inputClass}
+                />
+              ))}
+              <button
+                type="button"
+                onClick={() => updateBill(bill.id_xnk, (current) => ({
+                  ...current,
+                  containers: [...current.containers, { id_bl_container: `${NEW_BILL_CONTAINER_PREFIX}${Date.now()}-${current.containers.length}`, ma_container: "" }],
+                }))}
+                className="h-9 rounded-lg border border-dashed border-cyan-300 bg-white px-3 text-xs font-semibold text-cyan-700 hover:bg-cyan-50 dark:border-cyan-500/40 dark:bg-gray-900 dark:text-cyan-300"
+              >
+                {translate("addContainer")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...bills, { id_xnk: `${NEW_BILL_PREFIX}${Date.now()}-${bills.length}`, ma_bl: "", carrierName: "", containers: [{ id_bl_container: `${NEW_BILL_CONTAINER_PREFIX}${Date.now()}-0`, ma_container: "" }] }])}
+        className="w-fit rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 dark:border-brand-500/30 dark:bg-gray-900 dark:text-brand-300"
+      >
+        {translate("addBill")}
+      </button>
+      <p className="text-[11px] text-gray-400">{translate("billContainerEditHint")}</p>
+    </div>
+  );
+}
 function isDatabaseReadOnlyField(group: DetailFieldGroupKey, field: string): boolean {
   const normalized = normalizeSheetField(field);
   return group === "internationalPayment" || normalized === "xuatxu" || normalized === "socontainer";
@@ -1131,15 +1179,28 @@ function getOcrDocumentType(documentCode: string): OcrDocumentType | null {
   return code === "PI" || code === "INV" || code === "PKL" ? code : code === "BL" ? "BL" : null;
 }
 
-export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefresh }: ShipmentDetailModalProps) {
+export default function ShipmentDetailView({ shipment, onBack, onRefresh }: ShipmentDetailViewProps) {
   const { user, can } = useAuth();
-  const canUseTracking = can("tracking");
   const canViewDocuments = can("documents");
   const canViewTransport = can("containerTransport");
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
   const { language, t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<ModalTab>("overview");
+  const [activeTab, setActiveTabState] = useState<ModalTab>("overview");
+  // Tab nằm trên URL (?tab=details) để F5 / gửi link vẫn mở đúng tab.
+  const setActiveTab = (tab: ModalTab) => {
+    setActiveTabState(tab);
+    const url = new URL(window.location.href);
+    if (tab === "overview") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", tab);
+    window.history.replaceState(window.history.state, "", url);
+  };
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (!tab || !DETAIL_TABS.includes(tab as ModalTab)) return;
+    const timer = window.setTimeout(() => setActiveTabState(tab as ModalTab), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
   const [archived, setArchived] = useState<ArchivedDocumentsResponse | null>(null);
   const [isArchiveLoading, setIsArchiveLoading] = useState(false);
   const [isArchiveStateLoading, setIsArchiveStateLoading] = useState(false);
@@ -1154,6 +1215,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [detailForm, setDetailForm] = useState<Record<string, string>>({});
   const [purchaseDetailForms, setPurchaseDetailForms] = useState<PurchaseDetailWithItems[]>([]);
   const [containerDetailForms, setContainerDetailForms] = useState<ContainerDetailRecord[]>([]);
+  const [billForms, setBillForms] = useState<BillForm[]>([]);
   const [isSavingDetails, setIsSavingDetails] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [currentDay] = useState(() => {
@@ -1219,10 +1281,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   );
   const [isSendingEmail] = useState(false);
   const [emailSent] = useState(false);
-  const [isOpeningTracking, setIsOpeningTracking] = useState(false);
-  const [selectedTrackingCode, setSelectedTrackingCode] = useState("");
   const [documentFolderNames, setDocumentFolderNames] = useState<Record<string, string>>({});
-  const evergreenTrackingInProgress = React.useRef(false);
   const [documentProgress, setDocumentProgress] = useState<DocumentProgressResponse | null>(null);
   const [documentProgressError, setDocumentProgressError] = useState("");
   const [supplierOptions, setSupplierOptions] = useState<SupplierRecord[]>([]);
@@ -1240,12 +1299,20 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setInspectionFolderChoice("");
   };
 
+  const closePreview = () => {
+    setPreviewItems([]);
+    setPreviewIndex(0);
+    setIsPreviewMaximized(false);
+    setIsPreviewCollapsed(false);
+  };
+
   const openPreview = (items: PreviewItem[], index = 0) => {
     if (items.length === 0) return;
     setPreviewItems(items);
     setPreviewIndex(Math.min(Math.max(index, 0), items.length - 1));
     setIsPreviewCollapsed(false);
   };
+
 
   /** Mọi file của một chứng từ thành danh sách xem lần lượt. */
   const documentPreviewItems = (
@@ -1261,13 +1328,40 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     meta: [file.uploadedBy || "Chưa có người upload", formatUploadDateTime(file.uploadedAt, language)].join(" · "),
   }));
 
-  const handleModalClose = () => {
+  // Đang sửa / đang xác nhận OCR / đang upload: rời trang sẽ mất dữ liệu chưa lưu. Chỉ dùng trạng thái ổn định
+  // (không dùng cờ "đang lưu" bật tắt liên tục) để mục chặn nút Back không bị chèn / gỡ liên tục.
+  const hasUnsavedWork = isDetailsEditing || isReturnEditing || Boolean(ocrUploadFile) || isUploadingFile;
+  const confirmLeavePage = React.useCallback(() => confirm({
+    title: t("unsavedChangesTitle"),
+    message: t("unsavedChangesMessage"),
+    confirmText: t("leavePage"),
+    cancelText: t("stayOnPage"),
+    tone: "danger",
+  }), [confirm, t]);
+  const { allowLeave } = useLeaveGuard(hasUnsavedWork, confirmLeavePage);
+  // Đang xem file ở nửa phải (chưa thu gọn / phóng to): nội dung đơn nổi ở nửa trái như modal cũ.
+  const isSplitPreview = Boolean(previewUrl && !isPreviewCollapsed && !isPreviewMaximized);
+
+  // Đang mở khung xem file: khoá cuộn trang phía sau như modal cũ.
+  useEffect(() => {
+    if (!previewUrl || isPreviewCollapsed) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [isPreviewCollapsed, previewUrl]);
+
+  const leavePage = () => {
+    allowLeave();
     resetFilePreview();
-    onClose();
+    onBack();
   };
 
-  // Modal được giữ mounted giữa các lần chọn đơn, vì vậy phải xóa file của đơn cũ
-  // cả khi đóng modal lẫn khi parent chuyển thẳng sang một shipment khác.
+  const handleBack = async () => {
+    if (hasUnsavedWork && !(await confirmLeavePage())) return;
+    leavePage();
+  };
+
+  // Chuyển thẳng sang đơn khác (link khác cùng trang): bỏ file đang xem của đơn cũ.
   useEffect(() => {
     setPreviewItems([]);
     setPreviewIndex(0);
@@ -1277,35 +1371,33 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setSelectedContainerCodes({});
     setInspectionFolderNote("");
     setInspectionFolderChoice("");
-  }, [isOpen, shipment?.id]);
-
-  useEffect(() => {
-    setSelectedTrackingCode("");
-  }, [shipment?.id]);
+  }, [shipment.orderCode]);
 
   // Tên chứng từ lấy theo tên thư mục Drive; chưa tải được thì giữ tên mặc định "Chứng từ <mã>".
   useEffect(() => {
-    if (!isOpen) return;
     let cancelled = false;
     void getDocumentFolderNames()
       .then((names) => { if (!cancelled) setDocumentFolderNames(names); })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [isOpen]);
+  }, []);
 
   useEffect(() => {
     if (previewUrl) setIsPreviewCollapsed(false);
   }, [previewUrl]);
 
+  // Chuyển file bằng nút / phím: cuộn dải danh sách file bên dưới để file đang xem luôn nhìn thấy.
   useEffect(() => {
-    if (!isUploadingFile) return;
-    const warnBeforeLeave = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warnBeforeLeave);
-    return () => window.removeEventListener("beforeunload", warnBeforeLeave);
-  }, [isUploadingFile]);
+    if (isPreviewCollapsed || previewItems.length < 2) return;
+    document.querySelector(`[data-preview-index="${previewIndex}"]`)?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [isPreviewCollapsed, previewIndex, previewItems.length]);
+
+  // Trang dài: chọn file chứng từ OCR ở cuối danh sách thì cuộn lên khung xác nhận để thấy kết quả.
+  useEffect(() => {
+    if (!ocrUploadDocId) return;
+    const frame = window.requestAnimationFrame(() => document.getElementById("ocr-review")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [ocrUploadDocId]);
 
   // Đang xem chứng từ nhiều file: phím ← → chuyển file (bỏ qua khi đang gõ trong ô nhập).
   useEffect(() => {
@@ -1352,7 +1444,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   }, [carrierOptions, ocrUploadDocId, supplierOptions]);
 
   useEffect(() => {
-    if (!isOpen || !shipment) return;
     setDocumentProgress(null);
     setDocumentProgressError("");
     setOcrUploadDocId(null);
@@ -1373,6 +1464,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setDetailForm(shipment.summaryFields || {});
     setPurchaseDetailForms(shipment.database?.details || []);
     setContainerDetailForms(flattenContainerDetails(shipment.database));
+    setBillForms(billFormsFromDatabase(shipment.database));
     setIsDetailsEditing(false);
     setIsReturnLoading(true);
     // Danh mục lấy từ cache (đã có sẵn khi tải danh sách đơn), không tải lại mỗi lần mở / làm mới modal.
@@ -1433,9 +1525,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       });
     void Promise.all([archiveStateRequest, documentProgressRequest])
       .finally(() => setIsArchiveStateLoading(false));
-  }, [isOpen, shipment]);
+  }, [shipment]);
 
-  if (!shipment) return null;
 
   const isCancelled = shipment.status === "cancelled";
   const isArchived =  documentProgress?.archiveStatus === 1;
@@ -1451,7 +1542,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   // Tiền hàng theo quyền purchaseAmounts; BE cũng không trả các cột này khi thiếu quyền.
   const canViewPurchaseAmounts = can("purchaseAmounts");
   const isTabVisible = (tab: ModalTab) => (tab !== "folder" || Boolean(archived?.archived))
-    && (tab !== "journey" || canUseTracking)
     && ((tab !== "documents" && tab !== "folder") || canViewDocuments)
     && (tab !== "return" || canViewTransport);
   // Quyền vừa đổi (tải lại khi chuyển trang / bị BE từ chối): tab không còn được xem thì về Tổng quan.
@@ -1460,19 +1550,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     ? ["ten_hang", "so_kien", "net_weight", "don_gia", "tong_gia"]
     : ["ten_hang", "so_kien", "net_weight"];
   const shipmentContainers = flattenShipmentContainers(shipment.database);
-  const billContainerRows = shipment.database?.bills.flatMap((bill) => (
-    bill.containers.length > 0
-      ? bill.containers.map((container) => ({
-        key: container.id_bl_container,
-        billNumber: bill.ma_bl,
-        containerNumber: container.ma_container,
-      }))
-      : [{ key: `bill-${bill.ma_bl}`, billNumber: bill.ma_bl, containerNumber: "" }]
-  )) || [];
   const summaryFields = shipment.summaryFields;
   const overviewInfo = {
     invoice: getSummaryValue(summaryFields, ["INV", "Mã INV", "Số INV"]),
-    container: getSummaryValue(summaryFields, ["Số Container", "Mã Container", "Số cont", "Container"]),
     packageCount: getSummaryValue(summaryFields, ["Số kiện hàng", "Số kiện", "Số hộp"]),
     netWeight: getSummaryValue(summaryFields, ["Net weight", "Trọng lượng", "Trọng lượng tịnh"]),
     unitPrice: getSummaryValue(summaryFields, ["Đơn giá", "Unit price"]),
@@ -1483,6 +1563,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     ? formatOverviewPackageCount(overviewInfo.packageCount)
     : overviewInfo.packageCount;
   const overviewGoodsValue = overviewInfo.goodsValue ? formatOverviewMoney(overviewInfo.goodsValue) : "";
+  const overviewBills = shipment.database?.bills || [];
+  const overviewBillNumbers = [...new Set(overviewBills.map((bill) => String(bill.ma_bl || "").trim()).filter(Boolean))].join(", ");
+  const overviewContainerNumbers = [...new Set(overviewBills.flatMap((bill) => bill.containers.map((container) => String(container.ma_container || "").trim())).filter(Boolean))].join(", ");
   const packageUnits = Array.from(new Set(
     (shipment.database?.details || [])
       .map((detail) => String(detail.don_vi_kien || "").trim().toUpperCase())
@@ -1653,24 +1736,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const activeStageMessage = activeMissingDocCodes.length > 0
     ? `${t("missing")}: ${activeMissingDocCodes.join(", ")}`
     : t("processing");
-  const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
-  const isEvergreenTracking = carrierTrackingLink?.name === "EVERGREEN";
-  // "Số Container" is a quantity (for example: 1), not a tracking code.
-  // Tracking must only use actual container numbers.
-  const trackingContainerSummary = getSummaryValue(summaryFields, ["Mã Container", "Số cont", "Container"]);
-  const fallbackContainers = trackingContainerSummary.split(",").map((code) => code.trim()).filter(Boolean);
-  const containerCodes = [...new Set([
-    ...fallbackContainers,
-    ...(shipment.database?.bills.flatMap((bill) => bill.containers.map((container) => container.ma_container)) || []),
-  ].map((code) => code?.trim()).filter((code): code is string => Boolean(code)))];
-  const availableTrackingCodes = containerCodes;
-  const trackingCode = availableTrackingCodes.includes(selectedTrackingCode)
-    ? selectedTrackingCode
-    : availableTrackingCodes[0] || "";
-  const evergreenContainerNo = isEvergreenTracking ? trackingCode : "";
-  const carrierTrackingUrl = carrierTrackingLink?.buildUrl && !isEvergreenTracking && trackingCode
-    ? carrierTrackingLink.buildUrl(trackingCode)
-    : null;
   const currentOcrDocumentType = ocrUploadDocId ? getOcrDocumentType(ocrUploadDocId) : null;
   const canAddOcrRows = currentOcrDocumentType === "PI"
     || currentOcrDocumentType === "INV"
@@ -1757,34 +1822,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setOcrUploadRows((current) => current.length > 1 ? current.filter((_, index) => index !== rowIndex) : current);
     if (currentOcrDocumentType === "PKL") {
       setPklTargetDetailIds((current) => current.filter((_, index) => index !== rowIndex));
-    }
-  };
-
-  const handleExternalCarrierTracking = () => {
-    if (!carrierTrackingUrl) return;
-    const trackingWindow = window.open(
-      carrierTrackingUrl,
-      "carrier_tracking_popup",
-      "popup=yes,width=1200,height=800,left=80,top=60,resizable=yes,scrollbars=yes",
-    );
-    if (!trackingWindow) notify("Trình duyệt đang chặn popup tracking. Vui lòng cho phép popup cho trang này.", "warning");
-    else trackingWindow.focus();
-  };
-
-  const handleEvergreenTracking = async () => {
-    if (!isEvergreenTracking || !evergreenContainerNo || evergreenTrackingInProgress.current) return;
-
-    try {
-      await submitEvergreenTracking(evergreenContainerNo, {
-        showError: (message) => notify(message, "error"),
-        onStarted: () => {
-          evergreenTrackingInProgress.current = true;
-          setIsOpeningTracking(true);
-        },
-      });
-    } finally {
-      evergreenTrackingInProgress.current = false;
-      setIsOpeningTracking(false);
     }
   };
 
@@ -1893,6 +1930,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         let lastUpload: Awaited<ReturnType<typeof uploadDocument>> | null = null;
         const uploadedNames: string[] = [];
         const failures: string[] = [];
+        // Cả lượt chọn file chỉ thành một thông báo Google Chat ("đã upload N file").
+        const uploadBatch = createUploadBatch(files.length);
         for (const [index, selectedFile] of files.entries()) {
           const fingerprint = `${shipment.orderCode}:${docId}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`;
           const requestId = pendingUploadRequestIds.current.get(fingerprint) || crypto.randomUUID();
@@ -1900,7 +1939,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           setUploadProgress({ fileName: selectedFile.name, index: index + 1, total: files.length, loaded: 0, size: selectedFile.size });
           try {
             lastUpload = await uploadDocument(
-              { orderCode: shipment.orderCode, documentCode: docId, file: selectedFile, requestId, ...uploadTarget },
+              { orderCode: shipment.orderCode, documentCode: docId, file: selectedFile, requestId, batch: uploadBatch, ...uploadTarget },
               { onProgress: ({ loaded }) => setUploadProgress((current) => (current ? { ...current, loaded } : current)) },
             );
             uploadedNames.push(selectedFile.name);
@@ -1910,6 +1949,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           }
         }
         setUploadProgress(null);
+        // Có file lỗi nên lượt không đủ số file: báo BE gửi thông báo cho các file đã lưu luôn.
+        if (uploadedNames.length > 0 && failures.length > 0) void finishDocumentUploadBatch(uploadBatch, docId);
         if (uploadedNames.length > 0) {
           recordActivity(user, {
             action: "UPLOAD_DOCUMENT",
@@ -1941,8 +1982,18 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadDocId(docId);
       setOcrUploadRequestId(crypto.randomUUID());
       setIsOcrAnalyzing(true);
-      const result = await analyzeDocument({ documentType, file });
-      if (result.data.length === 0) throw new Error(`OCR ${documentType} không trả về dữ liệu`);
+      let result: Awaited<ReturnType<typeof analyzeDocument>>;
+      try {
+        result = await analyzeDocument({ documentType, file });
+        if (result.data.length === 0) throw new Error(`OCR ${documentType} không trả về dữ liệu`);
+      } catch (analyzeError) {
+        // OCR lỗi vẫn giữ file: người dùng bấm "Chỉ lưu file" rồi nhập số liệu tay ở tab Chi tiết.
+        setOcrUploadRows([]);
+        setOcrUploadError(t("ocrFailedSaveFileOnly", {
+          reason: analyzeError instanceof Error ? analyzeError.message : t("ocrAnalyzeFailed"),
+        }));
+        return;
+      }
       if (result.aiAvailable === false) notify(t("ocrAiUnavailable"), "warning");
       const normalizedRows = result.data.map((analyzedFields) => {
         const normalizedFields = normalizeOcrFields(analyzedFields, documentType);
@@ -1985,9 +2036,74 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     }
   };
 
+  const clearOcrUpload = () => {
+    setOcrUploadFile(null);
+    setOcrUploadDocId(null);
+    setOcrUploadRequestId("");
+    setOcrUploadRows([]);
+    setPklTargetDetailIds([]);
+  };
+
+  const reloadAfterDocumentUpload = async () => {
+    await onRefresh?.();
+    try {
+      setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
+      setDocumentProgressError("");
+    } catch (progressError) {
+      setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
+    }
+  };
+
+  /**
+   * "Chỉ lưu file": đưa file lên Drive, không ghi số liệu OCR vào đơn (OCR có thể đọc sai số liệu;
+   * người dùng nhập tay ở tab Chi tiết). Không bắt buộc đủ trường OCR.
+   */
+  const handleSaveOcrFileOnly = async () => {
+    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadRequestId || !canUploadDocuments || !canUploadDocumentType(user, ocrUploadDocId) || isOcrSaving) return;
+    const documentType = getOcrDocumentType(ocrUploadDocId);
+    const billCode = documentType === "BL" ? ocrUploadRows[0]?.["BL NO."]?.trim() : "";
+    const pklDetailId = documentType === "PKL" ? pklTargetDetailIds[0] || "" : "";
+    setIsOcrSaving(true);
+    setOcrUploadError("");
+    try {
+      setUploadProgress({ fileName: ocrUploadFile.name, index: 1, total: 1, loaded: 0, size: ocrUploadFile.size });
+      await uploadDocument({
+        orderCode: shipment.orderCode,
+        documentCode: ocrUploadDocId,
+        file: ocrUploadFile,
+        requestId: ocrUploadRequestId,
+        batch: createUploadBatch(1),
+        ...(billCode ? { referenceCode: billCode } : {}),
+        ...(pklDetailId ? { idChiTiet: pklDetailId } : {}),
+      }, { onProgress: ({ loaded }) => setUploadProgress((current) => (current ? { ...current, loaded } : current)) });
+      setUploadProgress(null);
+      recordActivity(user, {
+        action: "UPLOAD_DOCUMENT",
+        location: `ShipmentDetailModal/Documents/${ocrUploadDocId}`,
+        detail: `Đã upload file ${ocrUploadFile.name} chứng từ ${ocrUploadDocId} cho đơn ${shipment.orderCode}; chỉ lưu file, không cập nhật số liệu OCR`,
+      });
+      setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: URL.createObjectURL(ocrUploadFile) }));
+      const savedDocument = ocrUploadDocId;
+      clearOcrUpload();
+      await reloadAfterDocumentUpload();
+      notify(t("ocrFileOnlySaved", { document: savedDocument }), "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không thể lưu chứng từ";
+      setOcrUploadError(message);
+      notify(message, "error");
+    } finally {
+      setUploadProgress(null);
+      setIsOcrSaving(false);
+    }
+  };
+
   const handleConfirmOcrUpload = async () => {
     if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadRequestId || !canUploadDocuments || !canUploadDocumentType(user, ocrUploadDocId) || isOcrSaving) return;
     const documentType = getOcrDocumentType(ocrUploadDocId);
+    if (ocrUploadRows.length === 0) {
+      setOcrUploadError(t("ocrNoDataUseFileOnly"));
+      return;
+    }
     const missingFields = ocrUploadRows.flatMap((row) => getMissingOcrFields(row, documentType));
     if (documentType === "PKL" && shipment.database?.details.length !== 1
       && ocrUploadRows.some((_, index) => !pklTargetDetailIds[index])) {
@@ -2013,6 +2129,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         documentCode: ocrUploadDocId,
         file: ocrUploadFile,
         requestId: ocrUploadRequestId,
+        batch: createUploadBatch(1),
         ...(documentType === "BL" ? { referenceCode: ocrUploadRows[0]?.["BL NO."]?.trim() } : {}),
         ...(documentType === "PKL" ? { idChiTiet: pklTargetDetailIds[0] || "" } : {}),
       }, { onProgress: ({ loaded }) => setUploadProgress((current) => (current ? { ...current, loaded } : current)) });
@@ -2056,19 +2173,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         });
       }
       setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: URL.createObjectURL(ocrUploadFile) }));
-      await onRefresh?.();
-      try {
-        setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
-        setDocumentProgressError("");
-      } catch (progressError) {
-        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
-      }
-      setOcrUploadFile(null);
-      setOcrUploadDocId(null);
-        setOcrUploadRequestId("");
-      setOcrUploadRows([]);
-      setPklTargetDetailIds([]);
-      notify(`Đã bổ sung và cập nhật chứng từ ${ocrUploadDocId}`, "success");
+      const savedDocument = ocrUploadDocId;
+      clearOcrUpload();
+      await reloadAfterDocumentUpload();
+      notify(`Đã bổ sung và cập nhật chứng từ ${savedDocument}`, "success");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Không thể lưu chứng từ";
       setOcrUploadError(message);
@@ -2118,11 +2226,77 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     }
   };
 
+  const resetDetailForms = () => {
+    setDetailForm(shipment.summaryFields || {});
+    setPurchaseDetailForms(shipment.database?.details || []);
+    setContainerDetailForms(flattenContainerDetails(shipment.database));
+    setBillForms(billFormsFromDatabase(shipment.database));
+    setIsDetailsEditing(false);
+  };
+
+  /** So form B/L / container với DB: trả về các thay đổi cần ghi, hoặc lỗi để báo người dùng. */
+  const collectBillChanges = (): {
+    error?: string;
+    changedBills: Array<{ id: string; before: string; after: string }>;
+    newBills: Array<{ code: string; containers: string[] }>;
+    changedContainers: Array<{ id: string; before: string; after: string }>;
+    newContainers: Array<{ billId: string; billCode: string; code: string }>;
+  } => {
+    const empty = { changedBills: [], newBills: [], changedContainers: [], newContainers: [] };
+    const originalBills = shipment.database?.bills || [];
+    const originalContainers = originalBills.flatMap((bill) => bill.containers);
+    // Dòng B/L mới để trống hoàn toàn thì bỏ qua (bấm "Thêm B/L" nhầm).
+    const keptBills = billForms.filter((bill) => !bill.id_xnk.startsWith(NEW_BILL_PREFIX)
+      || normalizeBillCode(bill.ma_bl) || bill.containers.some((container) => normalizeContainerCode(container.ma_container)));
+    // Chỉ bắt lỗi ở dòng mới / dòng vừa sửa: B/L, container cũ trong DB vốn trống mà không đụng tới thì không chặn lưu.
+    const billTouched = (bill: BillForm) => {
+      const original = originalBills.find((item) => item.id_xnk === bill.id_xnk);
+      return !original || normalizeBillCode(original.ma_bl) !== normalizeBillCode(bill.ma_bl);
+    };
+    if (keptBills.some((bill) => billTouched(bill) && !normalizeBillCode(bill.ma_bl))) return { ...empty, error: t("billNumberRequired") };
+    const billCodes = keptBills.map((bill) => normalizeBillCode(bill.ma_bl)).filter(Boolean);
+    const duplicateBill = billCodes.find((code, index) => billCodes.indexOf(code) !== index);
+    if (duplicateBill) return { ...empty, error: t("duplicateBillNumber", { code: duplicateBill }) };
+    const clearedContainer = keptBills.flatMap((bill) => bill.containers).find((container) => {
+      if (container.id_bl_container.startsWith(NEW_BILL_CONTAINER_PREFIX) || normalizeContainerCode(container.ma_container)) return false;
+      // Xoá trắng số container đang có (không có API xoá container).
+      return Boolean(normalizeContainerCode(originalContainers.find((item) => item.id_bl_container === container.id_bl_container)?.ma_container));
+    });
+    if (clearedContainer) {
+      const before = originalContainers.find((item) => item.id_bl_container === clearedContainer.id_bl_container)?.ma_container || "";
+      return { ...empty, error: t("containerCodeRequired", { code: before }) };
+    }
+    const containerCodes = keptBills.flatMap((bill) => bill.containers.map((container) => normalizeContainerCode(container.ma_container)).filter(Boolean));
+    const duplicateContainer = containerCodes.find((code, index) => containerCodes.indexOf(code) !== index);
+    if (duplicateContainer) return { ...empty, error: t("duplicateContainerCode", { code: duplicateContainer }) };
+
+    const changedBills = keptBills.flatMap((bill) => {
+      const original = originalBills.find((item) => item.id_xnk === bill.id_xnk);
+      if (!original || normalizeBillCode(original.ma_bl) === normalizeBillCode(bill.ma_bl)) return [];
+      return [{ id: bill.id_xnk, before: original.ma_bl, after: normalizeBillCode(bill.ma_bl) }];
+    });
+    const changedContainers = keptBills.flatMap((bill) => bill.containers.flatMap((container) => {
+      const original = originalContainers.find((item) => item.id_bl_container === container.id_bl_container);
+      if (!original || normalizeContainerCode(original.ma_container) === normalizeContainerCode(container.ma_container)) return [];
+      return [{ id: container.id_bl_container, before: original.ma_container, after: normalizeContainerCode(container.ma_container) }];
+    }));
+    const newBills = keptBills
+      .filter((bill) => bill.id_xnk.startsWith(NEW_BILL_PREFIX))
+      .map((bill) => ({
+        code: normalizeBillCode(bill.ma_bl),
+        containers: bill.containers.map((container) => normalizeContainerCode(container.ma_container)).filter(Boolean),
+      }));
+    const newContainers = keptBills
+      .filter((bill) => !bill.id_xnk.startsWith(NEW_BILL_PREFIX))
+      .flatMap((bill) => bill.containers
+        .filter((container) => container.id_bl_container.startsWith(NEW_BILL_CONTAINER_PREFIX) && normalizeContainerCode(container.ma_container))
+        .map((container) => ({ billId: bill.id_xnk, billCode: normalizeBillCode(bill.ma_bl), code: normalizeContainerCode(container.ma_container) })));
+    return { changedBills, newBills, changedContainers, newContainers };
+  };
+
   const handleToggleDetailsEditing = () => {
     if (isDetailsEditing) {
-      setPurchaseDetailForms(shipment.database?.details || []);
-      setContainerDetailForms(flattenContainerDetails(shipment.database));
-      setIsDetailsEditing(false);
+      resetDetailForms();
       return;
     }
     setPurchaseDetailForms((current) => current.map((detail, index) => (
@@ -2246,51 +2420,63 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       }), "error");
       return;
     }
-    if (Object.keys(data).length === 0 && changedPurchaseDetails.length === 0 && changedItemCodes.length === 0 && newItemCodes.length === 0 && newPurchaseDetails.length === 0 && changedContainerDetails.length === 0 && newContainerDetails.length === 0) {
+    const billChanges = collectBillChanges();
+    if (billChanges.error) {
+      notify(billChanges.error, "error");
+      return;
+    }
+    // B/L mới lấy hãng tàu, cảng, ngày đang chọn ở mục Xuất nhập khẩu (bảng xnk bắt buộc có hãng tàu).
+    const formValue = (name: string) => String(Object.entries(detailForm).find(([field]) => normalizeSheetField(field) === normalizeSheetField(name))?.[1] ?? "").trim();
+    const newBillCarrierId = carrierOptions.find((carrier) => normalizeCatalogText(carrier.ten_hang_tau) === normalizeCatalogText(formValue("Hãng tàu")))?.id_hang_tau
+      || shipment.database?.bills[0]?.id_hang_tau
+      || "";
+    if (billChanges.newBills.length > 0 && !newBillCarrierId) {
+      notify(t("carrierRequiredForBill"), "error");
+      return;
+    }
+    const hasBillChanges = billChanges.changedBills.length > 0 || billChanges.newBills.length > 0
+      || billChanges.changedContainers.length > 0 || billChanges.newContainers.length > 0;
+    if (Object.keys(data).length === 0 && changedPurchaseDetails.length === 0 && changedItemCodes.length === 0 && newItemCodes.length === 0 && newPurchaseDetails.length === 0 && changedContainerDetails.length === 0 && newContainerDetails.length === 0 && !hasBillChanges) {
       setIsDetailsEditing(false);
       return;
     }
     setIsSavingDetails(true);
+    // Mỗi lần lưu gồm nhiều lệnh ghi; lỗi ở bước nào thì báo kèm tên bước (BE trả câu nêu rõ trường sai:
+    // trùng số B/L, thiếu trường bắt buộc, sai định dạng số...). Đã ghi được một phần thì tải lại dữ liệu.
+    // multiWrite: bước tự ghi nhiều bảng (thông tin đơn hàng) nên lỗi giữa chừng vẫn có thể đã ghi một phần.
+    let savedWrites = 0;
+    let partialStepFailed = false;
+    const step = async <T,>(label: string, run: () => Promise<T>, { multiWrite = false } = {}): Promise<T> => {
+      try {
+        const result = await run();
+        savedWrites += 1;
+        return result;
+      } catch (stepError) {
+        if (multiWrite) partialStepFailed = true;
+        throw new Error(`${label}: ${stepError instanceof Error ? stepError.message : String(stepError)}`);
+      }
+    };
     try {
       if (!shipment.database) throw new Error("Không tìm thấy quan hệ PostgreSQL của đơn hàng");
-      await Promise.all([
-        updatePostgresShipmentFields(shipment.database, data),
-        ...changedPurchaseDetails.map((detail) => updateDatabaseRow<PurchaseDetailRecord>(
-          databaseEndpoints.purchaseDetails,
-          detail.id_chi_tiet,
-          {
-            ten_hang: detail.ten_hang,
-            so_kien: databasePackageCountOrNull(detail.so_kien),
-            net_weight: databaseNumberOrNull(detail.net_weight),
-            // Không gửi tiền hàng khi user không xem được, tránh ghi đè giá đang có.
-            ...(canViewPurchaseAmounts ? {
-              don_gia: databaseNumberOrNull(detail.don_gia),
-              tong_gia: databaseNumberOrNull(detail.tong_gia),
-            } : {}),
-          },
-        )),
-        ...changedItemCodes.map((item) => updateDatabaseRow<PurchaseItemCodeRecord>(
-          databaseEndpoints.itemCodes,
-          item.id_item_code,
-          {
-            item_code: item.item_code,
-            ma_nha_may: item.ma_nha_may || null,
-            ten_nha_may: item.ten_nha_may || null,
-          },
-        )),
-        ...changedContainerDetails.map((detail) => updateDatabaseRow<ContainerDetailRecord>(
-          databaseEndpoints.containerDetails,
-          detail.id_chi_tiet_container,
-          {
-            id_bl_container: detail.id_bl_container,
-            id_item_code: detail.id_item_code,
-            so_kien: databasePackageCountOrNull(detail.so_kien),
-          },
-        )),
-      ]);
-      for (const detail of newPurchaseDetails) {
-        const created = await createDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, {
-          ma_hop_dong: shipment.database.purchase.ma_hop_dong,
+      const database = shipment.database;
+      // Đổi số trước khi ghi: nhập sai định dạng thì báo ngay, chưa ghi gì.
+      const purchaseDetailPatches = changedPurchaseDetails.map((detail) => ({
+        detail,
+        patch: {
+          ten_hang: detail.ten_hang,
+          so_kien: databasePackageCountOrNull(detail.so_kien),
+          net_weight: databaseNumberOrNull(detail.net_weight),
+          // Không gửi tiền hàng khi user không xem được, tránh ghi đè giá đang có.
+          ...(canViewPurchaseAmounts ? {
+            don_gia: databaseNumberOrNull(detail.don_gia),
+            tong_gia: databaseNumberOrNull(detail.tong_gia),
+          } : {}),
+        },
+      }));
+      const newPurchaseDetailPayloads = newPurchaseDetails.map((detail) => ({
+        detail,
+        payload: {
+          ma_hop_dong: database.purchase.ma_hop_dong,
           ten_hang: detail.ten_hang.trim(),
           so_kien: databasePackageCountOrNull(detail.so_kien),
           net_weight: databaseNumberOrNull(detail.net_weight),
@@ -2299,34 +2485,91 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             tong_gia: databaseNumberOrNull(detail.tong_gia),
           } : {}),
           don_vi_kien: detail.don_vi_kien || null,
-        });
+        },
+      }));
+      const containerDetailPackages = new Map([...changedContainerDetails, ...newContainerDetails]
+        .map((detail) => [detail.id_chi_tiet_container, databasePackageCountOrNull(detail.so_kien)]));
+
+      // allSettled: chờ mọi lệnh ghi song song xong hẳn rồi mới báo lỗi, để biết chắc phần nào đã lưu.
+      const parallelResults = await Promise.allSettled([
+        step(t("saveStepOrderInfo"), () => updatePostgresShipmentFields(database, data), { multiWrite: true }),
+        ...purchaseDetailPatches.map(({ detail, patch }) => step(
+          t("saveStepProduct", { name: detail.ten_hang }),
+          () => updateDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, detail.id_chi_tiet, patch),
+        )),
+        ...changedItemCodes.map((item) => step(
+          t("saveStepItemCode", { code: item.item_code }),
+          () => updateDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, item.id_item_code, {
+            item_code: item.item_code,
+            ma_nha_may: item.ma_nha_may || null,
+            ten_nha_may: item.ten_nha_may || null,
+          }),
+        )),
+        ...changedContainerDetails.map((detail) => step(
+          t("saveStepContainerCargo"),
+          () => updateDatabaseRow<ContainerDetailRecord>(databaseEndpoints.containerDetails, detail.id_chi_tiet_container, {
+            id_bl_container: detail.id_bl_container,
+            id_item_code: detail.id_item_code,
+            so_kien: containerDetailPackages.get(detail.id_chi_tiet_container) ?? null,
+          }),
+        )),
+      ]);
+      const parallelFailure = parallelResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (parallelFailure) throw parallelFailure.reason;
+      for (const { detail, payload } of newPurchaseDetailPayloads) {
+        const created = await step(t("saveStepProduct", { name: detail.ten_hang }), () => createDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, payload));
         for (const item of detail.itemCodes) {
           if (!item.item_code.trim()) continue;
           if (!created.id_chi_tiet) throw new Error("Backend không trả id_chi_tiet cho dòng hàng mới");
-          await createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
+          await step(t("saveStepItemCode", { code: item.item_code.trim() }), () => createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
             id_chi_tiet: created.id_chi_tiet,
             item_code: item.item_code.trim(),
             ma_nha_may: item.ma_nha_may || "",
             ten_nha_may: item.ten_nha_may || "",
-          });
+          }));
         }
       }
       for (const { detailId, item } of newItemCodes) {
-        await createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
+        await step(t("saveStepItemCode", { code: item.item_code.trim() }), () => createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
           id_chi_tiet: detailId,
           item_code: item.item_code.trim(),
           ma_nha_may: String(item.ma_nha_may || "").trim(),
           ten_nha_may: String(item.ten_nha_may || "").trim(),
-        });
+        }));
       }
       for (const detail of newContainerDetails) {
-        await createDatabaseRow<ContainerDetailRecord>(databaseEndpoints.containerDetails, {
+        await step(t("saveStepContainerCargo"), () => createDatabaseRow<ContainerDetailRecord>(databaseEndpoints.containerDetails, {
           id_bl_container: detail.id_bl_container,
           id_item_code: detail.id_item_code,
-          so_kien: databasePackageCountOrNull(detail.so_kien),
-        });
+          so_kien: containerDetailPackages.get(detail.id_chi_tiet_container) ?? null,
+        }));
       }
-      const logChanges = [
+      // B/L, container nhập tay: chạy sau khi đã lưu các trường của B/L chính (hãng tàu, cảng, ngày).
+      for (const bill of billChanges.changedBills) {
+        await step(t("saveStepBill", { code: bill.after }), () => updateDatabaseRow<XnkRecord>(databaseEndpoints.bills, bill.id, { ma_bl: bill.after }));
+      }
+      for (const container of billChanges.changedContainers) {
+        await step(t("saveStepContainer", { code: container.after }), () => updateDatabaseRow<ContainerRecord>(databaseEndpoints.containers, container.id, { ma_container: container.after }));
+      }
+      for (const container of billChanges.newContainers) {
+        await step(t("saveStepContainer", { code: container.code }), () => createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, { id_xnk: container.billId, ma_container: container.code }));
+      }
+      for (const bill of billChanges.newBills) {
+        const createdBill = await step(t("saveStepBill", { code: bill.code }), () => createDatabaseRow<XnkRecord>(databaseEndpoints.bills, {
+          ma_bl: bill.code,
+          ma_hop_dong: database.purchase.ma_hop_dong,
+          id_hang_tau: newBillCarrierId,
+          cang_di: formValue("Cảng đi") || null,
+          cang_den: formValue("Cảng đến") || null,
+          etd: toDateInputValue(formValue("ETD")) || null,
+          eta: toDateInputValue(formValue("ETA")) || null,
+          ata: toDateInputValue(formValue("ATA")) || null,
+        }));
+        if (!createdBill.id_xnk) throw new Error(`Backend không trả id_xnk cho B/L ${bill.code}`);
+        for (const code of bill.containers) {
+          await step(t("saveStepContainer", { code }), () => createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, { id_xnk: createdBill.id_xnk, ma_container: code }));
+        }
+      }      const logChanges = [
         ...Object.entries(data).map(([field, value]) => {
           const before = getOriginalSummaryValue(shipment.summaryFields, field).trim();
           // Nhật ký xem được bởi role khác (IT), nên không ghi số tiền.
@@ -2360,6 +2603,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             { item_code: "Mã", ma_nha_may: "Mã nhà máy", ten_nha_may: "Tên nhà máy" },
           );
         }),
+        ...billChanges.changedBills.map((bill) => `Số B/L: ${bill.before || "(trống)"} → ${bill.after}`),
+        ...billChanges.changedContainers.map((container) => `Số container: ${container.before || "(trống)"} → ${container.after}`),
+        ...billChanges.newBills.map((bill) => `thêm B/L ${bill.code}${bill.containers.length > 0 ? ` (container ${bill.containers.join(", ")})` : ""}`),
+        ...billChanges.newContainers.map((container) => `thêm container ${container.code} vào B/L ${container.billCode}`),
         ...newContainerDetails.map((detail) => `thêm chi tiết container ${detail.id_bl_container}: ${detail.so_kien || 0} kiện`),
         ...changedContainerDetails.flatMap((detail) => describeEditedFields(
           `container ${detail.id_bl_container}`,
@@ -2377,7 +2624,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setIsDetailsEditing(false);
       notify("Đã cập nhật chi tiết đơn hàng", "success");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Không thể cập nhật chi tiết đơn hàng", "error");
+      const message = error instanceof Error ? error.message : "Không thể cập nhật chi tiết đơn hàng";
+      if (savedWrites > 0 || partialStepFailed) {
+        // Đã ghi được một phần: tải lại để form khớp DB, tránh lưu lại tạo trùng B/L / container / dòng hàng.
+        notify(t("detailsPartiallySaved", { error: message }), "error");
+        await onRefresh?.().catch(() => undefined);
+        setIsDetailsEditing(false);
+      } else {
+        notify(message, "error");
+      }
     } finally {
       setIsSavingDetails(false);
     }
@@ -2448,7 +2703,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       });
       await onRefresh?.();
       notify(`Đã chuyển đơn ${shipment.orderCode} sang trạng thái Hủy`, "success");
-      handleModalClose();
+      leavePage();
     } catch (error) {
       notify(error instanceof Error ? error.message : "Không thể cập nhật trạng thái đơn hàng", "error");
     } finally {
@@ -2458,19 +2713,27 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   return (
     <>
-    <Modal
-      isOpen={isOpen}
-      onClose={handleModalClose}
-      contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
-      className={`mx-2 my-2 flex h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl flex-col overflow-hidden transition-[width,transform] duration-300 sm:mx-4 sm:my-4 sm:h-[94vh] sm:w-full ${previewUrl && !isPreviewCollapsed && !isPreviewMaximized ? "md:w-[calc(50vw-1.5rem)] md:max-w-none md:-translate-x-1/2" : ""}`}
-    >
+    {/* Đang xem file (từ md): như modal cũ — nền mờ phủ cả trang, nội dung đơn nổi ở nửa trái, file ở nửa phải. */}
+    {isSplitPreview && <div className="fixed inset-0 z-[100000] hidden bg-gray-400/50 backdrop-blur-[32px] md:block" aria-hidden="true" />}
+    <div className={isSplitPreview
+      ? "flex w-full min-w-0 flex-col gap-3 custom-scrollbar md:fixed md:bottom-4 md:left-4 md:top-4 md:z-[100000] md:w-[calc(50vw-1.5rem)] md:overflow-y-auto md:overscroll-contain md:rounded-3xl md:bg-white md:p-4 md:shadow-2xl dark:md:bg-gray-900"
+      : "flex w-full min-w-0 flex-col gap-3"}>
+      <button
+        type="button"
+        onClick={() => void handleBack()}
+        className="inline-flex min-h-9 w-fit items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-gray-500 hover:text-brand-600 dark:text-gray-400 dark:hover:text-brand-300"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+        {t("backToShipmentList")}
+      </button>
+    <section className="flex min-w-0 flex-col rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
       {/* Header */}
       <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-4 pb-3 pt-4 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pb-4 sm:pt-6">
-        <div className="min-w-0 flex flex-col gap-1 pr-10 sm:pr-0">
+        <div className="min-w-0 flex flex-col gap-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
-            <h2 className="min-w-0 break-all text-base font-bold tracking-wide text-gray-900 dark:text-white sm:text-lg font-mono">
+            <h1 className="min-w-0 break-all text-base font-bold tracking-wide text-gray-900 dark:text-white sm:text-lg font-mono">
               {shipment.orderCode}
-            </h2>
+            </h1>
             <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${flowColor}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${flowDotColor}`} />
               <span className="truncate">{flowLabel}</span>
@@ -2489,11 +2752,14 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         {/* Missing docs badge */}
       </div>
 
-      {/* Tabs */}
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-1 border-b border-gray-100 px-3 py-2 no-scrollbar dark:border-gray-800 sm:flex-nowrap sm:overflow-x-auto sm:px-6">
+      {/* Tabs: dính dưới header app khi cuộn trang. */}
+      <div className={`sticky z-30 flex flex-shrink-0 items-start gap-2 border-b border-gray-100 bg-white/95 px-3 py-2 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95 sm:items-center sm:px-6 ${isSplitPreview ? "top-[65px] md:top-0" : "top-[65px] lg:top-[73px]"}`}>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 no-scrollbar sm:flex-nowrap sm:overflow-x-auto">
         {TAB_LIST.filter((tab) => isTabVisible(tab.key)).map(tab => (
           <button
             key={tab.key}
+            type="button"
+            aria-current={currentTab === tab.key ? "page" : undefined}
             onClick={() => setActiveTab(tab.key)}
             className={`inline-flex min-w-0 basis-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-all duration-150 sm:basis-auto sm:flex-shrink-0 sm:flex-none sm:justify-start sm:px-3 sm:py-1.5 ${
               currentTab ===tab.key
@@ -2506,11 +2772,22 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           </button>
         ))}
       </div>
+        {/* Đóng chi tiết đơn, về danh sách ở trang chủ (đang sửa dở thì hỏi trước như nút "Danh sách đơn hàng"). */}
+        <button
+          type="button"
+          onClick={() => void handleBack()}
+          aria-label={t("backToShipmentList")}
+          title={t("backToShipmentList")}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+        </button>
+      </div>
 
       <input id="shipment-document-upload" type="file" className="hidden" accept={DOCUMENT_FILE_ACCEPT} multiple={allowMultipleUpload} onChange={handleUploadSelected} />
 
       {/* Tab Content */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 custom-scrollbar sm:px-6 sm:py-5">
+      <div className="min-w-0 px-3 py-4 sm:px-6 sm:py-5">
 
         {isCancelled && (
           <div className="mb-4 rounded-xl bg-error-50 px-4 py-3 text-sm font-medium text-error-600 dark:bg-error-500/10 dark:text-error-400">
@@ -2519,7 +2796,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
 
         {canUploadDocuments && (isOcrAnalyzing || ocrUploadFile || ocrUploadError) && (
-          <div className="mb-5">
+          <div id="ocr-review" className="mb-5 scroll-mt-36">
             <p className="text-sm font-semibold text-brand-700 dark:text-brand-300">
               {isOcrAnalyzing ? t("analyzingDocument") : t("reviewBeforeSave", { document: ocrUploadDocId || "" })}
             </p>
@@ -2633,15 +2910,17 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     </section>
                   ))}
                 </div>
-                {missingOcrFields.length > 0 && (
+                {missingOcrFields.length > 0 && ocrUploadRows.length > 0 && (
                   <p className="mt-3 text-xs text-error-600 dark:text-error-400">
                     {t("requiredMissing", { fields: missingOcrFields.map((field) => localizeSheetField(field, t)).join(", ") })}
                   </p>
                 )}
                 {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
-                <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadRequestId(""); setOcrUploadRows([]); setPklTargetDetailIds([]); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
-                  <button type="button" onClick={handleConfirmOcrUpload} disabled={!canUploadDocuments || isOcrSaving || missingOcrFields.length > 0} title={missingOcrFields.length > 0 ? t("requiredMissing", { fields: missingOcrFields.map((field) => localizeSheetField(field, t)).join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? t("saving") : t("confirmSave")}</button>
+                <p className="mt-4 text-[11px] leading-5 text-gray-500 dark:text-gray-400">{t("ocrSaveOptionsHint")}</p>
+                <div className="mt-2 flex flex-wrap justify-end gap-2">
+                  <button type="button" onClick={() => { clearOcrUpload(); setOcrUploadError(""); }} disabled={isOcrSaving} className="min-h-9 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
+                  <button type="button" onClick={() => void handleSaveOcrFileOnly()} disabled={!canUploadDocuments || isOcrSaving} className="min-h-9 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">{isOcrSaving ? t("saving") : t("ocrSaveFileOnly")}</button>
+                  <button type="button" onClick={() => void handleConfirmOcrUpload()} disabled={!canUploadDocuments || isOcrSaving || ocrUploadRows.length === 0 || missingOcrFields.length > 0} title={ocrUploadRows.length === 0 ? t("ocrNoDataUseFileOnly") : missingOcrFields.length > 0 ? t("requiredMissing", { fields: missingOcrFields.map((field) => localizeSheetField(field, t)).join(", ") }) : undefined} className="min-h-9 rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? t("saving") : t("ocrSaveAndUpdate")}</button>
                 </div>
               </>
             )}
@@ -2667,10 +2946,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{t("shippingInformation")}</p>
                 <div className="flex flex-col gap-2">
-                  <InfoRow label={t("containerNumber")} value={overviewInfo.container || t("notAvailable")} mono />
                   <InfoRow label={t("carrier")} value={shipment.vessel || t("notAvailable")} />
-                  <InfoRow label="Bill of Lading" value={shipment.bill || t("notAvailable")} mono />
                   <InfoRow label={t("destinationPort")} value={shipment.port || t("notAvailable")} />
+                  {/* Số B/L và số container tách 2 dòng, chỉ là chữ (bôi đen copy được); tracking bấm ở bảng danh sách đơn. */}
+                  <InfoRow label={t("billNumber")} value={overviewBillNumbers || t("notAvailable")} mono />
+                  <InfoRow label={t("containerCode")} value={overviewContainerNumbers || t("notAvailable")} mono />
                 </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
@@ -2725,156 +3005,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               </div>
               
             </div>
-          </div>
-        )}
-
-        {/* ── JOURNEY ── */}
-        {canUseTracking && currentTab ==="journey" && (
-          <div className="flex flex-col gap-6">
-            <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02] sm:p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                    {t("scheduleLookup")}
-                  </p>
-                  <p className="mt-2 text-sm font-medium text-gray-800 dark:text-white/90">
-                    {shipment.vessel || t("unknownCarrier")}
-                  </p>
-                    <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">
-                    {t("trackingHelp")}
-                  </p>
-                  {trackingCode && (
-                    <p className="mt-1 text-xs font-mono text-gray-400 dark:text-gray-500">
-                      {t("trackingCode", { code: trackingCode })}
-                    </p>
-                  )}
-                </div>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 flex-shrink-0 text-brand-500">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="2" y1="12" x2="22" y2="12" />
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                </svg>
-              </div>
-
-              {availableTrackingCodes.length > 1 && (
-                <label className="mt-4 flex flex-col gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300">
-                  <span>{t("selectTrackingContainer")}</span>
-                  <select
-                    value={trackingCode}
-                    onChange={(event) => setSelectedTrackingCode(event.target.value)}
-                    disabled={isOpeningTracking}
-                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-800 outline-none focus:border-brand-500 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                  >
-                    {availableTrackingCodes.map((code) => <option key={code} value={code}>{code}</option>)}
-                  </select>
-                </label>
-              )}
-
-              {carrierTrackingLink && (isEvergreenTracking || carrierTrackingUrl) ? (
-                <>
-                  {carrierTrackingLink.requiresManualCode && (
-                    <p className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
-                      {t("copyTrackingCode")}
-                    </p>
-                  )}
-                  {isEvergreenTracking ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => void handleEvergreenTracking()}
-                        disabled={!evergreenContainerNo || isOpeningTracking}
-                        className="mt-4 flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-500 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/30 sm:px-4"
-                      >
-                        <span className="min-w-0 break-words text-left leading-5">
-                          {isOpeningTracking ? t("openingEvergreenTracking") : t("trackEvergreen")}
-                        </span>
-                        {isOpeningTracking ? (
-                          <svg className="flex-shrink-0 animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="23 4 23 10 17 10" />
-                            <polyline points="1 20 1 14 7 14" />
-                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                          </svg>
-                        ) : (
-                          <svg className="flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                            <polyline points="15 3 21 3 21 9" />
-                            <line x1="10" y1="14" x2="21" y2="3" />
-                          </svg>
-                        )}
-                      </button>
-                      {!evergreenContainerNo && (
-                        <p className="mt-2 text-xs text-warning-600 dark:text-warning-400">{t("addTrackingCode")}</p>
-                      )}
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleExternalCarrierTracking}
-                      className={`${carrierTrackingLink.requiresManualCode ? "mt-2" : "mt-4"} flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-500 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 dark:border-brand-500/30 sm:px-4`}
-                    >
-                      <span className="min-w-0 break-words text-left leading-5">{t("scheduleLookup")} {carrierTrackingLink.name}</span>
-                      <svg className="flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                        <polyline points="15 3 21 3 21 9" />
-                        <line x1="10" y1="14" x2="21" y2="3" />
-                      </svg>
-                    </button>
-                  )}
-                </>
-              ) : (
-                <div className="mt-4 rounded-xl border border-dashed border-warning-200 bg-warning-50/70 px-4 py-3 dark:border-warning-500/30 dark:bg-warning-500/10">
-                  <p className="text-sm font-semibold text-warning-700 dark:text-warning-300">
-                    {carrierTrackingLink ? t("trackingUnavailable") : t("carrierTrackingUnavailable")}
-                  </p>
-                  <p className="mt-1 text-xs text-warning-600 dark:text-warning-400">
-                    {carrierTrackingLink
-                      ? t("addTrackingCode")
-                      : t("noCarrierLink")}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Journey detail cards */}
-            {shipment.timeline && (
-              <div className="flex flex-col gap-3">
-                {shipment.timeline.map((stage, idx) => (
-                  <div
-                    key={stage.id || `timeline-stage-${idx}`}
-                    className={`flex min-w-0 gap-3 rounded-xl border p-3 transition-all sm:gap-4 sm:p-4 ${
-                      stage.isCompleted
-                        ? "border-success-100 bg-success-50/50 dark:border-success-500/20 dark:bg-success-500/5"
-                        : stage.isCurrent
-                        ? "border-brand-200 bg-brand-50 dark:border-brand-500/30 dark:bg-brand-500/10"
-                        : "border-gray-100 bg-gray-50/50 dark:border-gray-800 dark:bg-white/[0.01]"
-                    }`}
-                  >
-                    <div className={`flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
-                      stage.isCompleted ? "bg-success-500 text-white" : stage.isCurrent ? "bg-brand-500 text-white" : "bg-gray-200 text-gray-500 dark:bg-gray-700"
-                    }`}>
-                      {stage.isCompleted ? "✓" : idx + 1}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className={`min-w-0 break-words text-sm font-semibold ${
-                          stage.isCompleted ? "text-success-700 dark:text-success-400" : stage.isCurrent ? "text-brand-700 dark:text-brand-300" : "text-gray-500"
-                        }`}>{stage.label}</p>
-                        {stage.isCurrent && (
-                          <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-500 dark:bg-brand-500/10">{t("currentStage")}</span>
-                        )}
-                      </div>
-                      {stage.portName && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">📍 {stage.portName}</p>}
-                      {stage.timestamp && <p className="text-xs text-gray-400 mt-0.5">🕐 {formatDateTime(stage.timestamp)}</p>}
-                      {stage.note && (
-                        <p className="mt-1.5 text-xs text-warning-700 dark:text-warning-300 bg-warning-50 dark:bg-warning-500/10 rounded-lg px-2 py-1">
-                          ⚠️ {stage.note}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
 
@@ -3461,30 +3591,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               : labelKey ? t(labelKey) : localizeSheetField(field, t)}
                           </label>
                           {group.key === "importExport" && normalizedField === normalizeSheetField("BL NO.") ? (
-                            <div id={inputId} className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
-                              <table className="w-full table-fixed text-left">
-                                <thead className="bg-gray-100/80 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900 dark:text-gray-400">
-                                  <tr>
-                                    <th className="w-1/2 border-r border-gray-200 px-3 py-2.5 sm:px-4 dark:border-gray-700">{t("billNumber")}</th>
-                                    <th className="w-1/2 px-3 py-2.5 sm:px-4">{t("containerCode")}</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100 bg-white dark:divide-gray-800 dark:bg-white/[0.02]">
-                                  {billContainerRows.length > 0 ? billContainerRows.map((row) => (
-                                    <tr key={row.key}>
-                                      <td className="border-r border-gray-100 px-3 py-3 sm:px-4 dark:border-gray-800">
-                                        <span className="break-all font-semibold text-gray-800 dark:text-gray-200">{row.billNumber}</span>
-                                      </td>
-                                      <td className="px-3 py-3 sm:px-4">
-                                        {row.containerNumber ? <span className="break-all font-semibold text-cyan-700 dark:text-cyan-300">{row.containerNumber}</span> : <span className="text-sm text-gray-400">{t("noContainersForBill")}</span>}
-                                      </td>
-                                    </tr>
-                                  )) : (
-                                    <tr><td colSpan={2} className="px-4 py-5 text-center text-sm text-gray-400">—</td></tr>
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
+                            <BillContainerEditor
+                              bills={billForms}
+                              editing={canEditDetails && isDetailsEditing && Boolean(shipment.database)}
+                              inputId={inputId}
+                              onChange={setBillForms}
+                              translate={t}
+                            />
                           ) : normalizeSheetField(field) === normalizeSheetField("Nhà cung cấp") ? (
                             <select
                               id={inputId}
@@ -3586,7 +3699,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             </div>
             {canEditDetails && isDetailsEditing && (
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => { setDetailForm(shipment.summaryFields || {}); setPurchaseDetailForms(shipment.database?.details || []); setContainerDetailForms(flattenContainerDetails(shipment.database)); setIsDetailsEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
+                <button type="button" onClick={resetDetailForms} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
                 <button type="button" onClick={handleSaveDetails} disabled={isSavingDetails} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingDetails ? t("saving") : t("save")}</button>
               </div>
             )}
@@ -3657,7 +3770,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           </div>
         )}
       </div>
-    </Modal>
+    </section>
+    </div>
       {uploadProgress && (
         <UploadProgressToast
           fileName={uploadProgress.fileName}
@@ -3693,9 +3807,38 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             <button type="button" onClick={() => setIsPreviewMaximized((current) => !current)} className="hidden shrink-0 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 sm:inline-flex dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={isPreviewMaximized ? t("minimize") : t("maximize")}>
               {isPreviewMaximized ? t("minimize") : t("maximize")}
             </button>
+            {/* Đóng hẳn khung xem file (khác nút "→ File" chỉ thu gọn sang mép phải). */}
+            <button type="button" onClick={closePreview} aria-label={t("close")} title={t("close")} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-error-50 hover:text-error-600 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-error-500/10 dark:hover:text-error-400">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+            </button>
           </div>
-          <div className="flex min-h-0 flex-1 bg-gray-100 p-2 dark:bg-gray-950">
+          <div className="relative flex min-h-0 flex-1 bg-gray-100 p-2 dark:bg-gray-950">
             <iframe key={previewUrl} title={previewName} src={previewUrl} className="block h-full min-h-[320px] w-full rounded-lg bg-white" />
+            {/* Nút lớn hai bên khung xem để chuyển file trước / sau (cùng chức năng ‹ › trên thanh tiêu đề, phím ← →). */}
+            {previewItems.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setPreviewIndex((current) => Math.max(current - 1, 0))}
+                  disabled={previewIndex === 0}
+                  aria-label={t("previousFile")}
+                  title={`${t("previousFile")} (←)`}
+                  className="absolute left-3 top-1/2 z-10 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-gray-900/55 text-white shadow-lg backdrop-blur-sm transition hover:bg-gray-900/75 disabled:pointer-events-none disabled:opacity-0 sm:h-12 sm:w-12"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewIndex((current) => Math.min(current + 1, previewItems.length - 1))}
+                  disabled={previewIndex === previewItems.length - 1}
+                  aria-label={t("nextFile")}
+                  title={`${t("nextFile")} (→)`}
+                  className="absolute right-3 top-1/2 z-10 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-gray-900/55 text-white shadow-lg backdrop-blur-sm transition hover:bg-gray-900/75 disabled:pointer-events-none disabled:opacity-0 sm:h-12 sm:w-12"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+                </button>
+              </>
+            )}
           </div>
           {/* Danh sách file của chứng từ: bấm để nhảy thẳng tới file, không phải mở từng cái. */}
           {previewItems.length > 1 && (
@@ -3704,6 +3847,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <button
                   key={`${item.url}-${index}`}
                   type="button"
+                  data-preview-index={index}
                   onClick={() => setPreviewIndex(index)}
                   aria-current={index === previewIndex ? "true" : undefined}
                   title={[item.fileName, item.meta].filter(Boolean).join(" · ")}
