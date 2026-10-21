@@ -156,6 +156,12 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return backendMessage || "Chi phí đã nằm trong đề nghị, không sửa / xóa được.";
     case "PAYMENT_COST_UNAVAILABLE":
       return backendMessage || "Chi phí đã được đưa vào đề nghị khác. Vui lòng tải lại danh sách chi phí.";
+    case "PAYMENT_CATEGORY_DUPLICATE":
+    case "PAYMENT_CATEGORY_PROTECTED":
+    case "PAYMENT_CATEGORY_IN_USE":
+      return backendMessage || "Không lưu được khoản phí này. Vui lòng kiểm tra lại.";
+    case "PAYMENT_CATEGORY_NOT_FOUND":
+      return "Không tìm thấy khoản phí (có thể đã bị đổi). Vui lòng tải lại danh mục.";
     case "GOODS_PAYMENT_MISMATCH":
       return backendMessage || "Cọc hàng + thanh toán tiền còn lại phải bằng tiền hàng của hợp đồng.";
     case "GOOGLE_CHAT_NOT_CONFIGURED":

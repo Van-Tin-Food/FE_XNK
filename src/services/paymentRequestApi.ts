@@ -48,6 +48,58 @@ export interface PaymentCost {
   createdAt: string;
 }
 
+/**
+ * Thông tin người thụ hưởng khi chuyển khoản: mỗi trường một dòng "Nhãn: giá trị" trong cột thong_tin_chuyen_khoan.
+ * Nhãn lưu (label) phải khớp TRANSFER_FIELDS ở BE (paymentRequestService.js) — BE kiểm tra trường bắt buộc theo nhãn.
+ * Quốc tế = đề nghị có khoản Cọc hàng / Thanh toán tiền còn lại.
+ */
+export type TransferKind = "domestic" | "international";
+export interface TransferField {
+  label: string;
+  /** Khoá bản dịch nhãn hiển thị. */
+  key: string;
+  required: boolean;
+  multiline?: boolean;
+}
+export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
+  domestic: [
+    { label: "Tên ngân hàng", key: "prTf_bankName", required: true },
+    { label: "Số tài khoản", key: "prTf_accountNumber", required: true },
+    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", required: true },
+    { label: "Nội dung thanh toán", key: "prTf_paymentNote", required: false },
+  ],
+  international: [
+    { label: "Nội dung thanh toán", key: "prTf_paymentNote", required: false },
+    { label: "Số IBAN người thụ hưởng", key: "prTf_iban", required: true },
+    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", required: true },
+    { label: "Địa chỉ người thụ hưởng", key: "prTf_beneficiaryAddress", required: false },
+    { label: "Mã SWIFT", key: "prTf_swift", required: true },
+    { label: "Tên ngân hàng thụ hưởng", key: "prTf_beneficiaryBank", required: true },
+    { label: "Địa chỉ ngân hàng thụ hưởng", key: "prTf_beneficiaryBankAddress", required: false },
+    { label: "Ngân hàng trung gian", key: "prTf_intermediaryBank", required: false, multiline: true },
+  ],
+};
+
+/** "Nhãn: giá trị" từng dòng → { nhãn: giá trị }. Dòng không theo mẫu (dữ liệu cũ) gom vào khoá "". */
+export function parseTransferInfo(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const match = /^([^:]{1,60}):\s*(.*)$/.exec(line.trim());
+    if (match) values[match[1].trim()] = match[2].trim();
+    else if (line.trim()) values[""] = [values[""], line.trim()].filter(Boolean).join(" ");
+  }
+  return values;
+}
+
+/** Ghép các trường đã điền thành khối "Nhãn: giá trị" (bỏ trường trống, xuống dòng trong ô gộp thành "; "). */
+export function buildTransferInfo(kind: TransferKind, values: Record<string, string>): string {
+  return TRANSFER_FIELDS[kind]
+    .map((field) => [field.label, (values[field.label] || "").split(/\r?\n/).map((part) => part.trim()).filter(Boolean).join("; ")] as const)
+    .filter(([, value]) => value)
+    .map(([label, value]) => `${label}: ${value}`)
+    .join("\n");
+}
+
 /** Hình thức thanh toán: tiền mặt / chuyển khoản. */
 export const PAYMENT_METHODS = ["chuyen_khoan", "tien_mat"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
@@ -73,7 +125,8 @@ export interface PaymentRequest {
   /** Đã gửi lên Google Chat (false = nháp). */
   sent: boolean;
   status: PaymentRequestStatus;
-  rejectReason: string;
+  /** Ghi chú duyệt (cột ghi_chu_duyet): lý do khi từ chối, ghi chú (không bắt buộc) khi duyệt. */
+  decisionNote: string;
   hasRed: boolean;
   costCount: number;
   costs: PaymentCost[];
@@ -218,7 +271,7 @@ function normalizeRequest(row: unknown): PaymentRequest | null {
     link: str(row.link),
     sent: row.da_gui === true,
     status: (PAYMENT_STATUSES as readonly number[]).includes(status) ? status as PaymentRequestStatus : 0,
-    rejectReason: str(row.ly_do_tu_choi),
+    decisionNote: str(row.ghi_chu_duyet),
     hasRed: row.has_red === true,
     costCount: Number(row.cost_count ?? costs.length) || 0,
     costs,

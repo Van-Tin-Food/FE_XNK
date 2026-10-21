@@ -162,9 +162,10 @@ const AppSidebar: React.FC = () => {
                 {showText && <span className="ml-auto text-xs">{catalogOpen ? "−" : "+"}</span>}
               </button>
               {catalogOpen && showText && <ul className="mt-1 space-y-1 pl-11">
-                <li><Link href="/master-data?catalog=suppliers" className={`menu-dropdown-item ${pathname === "/master-data" && searchParams.get("catalog") !== "carriers" && searchParams.get("catalog") !== "warehouses" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("suppliers")}</Link></li>
+                <li><Link href="/master-data?catalog=suppliers" className={`menu-dropdown-item ${pathname === "/master-data" && !["carriers", "warehouses", "paymentCategories"].includes(searchParams.get("catalog") || "") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("suppliers")}</Link></li>
                 <li><Link href="/master-data?catalog=carriers" className={`menu-dropdown-item ${searchParams.get("catalog") === "carriers" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("carriers")}</Link></li>
                 <li><Link href="/master-data?catalog=warehouses" className={`menu-dropdown-item ${searchParams.get("catalog") === "warehouses" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("warehouses")}</Link></li>
+                <li><Link href="/master-data?catalog=paymentCategories" className={`menu-dropdown-item ${searchParams.get("catalog") === "paymentCategories" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("paymentCategories")}</Link></li>
               </ul>}
             </li>
           )}

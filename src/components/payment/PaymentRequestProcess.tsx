@@ -33,7 +33,9 @@ const NODE_STYLES: Record<NodeState, { circle: string; line: string; label: stri
 };
 
 const nodeIcon = (state: NodeState, index: number) => (state === "done" ? "✓" : state === "rejected" ? "✕" : String(index + 1));
-const BUTTON_PRIMARY = "h-11 rounded-lg bg-brand-500 px-5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50";
+/** Chờ duyệt trên Google Chat: chu kỳ hỏi lại trạng thái đề nghị. */
+const POLL_MS = 8000;
+const BUTTON_PRIMARY ="h-11 rounded-lg bg-brand-500 px-5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50";
 const BUTTON_SECONDARY = "h-11 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800";
 
 function Stepper({ titles, states }: { titles: string[]; states: NodeState[] }) {
@@ -91,6 +93,39 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   }, [id, reloadKey, t]);
 
   const reload = useCallback(() => setReloadKey((key) => key + 1), []);
+
+  // Đã gửi, đang chờ duyệt trên Google Chat: hỏi lại BE mỗi POLL_MS (tab đang mở) và ngay khi quay lại tab, có kết quả
+  // duyệt / từ chối (hoặc ai đó sửa / hủy) thì cập nhật trang luôn, không cần F5. Đang sửa đề nghị thì không hỏi.
+  const awaitingDecision = Boolean(request && request.sent && request.status === 0 && !editing);
+  const currentVersion = request?.updatedAt || "";
+  useEffect(() => {
+    if (!awaitingDecision) return undefined;
+    let stopped = false;
+    let running = false;
+    const check = async () => {
+      if (stopped || running || document.visibilityState !== "visible") return;
+      running = true;
+      try {
+        const fresh = await getPaymentRequest(id);
+        if (stopped || (fresh.status === 0 && fresh.updatedAt === currentVersion && fresh.sent)) return;
+        setRequest(fresh);
+        if (fresh.status === 1) notify(t("prLiveApproved", { id: fresh.id, name: fresh.approverName || "—" }), "success");
+        else if (fresh.status === -1) notify(t("prLiveRejected", { id: fresh.id, name: fresh.approverName || "—" }), "error");
+      } catch {
+        // Lỗi mạng tạm thời: lần sau hỏi lại.
+      } finally {
+        running = false;
+      }
+    };
+    const timer = window.setInterval(() => void check(), POLL_MS);
+    const onVisible = () => { if (document.visibilityState === "visible") void check(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [awaitingDecision, currentVersion, id, notify, t]);
 
   if (error && !request) {
     return (
@@ -319,6 +354,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
             <div className="space-y-2">
               <p className="flex items-center gap-2 text-sm font-medium text-warning-700 dark:text-warning-300"><span className="h-2 w-2 animate-pulse rounded-full bg-warning-500" />{t("prWaitingApproval")}</p>
               <p className="text-sm text-gray-600 dark:text-gray-300">{t("prHowToApprove")}</p>
+              {awaitingDecision && <p className="text-xs text-gray-500">{t("prLiveHint")}</p>}
               <div className="flex flex-wrap items-center gap-2">
                 <code className="rounded-lg bg-gray-100 px-3 py-2 font-mono text-sm text-gray-800 dark:bg-gray-800 dark:text-gray-100">@… {request.id}</code>
                 <button type="button" onClick={() => void copyCode()} className="h-9 rounded-lg px-3 text-sm font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-500/10">{copied ? t("prCopied") : t("prCopy")}</button>
@@ -326,13 +362,19 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
             </div>
           )}
           {(request.status === 1 || request.status === 2) && (
-            <p className="text-sm text-success-700 dark:text-success-300">✓ {t("prApprovedBy", { name: request.approverName || "—", time: formatDateTime(request.updatedAt, language) })}</p>
+            <div className="space-y-2">
+              <p className="text-sm text-success-700 dark:text-success-300">✓ {t("prApprovedBy", { name: request.approverName || "—", time: formatDateTime(request.updatedAt, language) })}</p>
+              {/* Ghi chú người duyệt nhập trên Google Chat (không bắt buộc) */}
+              {request.decisionNote && (
+                <p className="whitespace-pre-line break-words rounded-lg bg-success-50 px-3 py-2 text-sm text-success-800 dark:bg-success-500/10 dark:text-success-200"><span className="font-semibold">{t("prDecisionNote")}:</span> {request.decisionNote}</p>
+              )}
+            </div>
           )}
           {cancelled && <p className="text-sm text-gray-600 dark:text-gray-300">🚫 {t("prCancelledInfo", { time: formatDateTime(request.updatedAt, language) })}</p>}
           {request.status === -1 && (
             <div className="space-y-3">
               <p className="text-sm font-medium text-error-700 dark:text-error-300">{t("prRejectedBy", { name: request.approverName || "—", time: formatDateTime(request.updatedAt, language) })}</p>
-              <p className="break-words rounded-lg bg-error-50 px-3 py-2 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-300"><span className="font-semibold">{t("prRejectReason")}:</span> {request.rejectReason}</p>
+              <p className="break-words rounded-lg bg-error-50 px-3 py-2 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-300"><span className="font-semibold">{t("prRejectReason")}:</span> {request.decisionNote}</p>
               {canEdit && <button type="button" onClick={startEdit} className={`${BUTTON_PRIMARY} w-full sm:w-auto`}>✎ {t("prEditAfterReject")}</button>}
             </div>
           )}

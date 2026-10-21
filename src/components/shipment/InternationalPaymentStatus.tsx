@@ -6,8 +6,8 @@ import { useLanguage } from "@/context/LanguageContext";
 import { getInternationalPaymentStatus, type GoodsPaymentState, type InternationalPaymentStatus as Status } from "@/services/paymentCostApi";
 
 // Tab Tổng quan: thanh toán tiền hàng (quốc tế) của hợp đồng theo 2 đợt — Cọc hàng và Thanh toán tiền còn lại — đã được
-// duyệt chưa (bộ phận mua hàng biết đã thanh toán tiền cọc / tiền hàng chưa). Đã duyệt = có đề nghị chứa khoản đó được
-// duyệt; đơn đã qua vận chuyển biển mà chưa có đề nghị = đã giao (coi như đã thanh toán). Kèm link các đề nghị liên quan.
+// duyệt chưa, kèm link đề nghị. Đã duyệt = có đề nghị chứa khoản đó được duyệt; đơn đã qua vận chuyển biển mà chưa có
+// đề nghị = đã giao (coi như đã thanh toán). Bảng tổng hợp mọi đơn nằm ở cột "Thanh toán QT" của bảng trang chủ.
 const LABEL_KEYS: Record<GoodsPaymentState, string> = {
   approved: "intlPaymentApproved",
   delivered: "intlPaymentDelivered",

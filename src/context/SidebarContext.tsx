@@ -51,6 +51,17 @@ export const SidebarProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, []);
 
+  // Màn laptop (1024–1679px, gồm 15,6" ở tỉ lệ 125% = 1536px): sidebar mặc định thu nhỏ (chỉ icon, 90px) để bảng / nội dung
+  // rộng hơn; từ 1680px mặc định mở rộng. Chỉ đặt lại khi tải trang hoặc khi cửa sổ đổi qua mốc 1680px — người dùng bấm
+  // nút ☰ để mở / thu tuỳ ý.
+  useEffect(() => {
+    const laptop = window.matchMedia("(max-width: 1679px)");
+    const apply = () => setIsExpanded(!laptop.matches);
+    apply();
+    laptop.addEventListener("change", apply);
+    return () => laptop.removeEventListener("change", apply);
+  }, []);
+
   const toggleSidebar = () => {
     setIsExpanded((prev) => !prev);
   };

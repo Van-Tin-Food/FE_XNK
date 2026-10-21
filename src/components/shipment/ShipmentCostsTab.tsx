@@ -29,6 +29,13 @@ const CONTAINER_CODE = "CONT";
 const cellKey = (target: Target, categoryId: string) => `${target}|${categoryId}`;
 const INPUT = "h-10 min-w-0 rounded-lg border bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:bg-gray-50 disabled:text-gray-500 dark:bg-gray-900 dark:text-white dark:disabled:bg-gray-800";
 const LABEL = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-400";
+/** Tiêu đề 2 mục "Chi phí theo hợp đồng" / "Chi phí theo container": chữ lớn, đậm, vạch màu bên trái cho nổi bật. */
+const SECTION_TITLE = "mb-3 flex flex-wrap items-center border-l-4 border-brand-500 pl-3 text-base font-bold text-gray-900 sm:text-lg dark:text-white";
+/**
+ * Lưới một khoản: thẻ hẹp = [khoản phí | số tiền | xoá] + nội dung ở hàng dưới; thẻ từ 24rem (container query @sm, theo
+ * bề rộng thẻ chứ không theo màn hình — thẻ nằm trong cột trái / phải) = [khoản phí | số tiền | nội dung | xoá] một hàng.
+ */
+const ENTRY_GRID = "grid grid-cols-[minmax(0,1fr)_7.5rem_auto] items-center gap-2 @sm:grid-cols-[minmax(0,1.1fr)_7rem_minmax(0,1fr)_auto]";
 type NewEntry = { categoryId: string; amount: string; note: string };
 const EMPTY_ENTRY: NewEntry = { categoryId: "", amount: "", note: "" };
 
@@ -221,33 +228,36 @@ export default function ShipmentCostsTab({ contract }: Props) {
     );
   };
 
-  const costCard = (target: Target, title: React.ReactNode, editable: boolean) => {
+  const costCard = (target: Target, title: React.ReactNode, editable: boolean, fill = false) => {
     const entries = entriesOf(target);
     const locked = lockedByTarget.get(target) || [];
     const entry = newEntry[target] || EMPTY_ENTRY;
     const groups = optionGroups(target);
     const isContract = target === CONTRACT_TARGET;
     const entryKind = goodsPaymentKind(categoriesById.get(entry.categoryId));
+    const showGoodsSplit = isContract && goodsTotal && (depositCategory || balanceCategory);
     return (
-      <div key={target} className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 dark:border-gray-700 dark:bg-white/[0.02]">
-        <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-2 dark:border-gray-800">
+      <div key={target} className={`@container rounded-xl border border-gray-200 bg-white p-3 sm:p-4 dark:border-gray-700 dark:bg-white/[0.02] ${fill ? "lg:flex-1" : ""}`}>
+        {/* Hàng tiêu đề: hợp đồng / cont | (hợp đồng) tiền hàng = cọc + còn lại | tổng — cùng một hàng, hẹp thì xuống dòng */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-100 pb-2 dark:border-gray-800">
           <p className={`min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-white ${isContract ? "" : "font-mono"}`}>{title}</p>
-          <p className="shrink-0 text-sm text-gray-500">{t("pcTotal")}: <span className="font-bold tabular-nums text-gray-900 dark:text-white">{money(targetTotal(target))}</span></p>
+          {showGoodsSplit && (
+            <span className="min-w-0 rounded-md bg-brand-50/70 px-2 py-0.5 text-xs text-gray-600 dark:bg-brand-500/10 dark:text-gray-300">
+              {t("pcGoodsSplit", { goods: money(goodsTotal), deposit: money(contractAmount(depositCategory) || "0"), balance: money(contractAmount(balanceCategory) || "0") })}
+            </span>
+          )}
+          <p className="ml-auto shrink-0 text-sm text-gray-500">{t("pcTotal")}: <span className="font-bold tabular-nums text-gray-900 dark:text-white">{money(targetTotal(target))}</span></p>
         </div>
-
-        {/* Hợp đồng: tóm tắt tiền hàng = cọc + còn lại */}
-        {isContract && goodsTotal && (depositCategory || balanceCategory) && (
-          <p className="mt-2 rounded-lg bg-brand-50/60 px-2.5 py-1.5 text-xs text-gray-600 dark:bg-brand-500/10 dark:text-gray-300">
-            {t("pcGoodsSplit", { goods: money(goodsTotal), deposit: money(contractAmount(depositCategory) || "0"), balance: money(contractAmount(balanceCategory) || "0") })}
-          </p>
-        )}
 
         {entries.length === 0 && locked.length === 0 && <p className="mt-3 text-sm text-gray-400">{t("pcNoEntries")}</p>}
         {(entries.length > 0 || locked.length > 0) && (
           <>
-            <div className="mt-3 flex justify-between px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            {/* Tiêu đề cột: Khoản phí | Số tiền | Nội dung (khi thẻ đủ rộng mới chia cột) */}
+            <div className={`${ENTRY_GRID} mt-3 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400`}>
               <span>{t("pcFeeLabel")}</span>
-              <span className={editable ? "mr-12" : ""}>{t("pcAmountLabel")}</span>
+              <span className="text-right">{t("pcAmountLabel")}</span>
+              <span className="hidden @sm:block">{t("pcNoteLabel")}</span>
+              <span className={editable ? "w-8" : ""} />
             </div>
             <ul className="mt-1 space-y-2">
               {entries.map((category) => {
@@ -255,22 +265,23 @@ export default function ShipmentCostsTab({ contract }: Props) {
                 const kind = goodsPaymentKind(category);
                 return (
                   <li key={key} className={`rounded-lg border p-2.5 ${dirtyKeys.includes(key) ? "border-warning-300 bg-warning-50/40 dark:border-warning-500/40 dark:bg-warning-500/5" : "border-gray-100 bg-gray-50/60 dark:border-gray-800 dark:bg-gray-800/40"}`}>
-                    <div className="flex items-center gap-2">
-                      <span className="line-clamp-2 min-w-0 flex-1 break-words text-sm font-medium text-gray-800 dark:text-gray-100" title={category.name}>{category.name}</span>
+                    {/* Một hàng: khoản phí | số tiền | nội dung | xoá; thẻ hẹp thì nội dung xuống dòng dưới */}
+                    <div className={ENTRY_GRID}>
+                      <span className="line-clamp-2 min-w-0 break-words text-sm font-medium text-gray-800 dark:text-gray-100" title={category.name}>{category.name}</span>
                       <input inputMode="decimal" aria-label={`${t("pcAmountLabel")} ${category.name}`} value={valueOf(key)} disabled={!editable}
                         onChange={(event) => setAmount(key, event.target.value)}
-                        className={`${INPUT} w-32 shrink-0 text-right font-semibold tabular-nums sm:w-36 ${invalidKeys.has(key) ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
-                      {editable && (
+                        className={`${INPUT} w-full text-right font-semibold tabular-nums ${invalidKeys.has(key) ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
+                      {(editable || noteOf(key)) ? (
+                        <input value={noteOf(key)} maxLength={500} disabled={!editable} placeholder={t("pcNotePlaceholder")} aria-label={`${t("prCostNote")} ${category.name}`}
+                          onChange={(event) => setNoteDrafts((current) => ({ ...current, [key]: event.target.value }))}
+                          className={`${INPUT} order-last col-span-3 w-full border-gray-200 @sm:order-none @sm:col-span-1 dark:border-gray-700`} />
+                      ) : <span className="hidden @sm:block" />}
+                      {editable ? (
                         <button type="button" onClick={() => removeEntry(key)} aria-label={`${t("prRemoveCost")} ${category.name}`} title={t("prRemoveCost")}
-                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10">✕</button>
-                      )}
+                          className="flex h-10 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10">✕</button>
+                      ) : <span />}
                     </div>
                     {kind === "balance" && balanceHint(parseAmountLoose(valueOf(key)))}
-                    {(editable || noteOf(key)) && (
-                      <input value={noteOf(key)} maxLength={500} disabled={!editable} placeholder={t("pcNotePlaceholder")} aria-label={`${t("prCostNote")} ${category.name}`}
-                        onChange={(event) => setNoteDrafts((current) => ({ ...current, [key]: event.target.value }))}
-                        className={`${INPUT} mt-2 h-9 w-full border-gray-200 text-xs dark:border-gray-700`} />
-                    )}
                   </li>
                 );
               })}
@@ -298,7 +309,8 @@ export default function ShipmentCostsTab({ contract }: Props) {
         {editable && groups.length > 0 && (
           <div className="mt-3 rounded-lg border border-dashed border-gray-300 p-2.5 dark:border-gray-700">
             <p className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">+ {t("pcAddTitle")}</p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_9rem]">
+            {/* Một hàng: khoản phí | số tiền | nội dung | nút thêm (thẻ hẹp thì xếp dọc) */}
+            <div className="grid grid-cols-1 items-end gap-2 @sm:grid-cols-[minmax(0,1.1fr)_7rem_minmax(0,1fr)_auto]">
               <label className="min-w-0">
                 <span className={LABEL}>{t("pcFeeLabel")}</span>
                 <select value={entry.categoryId}
@@ -324,21 +336,20 @@ export default function ShipmentCostsTab({ contract }: Props) {
                   onKeyDown={(event) => { if (event.key === "Enter") addEntry(target); }}
                   className={`${INPUT} w-full border-gray-200 text-right tabular-nums dark:border-gray-700`} />
               </label>
-              <label className="min-w-0 sm:col-span-2">
+              <label className="min-w-0">
                 <span className={LABEL}>{t("pcNoteLabel")}</span>
                 <input value={entry.note} maxLength={500} placeholder={t("pcNotePlaceholder")}
                   onChange={(event) => setNewEntry((current) => ({ ...current, [target]: { ...entry, note: event.target.value } }))}
                   onKeyDown={(event) => { if (event.key === "Enter") addEntry(target); }}
                   className={`${INPUT} w-full border-gray-200 dark:border-gray-700`} />
               </label>
-            </div>
-            {entryKind === "balance" && balanceHint(parseAmountLoose(entry.amount))}
-            <div className="mt-2 flex justify-end">
               <button type="button" onClick={() => addEntry(target)} disabled={!entry.categoryId || !entry.amount.trim()}
-                className="h-10 w-full rounded-lg bg-brand-50 px-4 text-sm font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50 sm:w-auto dark:bg-brand-500/10 dark:text-brand-300">
-                + {t("pcAddFee")}
+                aria-label={t("pcAddFee")} title={t("pcAddFee")}
+                className="h-10 w-full whitespace-nowrap rounded-lg bg-brand-50 px-4 text-sm font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50 @sm:w-10 @sm:px-0 dark:bg-brand-500/10 dark:text-brand-300">
+                +<span className="@sm:hidden"> {t("pcAddFee")}</span>
               </button>
             </div>
+            {entryKind === "balance" && balanceHint(parseAmountLoose(entry.amount))}
           </div>
         )}
       </div>
@@ -358,18 +369,19 @@ export default function ShipmentCostsTab({ contract }: Props) {
       {data.categories.length === 0 && <p className="text-sm text-gray-500">{t("pcNoGroups")}</p>}
 
       {data.categories.length > 0 && (showContract || showContainers) && (
-        <div className={`grid grid-cols-1 items-start gap-5 ${showContract && showContainers ? "lg:grid-cols-2" : ""}`}>
+        // Hai khối ngang hàng: tiêu đề cùng hàng, thẻ hợp đồng kéo cao bằng cột container (từ lg).
+        <div className={`grid grid-cols-1 gap-5 ${showContract && showContainers ? "lg:grid-cols-2 lg:items-stretch" : ""}`}>
           {showContract && (
-            <section className="min-w-0">
-              <h3 className="mb-2 text-sm font-semibold text-gray-800 dark:text-white">{t("pcContractSection")}{readOnlyTag}</h3>
-              {costCard(CONTRACT_TARGET, `${t("prContract")} ${data.contract}`, canEditContainer)}
+            <section className="flex min-w-0 flex-col">
+              <h3 className={SECTION_TITLE}>{t("pcContractSection")}{readOnlyTag}</h3>
+              {costCard(CONTRACT_TARGET, `${t("prContract")} ${data.contract}`, canEditContainer, true)}
               {data.seaPassed && <p className="mt-2 text-xs text-gray-500">{t("pcSeaPassedHint")}</p>}
             </section>
           )}
           {showContainers && (
             <section className="min-w-0">
-              <h3 className="mb-2 text-sm font-semibold text-gray-800 dark:text-white">
-                {t("pcContainerSection")}{data.containers.length > 0 && <span className="ml-1 font-normal text-gray-400">({data.containers.length})</span>}{readOnlyTag}
+              <h3 className={SECTION_TITLE}>
+                {t("pcContainerSection")}{data.containers.length > 0 && <span className="ml-1 text-sm font-medium text-gray-400">({data.containers.length})</span>}{readOnlyTag}
               </h3>
               {data.containers.length === 0
                 ? <p className="rounded-xl border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-500 dark:border-gray-700">{t("pcNoContainers")}</p>

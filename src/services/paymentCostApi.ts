@@ -154,8 +154,27 @@ export interface InternationalPaymentStatus {
   /** Trạng thái chung = đợt thanh toán còn lại (đã trả đủ tiền hàng). */
   status: GoodsPaymentState;
   requests: RequestRef[];
-  /** Từng đợt: cọc hàng, thanh toán tiền còn lại. */
-  items: Array<{ key: GoodsPaymentKind; status: GoodsPaymentState; requests: RequestRef[] }>;
+  /** Từng đợt: cọc hàng, thanh toán tiền còn lại. amount: chỉ có khi được xem tiền hàng (null = chưa nhập / không được xem). */
+  items: Array<{ key: GoodsPaymentKind; status: GoodsPaymentState; requests: RequestRef[]; amount: string | null }>;
+  /** Có khi được xem tiền hàng (quyền purchaseAmounts). */
+  showAmounts: boolean;
+  goodsTotal: string;
+}
+
+/** Trạng thái một đợt ở bảng danh sách đơn: đã duyệt / chờ duyệt / bị từ chối / đã giao (coi như đã trả) / chưa có đề nghị. */
+export type GoodsPaymentListState = "approved" | "pending" | "rejected" | "delivered" | "none";
+export type GoodsPaymentSummary = Record<string, Record<GoodsPaymentKind, GoodsPaymentListState>>;
+const LIST_STATES: GoodsPaymentListState[] = ["approved", "pending", "rejected", "delivered", "none"];
+
+/** Trang chủ: trạng thái cọc / còn lại của mọi đơn (theo mã hợp đồng) trong một request, cho cột "Thanh toán QT". */
+export async function getGoodsPaymentSummary(): Promise<GoodsPaymentSummary> {
+  const payload = await request("GET", "/international-payment/summary");
+  const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
+  const state = (value: unknown): GoodsPaymentListState => (LIST_STATES.includes(value as GoodsPaymentListState) ? value as GoodsPaymentListState : "none");
+  return Object.fromEntries(Object.entries(data).filter(([, row]) => isRecord(row)).map(([contract, row]) => {
+    const item = row as JsonRecord;
+    return [contract, { deposit: state(item.deposit), balance: state(item.balance) }];
+  }));
 }
 
 /** Hợp đồng đã được duyệt thanh toán tiền hàng (cọc / còn lại) chưa (tab Tổng quan, không có số tiền). */
@@ -169,7 +188,9 @@ export async function getInternationalPaymentStatus(contract: string): Promise<I
     requests: refs(data.requests),
     items: (Array.isArray(data.items) ? data.items : []).filter(isRecord)
       .filter((row) => row.key === "deposit" || row.key === "balance")
-      .map((row) => ({ key: row.key as GoodsPaymentKind, status: state(row.status), requests: refs(row.requests) })),
+      .map((row) => ({ key: row.key as GoodsPaymentKind, status: state(row.status), requests: refs(row.requests), amount: row.so_tien === null || row.so_tien === undefined ? null : str(row.so_tien) })),
+    showAmounts: "tong_tien_hang" in data,
+    goodsTotal: str(data.tong_tien_hang),
   };
 }
 

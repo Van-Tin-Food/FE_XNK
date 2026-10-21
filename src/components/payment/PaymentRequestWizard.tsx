@@ -6,16 +6,21 @@ import { useSystemNotification } from "@/context/SystemNotificationContext";
 import {
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABEL_KEYS,
+  TRANSFER_FIELDS,
+  buildTransferInfo,
   createPaymentRequest,
   getPaymentRequestOptions,
+  parseTransferInfo,
   updatePaymentRequest,
   type PaymentCategory,
   type PaymentCost,
   type PaymentMethod,
   type PaymentRequest,
   type PaymentRequestOptions,
+  type TransferKind,
 } from "@/services/paymentRequestApi";
 import { addVat, formatAmount, formatMoney, parseAmountLoose, parseVatInput, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
+import { goodsPaymentKind } from "@/services/paymentCostApi";
 import { PaymentFlowBadge, formatDueDate } from "./PaymentRequestParts";
 
 // Bước 1 "Tạo đề nghị" dạng hỏi lần lượt: trả lời xong câu nào thì câu tiếp theo mới hiện ra, câu đã trả lời thu lại
@@ -52,8 +57,8 @@ interface Props {
 }
 
 const STEP_COUNT = 3;
-/** Mức VAT hay dùng (bấm nhanh). */
-const VAT_PRESETS = ["0", "5", "8", "10"];
+/** Mức VAT hay dùng (bấm nhanh); mức khác gõ tay vào ô %. */
+const VAT_PRESETS = ["5", "8"];
 const SAVE_STEP = STEP_COUNT;
 const TYPE_ORDER = ["mua_hang", "ban_hang", "van_hanh", "phat_sinh"];
 const INPUT = "h-11 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
@@ -80,11 +85,6 @@ function vnDate(addDays = 0): string {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
   const [year, month, day] = today.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day + addDays)).toISOString().slice(0, 10);
-}
-
-function vnMonthEnd(): string {
-  const [year, month] = vnDate().split("-").map(Number);
-  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 }
 
 function StepCard({ index, title, state, summary, onChange, children }: {
@@ -173,7 +173,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [currency, setCurrency] = useState<PaymentCurrency | "">(editing?.currency || "");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">(editing?.paymentMethod || "");
   // Thông tin chuyển khoản (người thụ hưởng): một khối nhiều dòng, chọn chuyển khoản lần đầu thì điền sẵn khung mẫu.
-  const [transferInfo, setTransferInfo] = useState(editing?.transferInfo || "");
+  const [transferValues, setTransferValues] = useState<Record<string, string>>(() => parseTransferInfo(editing?.transferInfo || ""));
   const [active, setActive] = useState(editing ? SAVE_STEP : 0);
   const [reached, setReached] = useState(editing ? SAVE_STEP : 0);
   const [search, setSearch] = useState("");
@@ -236,8 +236,12 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const costCount = selectedCosts.length + manualRows.length;
   const transfer = paymentMethod === "chuyen_khoan";
   // Có ít nhất một dòng đã điền (dòng chỉ có nhãn "Ngân hàng:" không tính, BE cũng bỏ các dòng đó).
-  const transferLines = transferInfo.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !/^[^:]{1,40}:$/.test(line));
-  const recipientValid = !transfer || transferLines.length > 0;
+  // Thanh toán tiền hàng cho nhà cung cấp nước ngoài (cọc / còn lại) = chuyển khoản quốc tế: IBAN, SWIFT...
+  const internationalTransfer = selectedCosts.some((cost) => goodsPaymentKind({ code: cost.code, name: categoriesById.get(cost.categoryId)?.name || cost.categoryName }) !== null);
+  const transferKind: TransferKind = internationalTransfer ? "international" : "domestic";
+  const transferFields = TRANSFER_FIELDS[transferKind];
+  const missingTransfer = transfer ? transferFields.filter((field) => field.required && !(transferValues[field.label] || "").trim()) : [];
+  const recipientValid = missingTransfer.length === 0;
   const money = (value: string | null | undefined) => (currency ? formatMoney(value, currency, language) : formatAmount(value, language));
   const paymentDone = /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && Boolean(currency && paymentMethod && recipientValid);
   const complete = [costCount > 0 && otherValid && preparedVatValid, Boolean(content.trim()), paymentDone];
@@ -308,11 +312,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     ...selectedCosts.map((cost) => ({ key: cost.id, name: costLabel(cost), note: cost.note, target: targetOf(cost), amount: cost.amount, vatLine: vatLineOf(cost.amount, preparedVat(cost)) })),
     ...manualRows.map((row, index) => ({ key: row.key, name: categoriesById.get(row.categoryId)?.name || "—", note: row.note.trim(), target: "", amount: otherAmounts[index] || "0", vatLine: vatLineOf(otherAmounts[index], otherVats[index]) })),
   ];
-  const transferText = transfer ? transferLines.join("\n") : "";
-  const choosePaymentMethod = (value: PaymentMethod) => {
-    setPaymentMethod(value);
-    if (value === "chuyen_khoan" && !transferInfo.trim()) setTransferInfo(t("prTransferTemplate"));
-  };
+  const transferText = transfer ? buildTransferInfo(transferKind, transferValues) : "";
+  const choosePaymentMethod = (value: PaymentMethod) => setPaymentMethod(value);
 
   const save = async () => {
     if (saving || complete.some((done) => !done) || !currency || !paymentMethod) return;
@@ -505,8 +506,9 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                       const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-400";
                       return (
                         <li key={row.key} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-                          <div className="flex items-start gap-2">
-                            <label className="min-w-0 flex-1">
+                          {/* Một hàng: Khoản phí | Số tiền | Nội dung (màn hẹp xếp dọc) */}
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.3fr)_9.5rem_minmax(0,1fr)_auto] sm:items-end">
+                            <label className="min-w-0">
                               <span className={label}>{t("pcFeeLabel")}</span>
                               <select value={row.categoryId} onChange={(event) => updateVatRow(row, { categoryId: event.target.value })}
                                 className={`${INPUT} ${costsTouched && !row.categoryId ? "border-error-400" : ""}`}>
@@ -514,49 +516,41 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                 {manualCategories.map((item: PaymentCategory) => <option key={item.id} value={item.id}>{item.name}{item.flow === "do" ? " ⚠" : ""}</option>)}
                               </select>
                             </label>
-                            <span className="flex shrink-0 items-center gap-1 pt-6">
-                              {category && <PaymentFlowBadge flow={category.flow} />}
-                              <button type="button" onClick={() => setOthers((current) => current.filter((item) => item.key !== row.key))} aria-label={t("prRemoveCost")} title={t("prRemoveCost")}
-                                className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10">✕</button>
-                            </span>
-                          </div>
-                          {taxed ? (
-                            // Có thuế: nhập tiền trước thuế + % VAT (tự ra tổng) hoặc nhập thẳng tổng đã gồm VAT (tự ra trước thuế).
-                            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-end">
-                              <label className="min-w-0">
-                                <span className={label}>{t("prVatBase")}</span>
-                                <input inputMode="decimal" value={baseValueOf(row, index)} placeholder="1.000.000"
-                                  onChange={(event) => updateVatRow(row, { base: event.target.value, basis: "base" })}
-                                  className={`${INPUT} text-right tabular-nums`} />
-                              </label>
-                              <div className="min-w-0">
-                                <span className={label}>{t("prVatRate")}</span>
-                                <VatInput value={row.vat} label={t("prVatRate")} invalid={vatInvalid}
-                                  onChange={(value) => updateVatRow(row, { vat: value })} />
-                              </div>
-                              <label className="min-w-0">
-                                <span className={label}>{t("prVatTotal")}</span>
-                                <input inputMode="decimal" value={row.amount} placeholder="1.080.000"
-                                  onChange={(event) => updateRow(row.key, { amount: event.target.value, basis: "amount" })}
-                                  className={`${INPUT} text-right font-semibold tabular-nums ${amountInvalid ? "border-error-400" : ""}`} />
-                              </label>
-                              <p className="text-xs text-gray-500 sm:col-span-3">
-                                {otherAmounts[index] && otherVats[index] !== null ? vatLineOf(otherAmounts[index], otherVats[index]) : t("prVatHint")}
-                              </p>
-                            </div>
-                          ) : (
-                            <label className="mt-2 block sm:max-w-xs">
-                              <span className={label}>{t("pcAmountLabel")}</span>
-                              <input inputMode="decimal" value={row.amount} placeholder="1.250.000"
-                                onChange={(event) => updateRow(row.key, { amount: event.target.value })}
+                            <label className="min-w-0">
+                              <span className={label}>{taxed ? t("prVatTotal") : t("pcAmountLabel")}</span>
+                              <input inputMode="decimal" value={row.amount} placeholder={taxed ? "1.080.000" : "1.250.000"}
+                                onChange={(event) => updateRow(row.key, { amount: event.target.value, basis: "amount" })}
                                 className={`${INPUT} text-right font-semibold tabular-nums ${amountInvalid ? "border-error-400" : ""}`} />
                             </label>
+                            <label className="min-w-0">
+                              <span className={label}>{t("pcNoteLabel")}</span>
+                              <input value={row.note} maxLength={500} placeholder={t("prCostNotePlaceholder")}
+                                onChange={(event) => updateRow(row.key, { note: event.target.value })} className={INPUT} />
+                            </label>
+                            <span className="flex items-center justify-end gap-1">
+                              {category && <PaymentFlowBadge flow={category.flow} />}
+                              <button type="button" onClick={() => setOthers((current) => current.filter((item) => item.key !== row.key))} aria-label={t("prRemoveCost")} title={t("prRemoveCost")}
+                                className="flex h-11 w-10 items-center justify-center rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10">✕</button>
+                            </span>
+                          </div>
+                          {/* Có thuế: % VAT + tiền trước thuế (gõ trước thuế thì tự ra số tiền gồm VAT, gõ số tiền thì tự tách thuế) */}
+                          {taxed && (
+                            <div className="mt-2 flex flex-col gap-2 rounded-lg bg-gray-50 px-2.5 py-2 sm:flex-row sm:flex-wrap sm:items-center dark:bg-gray-800/50">
+                              <span className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                                <span className="font-semibold">VAT</span>
+                                <VatInput value={row.vat} label={t("prVatRate")} invalid={vatInvalid} onChange={(value) => updateVatRow(row, { vat: value })} />
+                              </span>
+                              <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                                <span className="shrink-0 font-semibold">{t("prVatBase")}</span>
+                                <input inputMode="decimal" value={baseValueOf(row, index)} placeholder="1.000.000"
+                                  onChange={(event) => updateVatRow(row, { base: event.target.value, basis: "base" })}
+                                  className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-right text-sm tabular-nums text-gray-800 outline-none focus:border-brand-400 sm:w-36 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                              </label>
+                              <span className="text-xs text-gray-500">
+                                {otherAmounts[index] && otherVats[index] !== null ? vatLineOf(otherAmounts[index], otherVats[index]) : t("prVatHint")}
+                              </span>
+                            </div>
                           )}
-                          <label className="mt-2 block">
-                            <span className={label}>{t("pcNoteLabel")}</span>
-                            <input value={row.note} maxLength={500} placeholder={t("prCostNotePlaceholder")}
-                              onChange={(event) => updateRow(row.key, { note: event.target.value })} className={INPUT} />
-                          </label>
                         </li>
                       );
                     })}
@@ -602,7 +596,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
               <p className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prDueDate")}</p>
               <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} aria-label={t("prDueDate")} className={INPUT} />
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {([["prQuickToday", vnDate()], ["prQuick3", vnDate(3)], ["prQuick7", vnDate(7)], ["prQuickMonthEnd", vnMonthEnd()]] as const).map(([key, value]) => (
+                {([["prQuickToday", vnDate()], ["prQuick3", vnDate(3)]] as const).map(([key, value]) => (
                   <button key={key} type="button" onClick={() => setDueDate(value)} className={`h-8 rounded-full border px-3 text-xs font-medium ${dueDate === value ? CHIP_ON : CHIP_OFF}`}>
                     {t(key)} · {formatDueDate(value).slice(0, 5)}
                   </button>
@@ -632,12 +626,36 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
               </div>
             </div>
           </div>
+          {/* Chuyển khoản: thông tin người thụ hưởng theo từng trường (trong nước / quốc tế), dấu * là bắt buộc */}
           {transfer && (
             <div className="mt-4 rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
-              <label htmlFor="transfer-info" className="block text-sm font-semibold text-gray-800 dark:text-white/90">{t("prTransferInfo")}</label>
-              <p className="mb-2 text-xs text-gray-500">{t("prTransferInfoHint")}</p>
-              <textarea id="transfer-info" value={transferInfo} onChange={(event) => setTransferInfo(event.target.value)} maxLength={2000} rows={5}
-                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-mono text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+              <p className="text-sm font-semibold text-gray-800 dark:text-white/90">
+                {t("prTransferInfo")} · <span className="font-normal text-gray-500">{t(internationalTransfer ? "prTransferKindIntl" : "prTransferKindDomestic")}</span>
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {transferFields.map((field) => {
+                  const value = transferValues[field.label] || "";
+                  const id = `transfer-${field.key}`;
+                  const className = "w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
+                  return (
+                    <label key={field.label} htmlFor={id} className={`min-w-0 ${field.multiline ? "sm:col-span-2" : ""}`}>
+                      <span className="mb-1 block text-xs font-semibold text-gray-600 dark:text-gray-300">{t(field.key)}{field.required && <span className="text-error-500"> *</span>}</span>
+                      {field.multiline ? (
+                        <textarea id={id} value={value} rows={2} maxLength={300} placeholder={t("prTfOptional")}
+                          onChange={(event) => setTransferValues((current) => ({ ...current, [field.label]: event.target.value }))}
+                          className={`${className} py-2`} />
+                      ) : (
+                        <input id={id} value={value} maxLength={300} placeholder={field.required ? "" : t("prTfOptional")}
+                          onChange={(event) => setTransferValues((current) => ({ ...current, [field.label]: event.target.value }))}
+                          className={`${className} h-11`} />
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+              {missingTransfer.length > 0 && (
+                <p className="mt-2 text-xs text-warning-700 dark:text-warning-300">{t("prTfMissing", { fields: missingTransfer.map((field) => t(field.key)).join(", ") })}</p>
+              )}
             </div>
           )}
           <div className="mt-4 flex justify-end">

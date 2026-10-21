@@ -6,6 +6,7 @@ import { paginateItems } from "@/utils/pagination";
 import PaginationControls from "@/components/common/PaginationControls";
 import { BillContainerTrackingList, hasTextSelection } from "./TrackingCodeButton";
 import { SHIPMENT_TABLE_STATE_KEY } from "@/utils/shipmentListState";
+import { getGoodsPaymentSummary, type GoodsPaymentListState, type GoodsPaymentSummary } from "@/services/paymentCostApi";
 
 interface ShipmentTableProps {
   shipments: Shipment[];
@@ -237,14 +238,48 @@ function DocBar({ total, received, missingList, missingLabel }: { total: number;
   );
 }
 
+// Cột "Thanh toán QT": 2 đợt thanh toán tiền hàng (cọc hàng, thanh toán tiền còn lại) của hợp đồng, trạng thái lấy một
+// lần cho mọi đơn (getGoodsPaymentSummary). Màu: xanh = đã duyệt / đã giao, vàng = chờ duyệt, đỏ = bị từ chối, xám = chưa có.
+const GOODS_STATE_STYLE: Record<GoodsPaymentListState, string> = {
+  approved: "bg-success-500",
+  delivered: "bg-success-300",
+  pending: "bg-warning-500",
+  rejected: "bg-error-500",
+  none: "bg-gray-300 dark:bg-gray-600",
+};
+const goodsContract = (shipment: Shipment) => String(shipment.database?.purchase?.ma_hop_dong || shipment.orderCode);
+
+function GoodsPaymentCell({ state, t, inline = false }: {
+  state: GoodsPaymentSummary[string] | undefined;
+  t: (key: string, variables?: Record<string, string | number>) => string;
+  inline?: boolean;
+}) {
+  if (!state) return <span className="text-xs text-gray-400">—</span>;
+  return (
+    <div className={inline ? "flex flex-wrap gap-x-3 gap-y-1" : "flex flex-col gap-1"}>
+      {(["deposit", "balance"] as const).map((kind) => {
+        const label = `${t(kind === "deposit" ? "glpDeposit" : "glpBalance")}: ${t(`glpState_${state[kind]}`)}`;
+        return (
+          <span key={kind} className="flex min-w-0 items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-300" title={label}>
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${GOODS_STATE_STYLE[state[kind]]}`} aria-hidden="true" />
+            <span className="truncate">{label}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function ShipmentCard({
   shipment,
   onClick,
   t,
   language,
+  goodsPayment,
 }: {
   shipment: Shipment;
   onClick: () => void;
+  goodsPayment?: GoodsPaymentSummary[string];
   t: (key: string, variables?: Record<string, string | number>) => string;
   language: "vi" | "en";
 }) {
@@ -305,6 +340,11 @@ function ShipmentCard({
         </div>
       </div>
 
+      <div className="mt-3 min-w-0">
+        <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("glpColumn")}</p>
+        <div className="mt-0.5"><GoodsPaymentCell state={goodsPayment} t={t} inline /></div>
+      </div>
+
       <div className="mt-auto flex min-w-0 items-center justify-between gap-3 border-t border-gray-100 pt-3 dark:border-gray-700">
         <span
           className={`inline-flex max-w-[62%] min-w-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${sc.color} ${sc.bg}`}
@@ -327,6 +367,23 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
   const [sortDir, setSortDir] = useState<SortDir>(() => savedState.sortDir || "asc");
   const [page, setPage] = useState(() => savedState.page || 1);
   const [pageSize, setPageSize] = useState(() => savedState.pageSize || DEFAULT_PAGE_SIZE);
+  // Trạng thái cọc / còn lại của mọi đơn: tải một lần, tải lại khi quay lại tab (có thể vừa duyệt trên Google Chat).
+  const [goodsPayments, setGoodsPayments] = useState<GoodsPaymentSummary | null>(null);
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      getGoodsPaymentSummary()
+        .then((summary) => { if (active) setGoodsPayments(summary); })
+        .catch(() => { /* Không tải được: cột hiện "—", bảng vẫn dùng bình thường. */ });
+    };
+    load();
+    const onVisible = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -404,7 +461,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
   const { items: paged, totalPages, safePage, from, to } = paginateItems(sorted, page, pageSize);
 
   const headerCls =
-    "py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition-colors";
+    "py-3 px-4 xl:max-2xl:px-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 transition-colors";
 
   return (
     <div className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
@@ -427,7 +484,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
         </div>
       </div>
 
-      {/* Dạng thẻ dưới 1280px (2 cột từ 768px); bảng 8 cột cần đủ chiều ngang khi sidebar mở. */}
+      {/* Dạng thẻ dưới 1280px (2 cột từ 768px); bảng 9 cột cần đủ chiều ngang. */}
       <div className="space-y-3 p-4 xl:hidden">
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1">
@@ -468,44 +525,46 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                 onClick={() => { if (!hasTextSelection()) onRowClick(shipment); }}
                 t={t}
                 language={language}
+                goodsPayment={goodsPayments?.[goodsContract(shipment)]}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Bảng từ 1280px, luôn đủ 8 cột. 1280–1535px (có sidebar) không đủ chỗ thì cuộn ngang trong khung bảng, không ẩn cột. */}
+      {/* Bảng từ 1280px, đủ 9 cột. Dưới 1680px sidebar mặc định thu nhỏ (SidebarContext) để bảng rộng hơn; vẫn thiếu chỗ thì cuộn ngang trong khung bảng, không ẩn cột. */}
       <div className="hidden w-full xl:block xl:max-2xl:overflow-x-auto xl:max-2xl:overscroll-x-contain xl:max-2xl:custom-scrollbar">
-          <table className="w-full min-w-0 table-fixed border-separate border-spacing-0 [&_td]:overflow-hidden [&_th]:overflow-hidden xl:max-2xl:min-w-[1240px]">
+          <table className="w-full min-w-0 table-fixed border-separate border-spacing-0 [&_td]:overflow-hidden [&_th]:overflow-hidden xl:max-2xl:min-w-[1140px]">
             <thead className="border-b border-gray-100 dark:border-gray-800">
             <tr>
-              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[4%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("sequence")}</th>
+              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[4%] bg-gray-50/95 px-2 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("sequence")}</th>
               {/* Số HĐ + ngày HĐ chung một cột; bấm tiêu đề sắp xếp theo ngày hợp đồng. */}
               <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("contractDate")} title={t("sortByContractDate")}>
                 <div className="flex items-center gap-1.5">{t("orderNumber")} <SortIcon col="contractDate" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[25%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[20%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
                 <div className="flex items-center gap-1.5">{t("productAndFactory")} <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[15%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400" title={t("trackingColumnHint")}>{t("billContainerColumn")}</th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[13%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
+              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[14%] bg-gray-50/95 px-4 py-3 xl:max-2xl:px-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400" title={t("trackingColumnHint")}>{t("billContainerColumn")}</th>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
                 <div className="flex items-center gap-1.5">{t("supplier")} <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[9%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
                 <div className="flex items-center gap-1.5">{t("arrivalDuration")} <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
                 <div className="flex items-center gap-1.5">{t("status")} <SortIcon col="status" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[9%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
                 <div className="flex items-center gap-1.5">{t("documents")} <SortIcon col="receivedDocs" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
+              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[10%] bg-gray-50/95 px-4 py-3 xl:max-2xl:px-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400" title={t("glpColumnHint")}>{t("glpColumn")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
             {paged.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-16 text-center text-sm text-gray-400">
+                <td colSpan={9} className="py-16 text-center text-sm text-gray-400">
                   <div className="flex flex-col items-center gap-2">
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
                       <circle cx="11" cy="11" r="8"/>
@@ -529,12 +588,12 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                     className="group cursor-pointer hover:bg-brand-50/40 dark:hover:bg-brand-500/5 transition-colors duration-150"
                   >
                     {/* Row number */}
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-3">
                       <span className="text-xs text-gray-400 tabular-nums">{rowNum}</span>
                     </td>
 
                     {/* Order code + contract date */}
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 xl:max-2xl:px-2.5">
                       <div className="flex flex-col gap-0.5">
                         <span className="truncate font-mono text-sm font-semibold text-brand-600 group-hover:text-brand-700 dark:text-brand-400" title={shipment.orderCode}>
                           {shipment.orderCode}
@@ -546,17 +605,17 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                     </td>
 
                     {/* Product + factory */}
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 xl:max-2xl:px-2.5">
                       <ProductFactoryText shipment={shipment} />
                     </td>
 
                     {/* B/L · container: bấm để tracking, không mở chi tiết đơn */}
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 xl:max-2xl:px-2.5">
                       <BillContainerTrackingList bills={shipment.database?.bills || []} maxContainers={LIST_CONTAINER_LIMIT} />
                     </td>
 
                     {/* Supplier */}
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 xl:max-2xl:px-2.5">
                       <div className="flex flex-col gap-0.5">
                         <span className="truncate text-xs font-medium text-gray-700 dark:text-gray-300" title={shipment.supplier}>{shipment.supplier || "—"}</span>
                         {shipment.vessel && (
@@ -572,7 +631,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
 
 
                     {/* Arrival status */}
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 xl:max-2xl:px-2.5">
                       {(() => {
                         const arrivalState = getArrivalState(shipment, language);
                         return <span className={`text-xs font-medium ${arrivalState.className}`}>{arrivalState.text}</span>;
@@ -580,7 +639,7 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                     </td>
 
                     {/* Status */}
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 xl:max-2xl:px-2.5">
                       <div className="flex flex-col items-start gap-1">
                         <span
                           className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${sc.color} ${sc.bg}`}
@@ -593,13 +652,18 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                     </td>
 
                     {/* Docs */}
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 xl:max-2xl:px-2.5">
                       <DocBar
                         total={shipment.totalDocs}
                         received={shipment.receivedDocs}
                         missingList={shipment.missingDocs}
                         missingLabel={t("missing")}
                       />
+                    </td>
+
+                    {/* Thanh toán QT: cọc hàng / thanh toán tiền còn lại */}
+                    <td className="py-3.5 px-4 xl:max-2xl:px-2.5">
+                      <GoodsPaymentCell state={goodsPayments?.[goodsContract(shipment)]} t={t} />
                     </td>
 
                   </tr>
