@@ -63,20 +63,20 @@ export interface TransferField {
 }
 export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
   domestic: [
-    { label: "Tên ngân hàng", key: "prTf_bankName", required: true },
     { label: "Số tài khoản", key: "prTf_accountNumber", required: true },
     { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", required: true },
+    { label: "Tên ngân hàng", key: "prTf_bankName", required: true },
     { label: "Nội dung thanh toán", key: "prTf_paymentNote", required: false },
   ],
   international: [
-    { label: "Nội dung thanh toán", key: "prTf_paymentNote", required: false },
     { label: "Số IBAN người thụ hưởng", key: "prTf_iban", required: true },
     { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", required: true },
-    { label: "Địa chỉ người thụ hưởng", key: "prTf_beneficiaryAddress", required: false },
-    { label: "Mã SWIFT", key: "prTf_swift", required: true },
     { label: "Tên ngân hàng thụ hưởng", key: "prTf_beneficiaryBank", required: true },
+    { label: "Mã SWIFT", key: "prTf_swift", required: true },
+    { label: "Địa chỉ người thụ hưởng", key: "prTf_beneficiaryAddress", required: false },
     { label: "Địa chỉ ngân hàng thụ hưởng", key: "prTf_beneficiaryBankAddress", required: false },
     { label: "Ngân hàng trung gian", key: "prTf_intermediaryBank", required: false, multiline: true },
+    { label: "Nội dung thanh toán", key: "prTf_paymentNote", required: false },
   ],
 };
 
@@ -138,6 +138,16 @@ export interface PaymentRequestOptions {
   containers: Array<{ code: string; contract: string }>;
   /** Chi phí nhập sẵn ở tab Chi phí (container / hợp đồng) chưa thuộc đề nghị nào. */
   availableCosts: PaymentCost[];
+}
+
+export interface PaymentBeneficiarySuggestion {
+  so_tai_khoan: string;
+  ten_nguoi_thu_huong?: string;
+  ten_ngan_hang?: string;
+  dia_chi_nguoi_thu_huong?: string;
+  ma_swift?: string;
+  dia_chi_ngan_hang?: string;
+  ngan_hang_trung_gian?: string;
 }
 
 export interface PaymentCostInput {
@@ -340,6 +350,21 @@ export async function getPaymentRequestOptions(signal?: AbortSignal): Promise<Pa
   };
 }
 
+export async function searchPaymentBeneficiaries(q: string, kind: TransferKind, signal?: AbortSignal): Promise<PaymentBeneficiarySuggestion[]> {
+  if (q.trim().length < 2) return [];
+  const payload = await request<unknown>("GET", `/beneficiaries?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}`, undefined, signal);
+  const rows = isRecord(payload) && Array.isArray(payload.data) ? payload.data : [];
+  return rows.filter(isRecord).map((row) => ({
+    so_tai_khoan: str(row.so_tai_khoan),
+    ten_nguoi_thu_huong: str(row.ten_nguoi_thu_huong) || undefined,
+    ten_ngan_hang: str(row.ten_ngan_hang) || undefined,
+    dia_chi_nguoi_thu_huong: str(row.dia_chi_nguoi_thu_huong) || undefined,
+    ma_swift: str(row.ma_swift) || undefined,
+    dia_chi_ngan_hang: str(row.dia_chi_ngan_hang) || undefined,
+    ngan_hang_trung_gian: str(row.ngan_hang_trung_gian) || undefined,
+  })).filter((row) => row.so_tai_khoan);
+}
+
 /** Bước 1: lưu nháp (chưa gửi Google Chat). */
 export async function createPaymentRequest(input: PaymentRequestInput): Promise<PaymentRequest> {
   return requireRequest(await request<unknown>("POST", "", toBody(input)));
@@ -363,6 +388,14 @@ export async function cancelPaymentRequest(id: string): Promise<PaymentRequest> 
 /** Bước 4: xác nhận đầy đủ chứng từ → đề nghị hoàn thành (khóa). */
 export async function confirmPaymentRequestDocuments(id: string): Promise<PaymentRequest> {
   return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/confirm-documents`));
+}
+
+export async function approvePaymentRequest(id: string): Promise<PaymentRequest> {
+  return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/approve`));
+}
+
+export async function rejectPaymentRequest(id: string, note: string): Promise<PaymentRequest> {
+  return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/reject`, { note }));
 }
 
 function normalizeDocumentFile(row: unknown): PaymentDocumentFile | null {

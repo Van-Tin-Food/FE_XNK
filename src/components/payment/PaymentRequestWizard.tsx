@@ -11,6 +11,7 @@ import {
   createPaymentRequest,
   getPaymentRequestOptions,
   parseTransferInfo,
+  searchPaymentBeneficiaries,
   updatePaymentRequest,
   type PaymentCategory,
   type PaymentCost,
@@ -174,6 +175,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">(editing?.paymentMethod || "");
   // Thông tin chuyển khoản (người thụ hưởng): một khối nhiều dòng, chọn chuyển khoản lần đầu thì điền sẵn khung mẫu.
   const [transferValues, setTransferValues] = useState<Record<string, string>>(() => parseTransferInfo(editing?.transferInfo || ""));
+  const [beneficiarySuggestions, setBeneficiarySuggestions] = useState<Array<Record<string, string>>>([]);
   const [active, setActive] = useState(editing ? SAVE_STEP : 0);
   const [reached, setReached] = useState(editing ? SAVE_STEP : 0);
   const [search, setSearch] = useState("");
@@ -314,6 +316,30 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   ];
   const transferText = transfer ? buildTransferInfo(transferKind, transferValues) : "";
   const choosePaymentMethod = (value: PaymentMethod) => setPaymentMethod(value);
+  const updateTransferValue = async (field: typeof transferFields[number], value: string) => {
+    setTransferValues((current) => ({ ...current, [field.label]: value }));
+    if (field.label !== "Số tài khoản" && field.label !== "Số IBAN người thụ hưởng") return;
+    if (value.trim().length < 2) return setBeneficiarySuggestions([]);
+    try {
+      const rows = await searchPaymentBeneficiaries(value, transferKind);
+      setBeneficiarySuggestions(rows.map((row) => Object.fromEntries(Object.entries(row).filter(([, value]) => value))));
+    } catch { setBeneficiarySuggestions([]); }
+  };
+  const applyBeneficiary = (row: Record<string, string>) => {
+    const values: Record<string, string> = {};
+    for (const field of transferFields) {
+      const key = field.label === "Số tài khoản" || field.label === "Số IBAN người thụ hưởng" ? "so_tai_khoan"
+        : field.label === "Tên người thụ hưởng" ? "ten_nguoi_thu_huong"
+          : field.label === "Tên ngân hàng" || field.label === "Tên ngân hàng thụ hưởng" ? "ten_ngan_hang"
+            : field.label === "Địa chỉ người thụ hưởng" ? "dia_chi_nguoi_thu_huong"
+              : field.label === "Mã SWIFT" ? "ma_swift"
+                : field.label === "Địa chỉ ngân hàng thụ hưởng" ? "dia_chi_ngan_hang"
+                  : field.label === "Ngân hàng trung gian" ? "ngan_hang_trung_gian" : "noi_dung_thanh_toan";
+      if (key !== "noi_dung_thanh_toan" && row[key]) values[field.label] = row[key];
+    }
+    setTransferValues((current) => ({ ...current, ...values }));
+    setBeneficiarySuggestions([]);
+  };
 
   const save = async () => {
     if (saving || complete.some((done) => !done) || !currency || !paymentMethod) return;
@@ -595,9 +621,9 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
             <div className="min-w-0">
               <p className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prDueDate")}</p>
               <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} aria-label={t("prDueDate")} className={INPUT} />
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className="mt-2 flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5">
                 {([["prQuickToday", vnDate()], ["prQuick3", vnDate(3)]] as const).map(([key, value]) => (
-                  <button key={key} type="button" onClick={() => setDueDate(value)} className={`h-8 rounded-full border px-3 text-xs font-medium ${dueDate === value ? CHIP_ON : CHIP_OFF}`}>
+                  <button key={key} type="button" onClick={() => setDueDate(value)} className={`h-8 shrink-0 whitespace-nowrap rounded-full border px-3 text-xs font-medium ${dueDate === value ? CHIP_ON : CHIP_OFF}`}>
                     {t(key)} · {formatDueDate(value).slice(0, 5)}
                   </button>
                 ))}
@@ -642,12 +668,23 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                       <span className="mb-1 block text-xs font-semibold text-gray-600 dark:text-gray-300">{t(field.key)}{field.required && <span className="text-error-500"> *</span>}</span>
                       {field.multiline ? (
                         <textarea id={id} value={value} rows={2} maxLength={300} placeholder={t("prTfOptional")}
-                          onChange={(event) => setTransferValues((current) => ({ ...current, [field.label]: event.target.value }))}
+                          onChange={(event) => void updateTransferValue(field, event.target.value)}
                           className={`${className} py-2`} />
                       ) : (
                         <input id={id} value={value} maxLength={300} placeholder={field.required ? "" : t("prTfOptional")}
-                          onChange={(event) => setTransferValues((current) => ({ ...current, [field.label]: event.target.value }))}
+                          onChange={(event) => void updateTransferValue(field, event.target.value)}
                           className={`${className} h-11`} />
+                      )}
+                      {(field.label === "Số tài khoản" || field.label === "Số IBAN người thụ hưởng") && beneficiarySuggestions.length > 0 && (
+                        <div className="relative z-10">
+                          <div className="absolute left-0 right-0 top-1 rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                            {beneficiarySuggestions.map((row, index) => (
+                              <button key={`${row.so_tai_khoan}-${index}`} type="button" onClick={() => applyBeneficiary(row)} className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800">
+                                <span className="font-semibold">{row.so_tai_khoan}</span>{row.ten_nguoi_thu_huong && <span className="ml-2 text-gray-500">{row.ten_nguoi_thu_huong}</span>}{row.ten_ngan_hang && <span className="ml-2 text-gray-500">· {row.ten_ngan_hang}</span>}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </label>
                   );

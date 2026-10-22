@@ -12,6 +12,8 @@ import {
   fetchPaymentRequestPrintHtml,
   PAYMENT_METHOD_LABEL_KEYS,
   getPaymentRequest,
+  approvePaymentRequest,
+  rejectPaymentRequest,
   sendPaymentRequest,
   type PaymentRequest,
 } from "@/services/paymentRequestApi";
@@ -78,7 +80,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "download">("");
+  const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "download" | "approve" | "reject">("");
   const [fileCount, setFileCount] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -150,6 +152,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   // Chứng từ upload dần (tạm) cho tới khi bấm "Đầy đủ chứng từ"; đề nghị đã hủy / hoàn thành thì khóa.
   const canUploadDocs = (isOwner || can("paymentDocuments", "edit")) && request.status !== 2 && !cancelled;
   const canArchive = can("paymentDocuments", "edit") && request.status === 1;
+  const canApprove = can("paymentApprove", "edit") && request.status === 0 && request.sent;
   const money = (value: string) => formatMoney(value, request.currency, language);
   const states: NodeState[] = [
     editing ? "current" : "done",
@@ -213,6 +216,30 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
     } finally {
       setBusy("");
     }
+  };
+
+  const approveRequest = async () => {
+    if (busy || !canApprove) return;
+    setBusy("approve");
+    try {
+      setRequest(await approvePaymentRequest(request.id));
+      notify(t("prApprovedBy", { name: user?.name || user?.username || "—", time: formatDateTime(new Date().toISOString(), language) }), "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    } finally { setBusy(""); }
+  };
+
+  const rejectRequest = async () => {
+    if (busy || !canApprove) return;
+    const note = window.prompt(t("prRejectReason"));
+    if (!note?.trim()) return;
+    setBusy("reject");
+    try {
+      setRequest(await rejectPaymentRequest(request.id, note.trim()));
+      notify(t("prRejectedBy", { name: user?.name || user?.username || "—", time: formatDateTime(new Date().toISOString(), language) }), "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    } finally { setBusy(""); }
   };
 
   const archive = async () => {
@@ -355,6 +382,17 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
               <p className="flex items-center gap-2 text-sm font-medium text-warning-700 dark:text-warning-300"><span className="h-2 w-2 animate-pulse rounded-full bg-warning-500" />{t("prWaitingApproval")}</p>
               <p className="text-sm text-gray-600 dark:text-gray-300">{t("prHowToApprove")}</p>
               {awaitingDecision && <p className="text-xs text-gray-500">{t("prLiveHint")}</p>}
+              {canApprove && (
+                <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-800">
+                  <p className="w-full text-xs text-gray-500">{t("prSystemApprovalHint")}</p>
+                  <button type="button" onClick={() => void approveRequest()} disabled={busy !== ""} className="h-10 rounded-lg bg-success-600 px-4 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50">
+                    {busy === "approve" ? t("prSaving") : t("prApproveSystem")}
+                  </button>
+                  <button type="button" onClick={() => void rejectRequest()} disabled={busy !== ""} className="h-10 rounded-lg border border-error-200 px-4 text-sm font-semibold text-error-600 hover:bg-error-50 disabled:opacity-50 dark:border-error-500/30 dark:text-error-400">
+                    {busy === "reject" ? t("prSaving") : t("prRejectSystem")}
+                  </button>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <code className="rounded-lg bg-gray-100 px-3 py-2 font-mono text-sm text-gray-800 dark:bg-gray-800 dark:text-gray-100">@… {request.id}</code>
                 <button type="button" onClick={() => void copyCode()} className="h-9 rounded-lg px-3 text-sm font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-500/10">{copied ? t("prCopied") : t("prCopy")}</button>

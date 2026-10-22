@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PaginationControls from "@/components/common/PaginationControls";
@@ -23,6 +23,25 @@ const DEFAULT_PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 350;
 const SELECT_CLASS = "h-10 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 md:w-48 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200";
 
+function SortIcon({ active, direction }: { active: boolean; direction: "asc" | "desc" }) {
+  if (!active) return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300 dark:text-gray-600"><polyline points="7 15 12 20 17 15" /><polyline points="7 9 12 4 17 9" /></svg>;
+  return direction === "asc"
+    ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-500"><polyline points="18 15 12 9 6 15" /></svg>
+    : <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-500"><polyline points="6 9 12 15 18 9" /></svg>;
+}
+
+function amountForSort(value: string): number {
+  const raw = String(value || "").trim().replace(/\s/g, "");
+  if (raw.includes(".") && raw.includes(",")) {
+    const decimal = raw.lastIndexOf(",") > raw.lastIndexOf(".") ? "," : ".";
+    const thousands = decimal === "," ? /\./g : /,/g;
+    return Number(raw.replace(thousands, "").replace(decimal, ".")) || 0;
+  }
+  if (/^\d{1,3}(\.\d{3})+$/.test(raw)) return Number(raw.replace(/\./g, "")) || 0;
+  if (/^\d{1,3}(,\d{3})+$/.test(raw)) return Number(raw.replace(/,/g, "")) || 0;
+  return Number(raw.replace(/,/g, "")) || 0;
+}
+
 function PaymentRequestsContent() {
   const { t, language } = useLanguage();
   const { can } = useAuth();
@@ -39,6 +58,8 @@ function PaymentRequestsContent() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [status, setStatus] = useState<"" | `${PaymentRequestStatus}`>("");
+  const [costCodeFilter, setCostCodeFilter] = useState("");
+  const [sort, setSort] = useState<{ key: "id" | "creator" | "content" | "cost" | "total" | "due" | "status"; direction: "asc" | "desc" }>({ key: "id", direction: "desc" });
   const [mine, setMine] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -106,6 +127,33 @@ function PaymentRequestsContent() {
 
   const money = (request: PaymentRequest) => formatMoney(request.total, request.currency, language);
   const dueClass = (request: PaymentRequest) => (isOverdue(request.dueDate, request.status) ? "text-error-600 dark:text-error-400" : "text-gray-700 dark:text-gray-300");
+  const costGroups = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => cost.code || "—"))];
+  const costTargets = (request: PaymentRequest) => ({
+    contracts: [...new Set(request.costs.map((cost) => cost.contract).filter(Boolean))],
+    containers: [...new Set(request.costs.map((cost) => cost.container).filter(Boolean))],
+  });
+  const costTargetText = (request: PaymentRequest) => [...costTargets(request).contracts, ...costTargets(request).containers].join(", ");
+  const costNames = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => cost.categoryName).filter(Boolean))];
+  const costCodes = useMemo(() => [...new Set(requests.flatMap((request) => request.costs.map((cost) => cost.code).filter(Boolean)))].sort(), [requests]);
+  const visibleRequests = useMemo(() => {
+    const filtered = costCodeFilter ? requests.filter((request) => request.costs.some((cost) => cost.code === costCodeFilter)) : requests;
+    const valueOf = (request: PaymentRequest): string | number => {
+      if (sort.key === "creator") return request.creatorName;
+      if (sort.key === "content") return request.content;
+      if (sort.key === "cost") return costGroups(request).join(", ");
+      if (sort.key === "total") return amountForSort(request.total);
+      if (sort.key === "due") return request.dueDate;
+      if (sort.key === "status") return request.status;
+      return request.id;
+    };
+    return [...filtered].sort((a, b) => {
+      const left = valueOf(a); const right = valueOf(b);
+      const result = typeof left === "number" && typeof right === "number" ? left - right : String(left).localeCompare(String(right), "vi", { numeric: true });
+      return sort.direction === "asc" ? result : -result;
+    });
+  }, [costCodeFilter, requests, sort, costGroups]);
+  const toggleSort = (key: typeof sort.key) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" });
+  const sortLabel = (key: typeof sort.key, label: string) => <button type="button" onClick={() => toggleSort(key)} className="inline-flex items-center gap-1.5 text-left hover:text-brand-600">{label}<SortIcon active={sort.key === key} direction={sort.direction} /></button>;
 
   return (
     <div className="space-y-5">
@@ -130,6 +178,10 @@ function PaymentRequestsContent() {
             <option value="">{t("prAllStatuses")}</option>
             {PAYMENT_STATUSES.map((value) => <option key={value} value={value}>{t(PAYMENT_STATUS_LABEL_KEYS[value])}</option>)}
           </select>
+          <select value={costCodeFilter} onChange={(event) => setCostCodeFilter(event.target.value)} aria-label={t("prCostCodeLabel")} className={SELECT_CLASS}>
+            <option value="">{t("prCostCodeLabel")}: tất cả</option>
+            {costCodes.map((code) => <option key={code} value={code}>{code}</option>)}
+          </select>
           {viewAll && (
             <label className="flex h-10 items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
               <input type="checkbox" className="h-4 w-4" checked={mine} onChange={(event) => { setMine(event.target.checked); setPage(1); }} />
@@ -151,7 +203,7 @@ function PaymentRequestsContent() {
           <div className={loading ? "opacity-60 transition-opacity" : ""}>
             {/* Điện thoại / tablet: thẻ */}
             <ul className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 lg:hidden">
-              {requests.map((request) => (
+              {visibleRequests.map((request) => (
                 <li key={request.id}>
                   <button type="button" onClick={() => openDetail(request.id)}
                     className="flex h-full w-full min-w-0 flex-col gap-2 rounded-xl border border-gray-200 p-4 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/30 dark:border-gray-700 dark:hover:border-brand-500/50">
@@ -168,6 +220,12 @@ function PaymentRequestsContent() {
                       <span className="truncate">{request.creatorName} · {t("prCostCount", { count: request.costCount })}</span>
                       <span className={dueClass(request)}>{t("prDueDate")}: {formatDueDate(request.dueDate)}</span>
                     </span>
+                    <span className="w-full space-y-0.5 border-t border-gray-100 pt-2 text-left text-xs text-gray-500 dark:border-gray-800">
+                      <span className="block truncate" title={costGroups(request).join(", ")}>{t("prCostTypeLabel")}: {costGroups(request).join(", ") || "—"}</span>
+                      <span className="block truncate" title={costTargetText(request)}>{t("prContractNumber")}: {costTargets(request).contracts.join(", ") || "—"}</span>
+                      <span className="block truncate text-gray-400" title={costTargetText(request)}>{t("prContainer")}: {costTargets(request).containers.join(", ") || "—"}</span>
+                      <span className="block truncate" title={costNames(request).join(", ")}>{t("prCosts")}: {costNames(request).join(", ") || "—"}</span>
+                    </span>
                   </button>
                 </li>
               ))}
@@ -175,29 +233,42 @@ function PaymentRequestsContent() {
 
             {/* Màn lớn: bảng */}
             <div className="hidden overflow-x-auto custom-scrollbar lg:block">
-              <table className="w-full min-w-[960px] table-fixed text-left">
+              <table className="w-full min-w-[1280px] table-fixed text-left">
                 <thead className="bg-gray-50 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:bg-gray-900 dark:text-gray-400">
                   <tr>
-                    <th className="w-[12%] px-4 py-3">{t("prCode")}</th>
-                    <th className="w-[30%] px-4 py-3">{t("prContent")}</th>
-                    <th className="w-[14%] px-4 py-3">{t("prCreator")}</th>
-                    <th className="w-[15%] px-4 py-3 text-right">{t("prTotal")}</th>
-                    <th className="w-[11%] px-4 py-3">{t("prDueDate")}</th>
-                    <th className="w-[18%] px-4 py-3">{t("status")}</th>
+                    <th className="w-[12%] px-4 py-3">{sortLabel("id", t("prCode"))}</th>
+                    <th className="w-[12%] px-4 py-3">{sortLabel("creator", t("prCreator"))}</th>
+                    <th className="w-[22%] px-4 py-3">{sortLabel("content", t("prContent"))}</th>
+                    <th className="w-[14%] px-4 py-3">{sortLabel("cost", t("prCostTypeLabel"))}</th>
+                    <th className="w-[16%] px-4 py-3">{t("prContractNumber")}</th>
+                    <th className="w-[18%] px-4 py-3">{t("prCosts")}</th>
+                    <th className="w-[15%] px-4 py-3 text-right">{sortLabel("total", t("prTotal"))}</th>
+                    <th className="w-[10%] px-4 py-3">{sortLabel("due", t("prDueDate"))}</th>
+                    <th className="w-[15%] px-4 py-3">{sortLabel("status", t("status"))}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {requests.map((request) => (
+                  {visibleRequests.map((request) => (
                     <tr key={request.id} onClick={() => openDetail(request.id)} className="cursor-pointer hover:bg-brand-50/40 dark:hover:bg-brand-500/5">
                       <td className="px-4 py-3">
                         <button type="button" onClick={(event) => { event.stopPropagation(); openDetail(request.id); }} className="font-mono text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400">{request.id}</button>
                         <p className="text-xs text-gray-400">{formatDateTime(request.createdAt, language)}</p>
                       </td>
+                      <td className="truncate px-4 py-3 text-sm text-gray-700 dark:text-gray-300" title={request.creatorName}>{request.creatorName || "—"}</td>
                       <td className="px-4 py-3">
                         <p className="truncate text-sm font-medium text-gray-800 dark:text-white/90" title={request.content}>{request.content}</p>
                         <p className="mt-0.5 flex items-center gap-2 text-xs text-gray-500">{t("prCostCount", { count: request.costCount })}{request.hasRed && <RedFlowBadge />}</p>
                       </td>
-                      <td className="truncate px-4 py-3 text-sm text-gray-700 dark:text-gray-300" title={request.creatorName}>{request.creatorName || "—"}</td>
+                      <td className="px-4 py-3 align-top text-sm text-gray-700 dark:text-gray-300">
+                        <p className="line-clamp-2" title={costGroups(request).join(", ")}>{costGroups(request).join(", ") || "—"}</p>
+                      </td>
+                      <td className="px-4 py-3 align-top text-sm text-gray-700 dark:text-gray-300">
+                        <p className="truncate" title={costTargetText(request)}>{costTargets(request).contracts.join(", ") || "—"}</p>
+                        <p className="truncate text-xs text-gray-500" title={costTargetText(request)}>{costTargets(request).containers.join(", ") || "—"}</p>
+                      </td>
+                      <td className="px-4 py-3 align-top text-sm text-gray-700 dark:text-gray-300">
+                        <p className="line-clamp-2" title={costNames(request).join(", ")}>{costNames(request).join(", ") || "—"}</p>
+                      </td>
                       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{money(request)}</td>
                       <td className={`px-4 py-3 text-sm ${dueClass(request)}`}>{formatDueDate(request.dueDate)}</td>
                       <td className="px-4 py-3">
