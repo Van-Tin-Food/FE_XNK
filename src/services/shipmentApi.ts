@@ -271,11 +271,24 @@ export function getCachedShipments(): ShipmentListResult | null {
   return shipmentListCache && shipmentListCache.token === token ? shipmentListCache.result : null;
 }
 
-export async function fetchShipments(): Promise<ShipmentListResult> {
+// Lần tải đang chạy. shareInFlight (chỉ dùng cho lần tải lúc mở trang): đang có request thì chờ chung thay vì tải toàn bộ
+// dữ liệu thêm lần nữa (ví dụ chuyển nhanh trang chủ <-> chi tiết). Tải lại sau khi sửa / bấm làm mới thì không truyền,
+// luôn gọi request mới để không nhận kết quả của request bắt đầu trước khi lưu.
+let shipmentListInFlight: { token: string; promise: Promise<ShipmentListResult> } | null = null;
+
+export function fetchShipments({ shareInFlight = false }: { shareInFlight?: boolean } = {}): Promise<ShipmentListResult> {
   const token = getStoredUser()?.token || "";
-  const result = await loadShipmentList();
-  shipmentListCache = { token, result };
-  return result;
+  if (shareInFlight && shipmentListInFlight && shipmentListInFlight.token === token) return shipmentListInFlight.promise;
+  const promise = loadShipmentList()
+    .then((result) => {
+      shipmentListCache = { token, result };
+      return result;
+    })
+    .finally(() => {
+      if (shipmentListInFlight?.promise === promise) shipmentListInFlight = null;
+    });
+  shipmentListInFlight = { token, promise };
+  return promise;
 }
 
 async function loadShipmentList(): Promise<ShipmentListResult> {

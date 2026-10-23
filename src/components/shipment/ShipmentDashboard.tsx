@@ -6,6 +6,7 @@ import type { Shipment, ShipmentFilter, ShipmentStatus, ShipmentFilterStatus } f
 import { fetchShipments, computeMetrics, exportEtaRows, getCachedShipments } from "@/services/shipmentApi";
 import { returnItemsFromRelations } from "@/services/postgresShipmentApi";
 import { buildEtaRows, getEtaHeaders } from "@/services/shipmentExcelExport";
+import { getGoodsPaymentSummary } from "@/services/paymentCostApi";
 import ShipmentMetrics from "./ShipmentMetrics";
 import DashboardInfoBar from "./DashboardInfoBar";
 import ShipmentFilters from "./ShipmentFilters";
@@ -185,7 +186,7 @@ export default function ShipmentDashboard() {
     return () => window.cancelAnimationFrame(frame);
   }, [cachedList]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async ({ initial = false }: { initial?: boolean } = {}) => {
     // Không có quyền xem đơn hàng: không gọi API (BE cũng trả 403) và bỏ dữ liệu đang giữ.
     if (!canViewShipments) {
       setShipments([]);
@@ -197,7 +198,7 @@ export default function ShipmentDashboard() {
     setApiError(null);
 
     try {
-      const result = await fetchShipments();
+      const result = await fetchShipments({ shareInFlight: initial });
       hasShipmentsRef.current = true;
       setShipments(result.shipments);
       setLastUpdated(result.lastUpdated);
@@ -212,11 +213,14 @@ export default function ShipmentDashboard() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadData();
+      // Tải trước trạng thái cọc / còn lại song song với danh sách đơn (trước đây bảng hiện xong mới gọi, thành 2 lượt nối
+      // tiếp). Bảng dùng lại kết quả này (paymentCostApi dùng chung lần tải). Lỗi thì bảng tự hiện "—".
+      if (canViewShipments) void getGoodsPaymentSummary().catch(() => undefined);
+      void loadData({ initial: true });
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [loadData]);
+  }, [canViewShipments, loadData]);
 
   // Refresh handler
   const handleRefresh = useCallback(async () => {

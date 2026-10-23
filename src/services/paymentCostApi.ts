@@ -167,7 +167,24 @@ export type GoodsPaymentSummary = Record<string, Record<GoodsPaymentKind, GoodsP
 const LIST_STATES: GoodsPaymentListState[] = ["approved", "pending", "rejected", "delivered", "none"];
 
 /** Trang chủ: trạng thái cọc / còn lại của mọi đơn (theo mã hợp đồng) trong một request, cho cột "Thanh toán QT". */
-export async function getGoodsPaymentSummary(): Promise<GoodsPaymentSummary> {
+// Trang chủ gọi trước (song song với danh sách đơn) rồi bảng dùng lại: đang tải thì chờ chung, vừa tải trong
+// SUMMARY_FRESH_MS thì dùng lại (quay lại tab liên tục không tải lại cả bảng). Khoá theo token như cache danh sách đơn.
+const SUMMARY_FRESH_MS = 30 * 1000;
+let summaryCache: { token: string; at: number; promise: Promise<GoodsPaymentSummary> } | null = null;
+
+export function getGoodsPaymentSummary({ force = false }: { force?: boolean } = {}): Promise<GoodsPaymentSummary> {
+  const token = getStoredUser()?.token || "";
+  if (!force && summaryCache && summaryCache.token === token && Date.now() - summaryCache.at < SUMMARY_FRESH_MS) {
+    return summaryCache.promise;
+  }
+  const promise = loadGoodsPaymentSummary();
+  const entry = { token, at: Date.now(), promise };
+  summaryCache = entry;
+  promise.catch(() => { if (summaryCache === entry) summaryCache = null; });
+  return promise;
+}
+
+async function loadGoodsPaymentSummary(): Promise<GoodsPaymentSummary> {
   const payload = await request("GET", "/international-payment/summary");
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   const state = (value: unknown): GoodsPaymentListState => (LIST_STATES.includes(value as GoodsPaymentListState) ? value as GoodsPaymentListState : "none");

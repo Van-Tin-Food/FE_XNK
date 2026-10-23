@@ -1,4 +1,7 @@
-import * as XLSX from "xlsx";
+// xlsx (SheetJS) lớn: chỉ nạp khi thật sự tạo file (buildShipmentWorkbook), không đóng gói vào trang danh sách đơn.
+import type { WorkBook } from "xlsx";
+
+type XlsxModule = typeof import("xlsx");
 import type { ReturnItem, Shipment } from "@/types/shipment";
 
 export type ReturnItemsByOrder = Record<string, ReturnItem[]>;
@@ -56,7 +59,7 @@ function sortByContractDate(shipments: Shipment[]): Shipment[] {
     .map(({ shipment }) => shipment);
 }
 
-function addSheet(workbook: XLSX.WorkBook, name: string, rows: Array<Record<string, unknown>>) {
+function addSheet(XLSX: XlsxModule, workbook: WorkBook, name: string, rows: Array<Record<string, unknown>>) {
   const safeRows = rows.length > 0 ? rows : [{ "Thông tin": "Không có dữ liệu" }];
   const normalized = safeRows.map((row) => Object.fromEntries(
     Object.entries(row).map(([key, value]) => [key, excelValue(value)]),
@@ -119,14 +122,15 @@ function buildSummaryRows(shipments: Shipment[]): Array<Record<string, unknown>>
   });
 }
 
-export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder: ReturnItemsByOrder): XLSX.WorkBook {
+export async function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder: ReturnItemsByOrder): Promise<WorkBook> {
+  const XLSX = await import("xlsx");
   const workbook = XLSX.utils.book_new();
   const orderedShipments = sortByContractDate(shipments);
   const orderCodes = [...new Set(orderedShipments.map((shipment) => shipment.orderCode).filter(Boolean))];
 
-  addSheet(workbook, "Tổng hợp XNK", buildSummaryRows(orderedShipments));
+  addSheet(XLSX, workbook, "Tổng hợp XNK", buildSummaryRows(orderedShipments));
 
-  addSheet(workbook, "Chi tiết mua hàng", orderedShipments.flatMap((shipment) => (shipment.database?.details || []).map((detail) => ({
+  addSheet(XLSX, workbook, "Chi tiết mua hàng", orderedShipments.flatMap((shipment) => (shipment.database?.details || []).map((detail) => ({
     "Mã đơn hàng": shipment.orderCode,
     "ID chi tiết": detail.id_chi_tiet,
     "Tên hàng": detail.ten_hang,
@@ -137,7 +141,7 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
     "Giá tổng": detail.tong_gia,
   }))));
 
-  addSheet(workbook, "Vận đơn", orderedShipments.flatMap((shipment) => (shipment.database?.bills || []).map((bill) => ({
+  addSheet(XLSX, workbook, "Vận đơn", orderedShipments.flatMap((shipment) => (shipment.database?.bills || []).map((bill) => ({
     "Mã đơn hàng": shipment.orderCode,
     "Mã BL": bill.ma_bl,
     "Hãng tàu": bill.carrier?.ten_hang_tau || bill.id_hang_tau,
@@ -148,7 +152,7 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
     "ATA": bill.ata,
   }))));
 
-  addSheet(workbook, "Container", orderedShipments.flatMap((shipment) => (shipment.database?.bills || []).flatMap((bill) => bill.containers.map((container) => ({
+  addSheet(XLSX, workbook, "Container", orderedShipments.flatMap((shipment) => (shipment.database?.bills || []).flatMap((bill) => bill.containers.map((container) => ({
     "Mã đơn hàng": shipment.orderCode,
     "Mã BL": bill.ma_bl,
     "ID B/L - container": container.id_bl_container,
@@ -156,7 +160,7 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
     "Chi tiết hàng trong container": JSON.stringify(container.details || []),
   })))));
 
-  addSheet(workbook, "Vận chuyển", orderedShipments.flatMap((shipment) => (shipment.database?.bills || []).flatMap((bill) => bill.containers.flatMap((container) => container.transports.map((transport) => ({
+  addSheet(XLSX, workbook, "Vận chuyển", orderedShipments.flatMap((shipment) => (shipment.database?.bills || []).flatMap((bill) => bill.containers.flatMap((container) => container.transports.map((transport) => ({
     "Mã đơn hàng": shipment.orderCode,
     "Mã BL": bill.ma_bl,
     "Mã container": container.ma_container,
@@ -171,7 +175,7 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
     "Ghi chú vận chuyển": transport.ghi_chu,
   }))))));
 
-  addSheet(workbook, "Trả công", orderCodes.flatMap((orderCode) => (returnItemsByOrder[orderCode] || []).map((item) => ({
+  addSheet(XLSX, workbook, "Trả công", orderCodes.flatMap((orderCode) => (returnItemsByOrder[orderCode] || []).map((item) => ({
     "Mã đơn hàng": orderCode,
     "ID vận chuyển": item.idVanChuyen,
     "ID B/L - container": item.idBlContainer,
@@ -188,7 +192,7 @@ export function buildShipmentWorkbook(shipments: Shipment[], returnItemsByOrder:
     "Ghi chú": item.ghiChu,
   }))));
 
-  addSheet(workbook, "Chứng từ", orderedShipments.flatMap((shipment) => (shipment.documents || []).flatMap((document) => {
+  addSheet(XLSX, workbook, "Chứng từ", orderedShipments.flatMap((shipment) => (shipment.documents || []).flatMap((document) => {
     const files = document.files?.length ? document.files : [{ fileUrl: document.url || "" }];
     return files.map((file) => ({
       "Mã đơn hàng": shipment.orderCode,

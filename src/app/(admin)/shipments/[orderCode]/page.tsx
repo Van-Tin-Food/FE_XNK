@@ -39,10 +39,10 @@ export default function ShipmentDetailPage() {
   // Đánh số từng lần tải: lần tải ngầm lúc mở trang về sau lần tải sau khi lưu thì bỏ, không ghi đè dữ liệu mới bằng cũ.
   const loadSequenceRef = useRef(0);
 
-  const loadShipment = useCallback(async () => {
+  const loadShipment = useCallback(async ({ initial = false }: { initial?: boolean } = {}) => {
     const sequence = ++loadSequenceRef.current;
     try {
-      const result = await fetchShipments();
+      const result = await fetchShipments({ shareInFlight: initial });
       if (sequence !== loadSequenceRef.current) return;
       const found = findShipment(result.shipments, orderCode);
       hasShipmentRef.current = Boolean(found);
@@ -61,7 +61,7 @@ export default function ShipmentDetailPage() {
 
   useEffect(() => {
     if (!canViewShipments) return;
-    const timer = window.setTimeout(() => void loadShipment(), 0);
+    const timer = window.setTimeout(() => void loadShipment({ initial: true }), 0);
     return () => window.clearTimeout(timer);
   }, [canViewShipments, loadShipment]);
 

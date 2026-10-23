@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
+// Vercel: chạy gateway ở Singapore (gần người dùng + BE ở Việt Nam). Mặc định Vercel chạy ở Mỹ nên mỗi request API phải
+// đi qua Thái Bình Dương hai lần. Tự host (Docker / next start) thì Next bỏ qua cấu hình này.
+export const preferredRegion = "sin1";
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 

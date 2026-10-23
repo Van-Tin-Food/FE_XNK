@@ -24,6 +24,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 
 // Tải lại trang (F5): chờ BE trả role + quyền mới tối đa ngần này rồi mới hiện giao diện.
 // Mạng chậm / BE lỗi thì dùng tạm quyền đã lưu, lần tải trang sau sẽ đọc lại.
+const NAVIGATION_REFRESH_MS = 60 * 1000;
 const INITIAL_REFRESH_TIMEOUT_MS = 6000;
 
 interface AuthContextValue {
@@ -54,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const pathname = usePathname();
   const lastPathname = useRef<string | null>(null);
+  const lastUserRefreshAt = useRef(0);
 
   const permissions = useMemo(
     () => (user && isAdminRole(user.role) ? fullPermissions() : completePermissions(user?.permissions)),
@@ -106,6 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       fallbackTimer = window.setTimeout(() => {
         if (active) setIsInitialized(true);
       }, INITIAL_REFRESH_TIMEOUT_MS);
+      lastUserRefreshAt.current = Date.now();
       void refreshUser().finally(() => {
         window.clearTimeout(fallbackTimer);
         if (active) setIsInitialized(true);
@@ -146,13 +149,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [clearSession, refreshUser]);
 
-  // Chuyển trang trong app: đọc lại role + quyền. Lần đầu đã đọc ở effect khởi tạo phía trên.
+  // Chuyển trang trong app: đọc lại role + quyền, tối đa một lần mỗi NAVIGATION_REFRESH_MS (trước đây mỗi lần chuyển
+  // trang là một request /me đọc DB). Quyền bị thu hồi giữa chừng vẫn được cập nhật ngay: BE trả 403 -> PERMISSIONS_STALE_EVENT.
+  // Lần đầu đã đọc ở effect khởi tạo phía trên.
   useEffect(() => {
     if (lastPathname.current === null || lastPathname.current === pathname) {
       lastPathname.current = pathname;
       return;
     }
     lastPathname.current = pathname;
+    if (Date.now() - lastUserRefreshAt.current < NAVIGATION_REFRESH_MS) return;
+    lastUserRefreshAt.current = Date.now();
     void refreshUser();
   }, [pathname, refreshUser]);
 

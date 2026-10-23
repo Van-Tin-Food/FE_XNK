@@ -508,6 +508,7 @@ export default function ShipmentTable({ shipments, onRowClick, onShipmentUpdated
         .catch(() => { /* Không tải được: cột hiện "—", bảng vẫn dùng bình thường. */ });
     };
     load();
+    // Quay lại tab (có thể vừa duyệt trên Google Chat): tải lại nếu lần trước đã quá 30 giây (paymentCostApi tự kiểm tra).
     const onVisible = () => { if (document.visibilityState === "visible") load(); };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
