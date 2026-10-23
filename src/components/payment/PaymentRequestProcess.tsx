@@ -13,6 +13,7 @@ import {
   PAYMENT_METHOD_LABEL_KEYS,
   getPaymentRequest,
   approvePaymentRequest,
+  notifyMissingPaymentDocuments,
   rejectPaymentRequest,
   sendPaymentRequest,
   type PaymentRequest,
@@ -80,7 +81,10 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "download" | "approve" | "reject">("");
+  const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "download" | "approve" | "reject" | "missing">("");
+  // Báo thiếu chứng từ (bước lưu trữ): ô nhập mở ngay dưới nút, gửi lên Google Chat kèm tag người đề nghị.
+  const [missingOpen, setMissingOpen] = useState(false);
+  const [missingNote, setMissingNote] = useState("");
   const [fileCount, setFileCount] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -256,6 +260,23 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
     }
   };
 
+  const sendMissingDocuments = async () => {
+    const note = missingNote.trim();
+    if (busy || !note) return;
+    setBusy("missing");
+    try {
+      const result = await notifyMissingPaymentDocuments(request.id, note);
+      const name = result.requesterName || request.creatorName || "—";
+      notify(result.mentioned ? t("prMissingSent", { name }) : t("prMissingSentNoTag", { name }), result.mentioned ? "success" : "warning");
+      setMissingNote("");
+      setMissingOpen(false);
+    } catch (missingError) {
+      notify(missingError instanceof Error ? missingError.message : String(missingError), "error");
+    } finally {
+      setBusy("");
+    }
+  };
+
   const copyCode = async () => {
     try {
       await navigator.clipboard.writeText(request.id);
@@ -426,10 +447,35 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
               {fileCount > 0 && <p className="mb-3 rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("prDocsDraftHint", { count: fileCount })}</p>}
               {canArchive ? (
                 <>
-                  <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0} className={`h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto`}>
-                    {busy === "archive" ? t("prSaving") : `🗄 ${t("prArchive")}`}
-                  </button>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0} className={`h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto`}>
+                      {busy === "archive" ? t("prSaving") : `🗄 ${t("prArchive")}`}
+                    </button>
+                    <button type="button" onClick={() => setMissingOpen((open) => !open)} disabled={busy !== ""} aria-expanded={missingOpen}
+                      className="h-11 w-full rounded-lg border border-warning-300 px-5 text-sm font-semibold text-warning-700 hover:bg-warning-50 disabled:opacity-50 sm:w-auto dark:border-warning-500/40 dark:text-warning-300 dark:hover:bg-warning-500/10">
+                      {t("prMissingButton")}
+                    </button>
+                  </div>
                   {fileCount === 0 && <p className="mt-2 text-xs text-gray-500">{t("prArchiveNeedsFile")}</p>}
+                  {missingOpen && (
+                    <div className="mt-3 rounded-xl border border-warning-200 bg-warning-50/60 p-3 dark:border-warning-500/30 dark:bg-warning-500/5">
+                      <label htmlFor="pr-missing-note" className="block text-sm font-semibold text-gray-800 dark:text-white/90">{t("prMissingLabel")}</label>
+                      <p className="mt-0.5 text-xs text-gray-500">{t("prMissingHint", { name: request.creatorName || "—" })}</p>
+                      <textarea id="pr-missing-note" value={missingNote} onChange={(event) => setMissingNote(event.target.value)} rows={3} maxLength={1000}
+                        placeholder={t("prMissingPlaceholder")} autoFocus
+                        className="mt-2 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                      <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                        <button type="button" onClick={() => { setMissingOpen(false); setMissingNote(""); }} disabled={busy === "missing"}
+                          className="h-10 w-full rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 sm:w-auto dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">
+                          {t("cancel")}
+                        </button>
+                        <button type="button" onClick={() => void sendMissingDocuments()} disabled={busy !== "" || !missingNote.trim()}
+                          className="h-10 w-full rounded-lg bg-warning-600 px-4 text-sm font-semibold text-white hover:bg-warning-700 disabled:opacity-50 sm:w-auto">
+                          {busy === "missing" ? t("prSaving") : t("prMissingSend")}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               ) : <p className="text-sm text-gray-500">{t("prWaitArchive")}</p>}
             </div>

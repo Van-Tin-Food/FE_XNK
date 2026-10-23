@@ -407,6 +407,16 @@ export async function confirmPaymentRequestDocuments(id: string): Promise<Paymen
   return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/confirm-documents`));
 }
 
+/**
+ * Báo thiếu chứng từ (bước lưu trữ hồ sơ): BE gửi vào thread Google Chat của đề nghị, tag người đề nghị.
+ * mentioned = false khi người đề nghị chưa đăng nhập Google lần nào sau khi có tính năng (chưa có ID Google để tag).
+ */
+export async function notifyMissingPaymentDocuments(id: string, note: string): Promise<{ mentioned: boolean; requesterName: string }> {
+  const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/missing-documents`, { note });
+  const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
+  return { mentioned: data.mentioned === true, requesterName: str(data.requesterName) };
+}
+
 export async function approvePaymentRequest(id: string): Promise<PaymentRequest> {
   return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/approve`));
 }

@@ -58,6 +58,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   PAYMENT_REQUEST_SEND: "logPaymentSend",
   PAYMENT_REQUEST_UPLOAD: "logPaymentUpload",
   PAYMENT_REQUEST_DOCUMENT_REMOVE: "logPaymentDocRemove",
+  PAYMENT_REQUEST_MISSING_DOCUMENTS: "logPaymentMissingDocs",
   PAYMENT_COST_UPDATE: "logPaymentCostUpdate",
   PAYMENT_COST_DELETE: "logPaymentCostDelete",
   PAYMENT_REQUEST_CANCEL: "logPaymentCancel",
