@@ -39,9 +39,8 @@ export interface ActivityActor {
   role?: string;
 }
 
-export interface ActivityLogQuery {
-  limit: number;
-  offset: number;
+/** Bộ lọc nhật ký thao tác (lọc phía server). */
+export interface ActivityLogFilters {
   userId?: number;
   action?: string;
   role?: string;
@@ -49,12 +48,6 @@ export interface ActivityLogQuery {
   from?: string;
   to?: string;
   q?: string;
-}
-
-export interface ActivityLogPage {
-  logs: ActivityLog[];
-  total: number;
-  actors: ActivityActor[];
 }
 
 export type EmailDeliveryStatus = "sent" | "not sent";
@@ -120,14 +113,47 @@ function normalizeActor(row: unknown): ActivityActor | null {
   };
 }
 
-/** Nhật ký thao tác, lọc + phân trang phía server (mới nhất trước). */
-export async function getActivityLogs(query: ActivityLogQuery, signal?: AbortSignal): Promise<ActivityLogPage> {
-  const params = new URLSearchParams({ limit: String(query.limit), offset: String(query.offset) });
+export interface ActivityLogBatch {
+  logs: ActivityLog[];
+  /** Chỉ có ở lần tải đầu (không có cursor). */
+  actors: ActivityActor[];
+  hasMore: boolean;
+  /** Gửi lại ở lần tải sau để lấy các dòng cũ hơn; null = đã hết. */
+  nextCursor: string | null;
+}
+
+function filterParams(params: URLSearchParams, filters: ActivityLogFilters) {
   for (const key of ["userId", "action", "role", "status", "from", "to", "q"] as const) {
-    const value = query[key];
+    const value = filters[key];
     if (value !== undefined && value !== "") params.set(key, String(value));
   }
-  const pagePath = `/api/auth/activity-logs?${params.toString()}`;
+}
+
+/**
+ * Nhật ký thao tác dạng tải dần (cuộn tới đâu tải tới đó): mỗi lần limit dòng, mới nhất trước. BE không đếm tổng, không
+ * OFFSET nên bảng lớn mấy cũng nhanh. cursor = nextCursor của lần trước (bỏ trống = lần đầu).
+ */
+export async function getActivityLogBatch(
+  { limit, cursor, ...filters }: ActivityLogFilters & { limit: number; cursor?: string | null },
+  signal?: AbortSignal,
+): Promise<ActivityLogBatch> {
+  const params = new URLSearchParams({ limit: String(limit), scroll: "1" });
+  if (cursor) params.set("cursor", cursor);
+  filterParams(params, filters);
+  const result = await requestActivityLogs(`/api/auth/activity-logs?${params.toString()}`, signal);
+  const pagination = isRecord(result) && isRecord(result.pagination) ? result.pagination : {};
+  const nextCursor = typeof pagination.nextCursor === "string" && pagination.nextCursor ? pagination.nextCursor : null;
+  return {
+    logs: findLogRows(result).map((row, index) => normalizeLog(row, index)).filter((log): log is ActivityLog => log !== null),
+    actors: isRecord(result) && Array.isArray(result.actors)
+      ? result.actors.map(normalizeActor).filter((actor): actor is ActivityActor => actor !== null)
+      : [],
+    hasMore: pagination.hasMore === true && nextCursor !== null,
+    nextCursor,
+  };
+}
+
+async function requestActivityLogs(pagePath: string, signal?: AbortSignal): Promise<unknown> {
   const token = getStoredUser()?.token?.trim();
   let response: Response;
   try {
@@ -141,17 +167,10 @@ export async function getActivityLogs(query: ActivityLogQuery, signal?: AbortSig
     if (error instanceof TypeError) throw createNetworkApiError("Nhật ký", "GET", pagePath, error);
     throw error;
   }
-
   const { data: result, nonJsonPreview } = await parseApiResponse(response);
   if (!response.ok) throw createHttpApiError("Nhật ký", "GET", pagePath, response, result, nonJsonPreview);
   if (result === null) throw createInvalidResponseError("Nhật ký", "GET", pagePath, nonJsonPreview);
-  const logs = findLogRows(result).map((row, index) => normalizeLog(row, index)).filter((log): log is ActivityLog => log !== null);
-  const pagination = isRecord(result) && isRecord(result.pagination) ? result.pagination : {};
-  const total = Number(pagination.total);
-  const actors = isRecord(result) && Array.isArray(result.actors)
-    ? result.actors.map(normalizeActor).filter((actor): actor is ActivityActor => actor !== null)
-    : [];
-  return { logs, total: Number.isFinite(total) ? total : logs.length, actors };
+  return result;
 }
 
 export async function getEmailActivityLogs(): Promise<ActivityLog[]> {

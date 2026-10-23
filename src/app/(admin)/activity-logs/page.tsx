@@ -4,7 +4,7 @@ import SearchSuggestions from "@/components/common/SearchSuggestions";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import {
-  getActivityLogs,
+  getActivityLogBatch,
   getEmailDeliveryLogs,
   type ActivityActor,
   type ActivityLog,
@@ -16,9 +16,12 @@ import { paginateItems } from "@/utils/pagination";
 import PaginationControls from "@/components/common/PaginationControls";
 import { useRouter } from "next/navigation";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const DEFAULT_PAGE_SIZE = 20;
+// Lịch sử thao tác tải dần: mỗi lần 50 dòng, cuộn gần cuối danh sách (còn ~600px) thì tải tiếp.
+const ACTIVITY_BATCH_SIZE = 50;
+const LOAD_MORE_MARGIN = "600px";
 const SEARCH_DEBOUNCE_MS = 350;
 const ACTION_LABEL_KEYS: Record<string, string> = {
   LOGIN: "logLogin",
@@ -213,9 +216,17 @@ export default function ActivityLogsPage() {
   // chuyển mục — vào mục nào hiện đúng mục đó, không còn state riêng nên không thể lệch tab.
   const activeTab: "activity" | "email" = searchParams.get("tab") === "email" ? "email" : "activity";
 
-  // ---------- Lịch sử thao tác: lọc + phân trang phía server ----------
+  // ---------- Lịch sử thao tác: lọc phía server, cuộn tới đâu tải tới đó (không đếm tổng, không tải hết bảng) ----------
   const [logs, setLogs] = useState<ActivityLog[]>([]);
-  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Lỗi khi tải thêm: chỉ báo ở cuối danh sách (giữ các dòng đã tải), bấm để thử lại; không tự gọi lại liên tục.
+  const [loadMoreError, setLoadMoreError] = useState("");
+  // Đổi bộ lọc / tải lại: tăng số lượt để bỏ kết quả "tải thêm" của bộ lọc cũ còn đang chạy.
+  const batchGenerationRef = useRef(0);
+  const loadMoreAbortRef = useRef<AbortController | null>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const [actors, setActors] = useState<ActivityActor[]>([]);
   const [activityUser, setActivityUser] = useState("all");
   const [activityAction, setActivityAction] = useState("all");
@@ -252,12 +263,15 @@ export default function ActivityLogsPage() {
   useEffect(() => {
     if (!canViewLogs || activeTab !== "activity") return;
     const controller = new AbortController();
+    const generation = ++batchGenerationRef.current;
+    loadMoreAbortRef.current?.abort();
     const timer = window.setTimeout(() => {
       setLoading(true);
+      setLoadingMore(false);
+      setLoadMoreError("");
       setError("");
-      getActivityLogs({
-        limit: pageSize,
-        offset: (page - 1) * pageSize,
+      getActivityLogBatch({
+        limit: ACTIVITY_BATCH_SIZE,
         userId: activityUser === "all" ? undefined : Number(activityUser),
         action: activityAction === "all" ? undefined : activityAction,
         role: activityRole === "all" ? undefined : activityRole,
@@ -267,12 +281,11 @@ export default function ActivityLogsPage() {
         q: debouncedQuery || undefined,
       }, controller.signal)
         .then((result) => {
+          if (generation !== batchGenerationRef.current) return;
           setLogs(result.logs);
-          setTotal(result.total);
+          setHasMore(result.hasMore);
+          setNextCursor(result.nextCursor);
           if (result.actors.length) setActors(result.actors);
-          // Trang hiện tại vượt quá số trang (vd vừa đổi bộ lọc): quay về trang cuối còn dữ liệu.
-          const lastPage = Math.max(1, Math.ceil(result.total / pageSize));
-          if (page > lastPage) setPage(lastPage);
         })
         .catch((loadError) => {
           if (loadError instanceof DOMException && loadError.name === "AbortError") return;
@@ -286,7 +299,56 @@ export default function ActivityLogsPage() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [activeTab, activityAction, activityDateFrom, activityDateTo, activityRole, activityStatus, activityUser, canViewLogs, debouncedQuery, page, pageSize, reloadKey, t]);
+  }, [activeTab, activityAction, activityDateFrom, activityDateTo, activityRole, activityStatus, activityUser, canViewLogs, debouncedQuery, reloadKey, t]);
+
+  /** Tải lô tiếp theo (cũ hơn) nối vào cuối danh sách. */
+  const loadMoreActivity = useCallback(() => {
+    if (loading || loadingMore || !hasMore || !nextCursor) return;
+    const generation = batchGenerationRef.current;
+    const controller = new AbortController();
+    loadMoreAbortRef.current = controller;
+    setLoadingMore(true);
+    setLoadMoreError("");
+    getActivityLogBatch({
+      limit: ACTIVITY_BATCH_SIZE,
+      cursor: nextCursor,
+      userId: activityUser === "all" ? undefined : Number(activityUser),
+      action: activityAction === "all" ? undefined : activityAction,
+      role: activityRole === "all" ? undefined : activityRole,
+      status: activityStatus === "all" ? undefined : activityStatus,
+      from: activityDateFrom || undefined,
+      to: activityDateTo || undefined,
+      q: debouncedQuery || undefined,
+    }, controller.signal)
+      .then((result) => {
+        if (generation !== batchGenerationRef.current) return;
+        // Bỏ dòng trùng (phòng khi có log mới chen vào giữa hai lần tải).
+        setLogs((current) => {
+          const seen = new Set(current.map((log) => String(log.id)));
+          return [...current, ...result.logs.filter((log) => !seen.has(String(log.id)))];
+        });
+        setHasMore(result.hasMore);
+        setNextCursor(result.nextCursor);
+      })
+      .catch((loadError) => {
+        if (controller.signal.aborted || generation !== batchGenerationRef.current) return;
+        setLoadMoreError(loadError instanceof Error ? loadError.message : t("activityLogLoadError"));
+      })
+      .finally(() => {
+        if (generation === batchGenerationRef.current) setLoadingMore(false);
+      });
+  }, [activityAction, activityDateFrom, activityDateTo, activityRole, activityStatus, activityUser, debouncedQuery, hasMore, loading, loadingMore, nextCursor, t]);
+
+  // Cuộn tới gần cuối danh sách thì tự tải tiếp (vẫn có nút "Tải thêm" nếu trình duyệt không hỗ trợ).
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (activeTab !== "activity" || !hasMore || loadMoreError || !sentinel || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) loadMoreActivity();
+    }, { rootMargin: LOAD_MORE_MARGIN });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [activeTab, hasMore, loadMoreActivity, loadMoreError]);
 
   const loadEmailLogs = useCallback(async () => {
     setLoading(true);
@@ -328,13 +390,9 @@ export default function ActivityLogsPage() {
   const suppliers = useMemo(() => Array.from(new Set(emailLogs.map((log) => log.supplierName).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [emailLogs]);
   const emailPage = paginateItems(filteredEmailLogs, page, pageSize);
 
-  const activityTotalPages = Math.max(1, Math.ceil(total / pageSize));
-  const activityPage = Math.min(page, activityTotalPages);
-  const visibleCount = activeTab === "activity" ? total : filteredEmailLogs.length;
-  const currentPage = activeTab === "activity" ? activityPage : emailPage.safePage;
-  const totalPages = activeTab === "activity" ? activityTotalPages : emailPage.totalPages;
-  const from = activeTab === "activity" ? (total === 0 ? 0 : (activityPage - 1) * pageSize + 1) : emailPage.from;
-  const to = activeTab === "activity" ? Math.min(total, activityPage * pageSize) : emailPage.to;
+  const visibleCount = activeTab === "activity" ? logs.length : filteredEmailLogs.length;
+  // Tải dần thì chưa biết tổng: còn dữ liệu thì ghi "Đã tải N", tải hết rồi mới ghi tổng.
+  const countLabel = activeTab === "activity" && hasMore ? t("loadedRecordCount", { count: visibleCount }) : t("recordCount", { count: visibleCount });
   const isEmpty = activeTab === "activity" ? logs.length === 0 : emailPage.items.length === 0;
 
   const activitySuggestions = useMemo(() => Array.from(new Set([
@@ -379,7 +437,7 @@ export default function ActivityLogsPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="font-semibold text-gray-800 dark:text-white/90">{activeTab === "activity" ? t("operationHistory") : t("emailHistory")}</h2>
-              <p className="mt-0.5 text-xs text-gray-500">{t("recordCount", { count: visibleCount })}</p>
+              <p className="mt-0.5 text-xs text-gray-500">{countLabel}</p>
             </div>
             <SearchSuggestions
               value={query}
@@ -434,8 +492,23 @@ export default function ActivityLogsPage() {
         ) : isEmpty ? (
           <div className="flex min-h-52 items-center justify-center px-4 text-center text-sm text-gray-500">{activeTab === "email" ? t("noEmailLogs") : t("noActivityLogs")}</div>
         ) : activeTab === "activity" ? (
-          <div className={`divide-y divide-gray-100 transition-opacity dark:divide-gray-800 ${loading ? "opacity-60" : ""}`} aria-busy={loading}>
-            {logs.map((log) => <ActivityRow key={log.id} log={log} />)}
+          <div>
+            <div className={`divide-y divide-gray-100 transition-opacity dark:divide-gray-800 ${loading ? "opacity-60" : ""}`} aria-busy={loading || loadingMore}>
+              {logs.map((log) => <ActivityRow key={log.id} log={log} />)}
+            </div>
+            {/* Mốc cuối danh sách: lọt vào màn hình (còn ~600px) thì tải lô tiếp theo */}
+            <div ref={loadMoreSentinelRef} className="flex min-h-14 items-center justify-center border-t border-gray-100 px-4 py-3 dark:border-gray-800">
+              {loadingMore ? (
+                <span className="flex items-center gap-2 text-xs text-gray-500"><span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />{t("loading")}</span>
+              ) : hasMore ? (
+                <div className="flex flex-col items-center gap-2 text-center">
+                  {loadMoreError && <p className="break-words text-xs text-error-600 dark:text-error-400">{loadMoreError}</p>}
+                  <button type="button" onClick={loadMoreActivity} className="h-10 rounded-lg border border-gray-200 px-4 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("loadMore")}</button>
+                </div>
+              ) : (
+                <span className="text-xs text-gray-400">{t("allRecordsLoaded")}</span>
+              )}
+            </div>
           </div>
         ) : (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -461,7 +534,7 @@ export default function ActivityLogsPage() {
             })}
           </div>
         )}
-        {!error && visibleCount > 0 && <PaginationControls page={currentPage} totalPages={totalPages} pageSize={pageSize} totalItems={visibleCount} from={from} to={to} summaryKey="showingRecords" onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} />}
+        {!error && activeTab === "email" && visibleCount > 0 && <PaginationControls page={emailPage.safePage} totalPages={emailPage.totalPages} pageSize={pageSize} totalItems={visibleCount} from={emailPage.from} to={emailPage.to} summaryKey="showingRecords" onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1); }} />}
       </div>
     </section>
   );

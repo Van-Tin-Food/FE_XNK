@@ -17,20 +17,9 @@ import { formatDateTime } from "./PaymentRequestParts";
 // Chứng từ hồ sơ đề nghị (bước 4): thư mục DNTT_xxx trên Google Drive, cùng cơ chế chứng từ XNK —
 // kiểm tra định dạng + trùng tên trước, rồi upload lần lượt bằng quyền Drive của người dùng. Chứng từ upload dần (tạm),
 // bỏ được file up nhầm; chỉ khi bấm "Đầy đủ chứng từ" (PaymentRequestProcess) đề nghị mới hoàn thành và khóa.
+// File gửi thẳng lên Google Drive (không qua gateway), nên giới hạn là của Drive upload: 1 GB/file như chứng từ XNK.
 
-const MAX_FILE_MB = 15;
-
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") return reject(new Error("Không đọc được file"));
-      resolve(reader.result.includes(",") ? reader.result.split(",", 2)[1] : reader.result);
-    };
-    reader.onerror = () => reject(new Error("Không đọc được file"));
-    reader.readAsDataURL(file);
-  });
-}
+const MAX_FILE_MB = 1024;
 
 interface Props {
   requestId: string;
@@ -79,7 +68,8 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, onFilesCha
         return;
       }
       for (const [index, file] of selected.entries()) {
-        await uploadPaymentDocument(requestId, { name: file.name, type: getDocumentMimeType(file), data: await readFileAsBase64(file) });
+        if (file.size <= 0) throw new Error(t("prEmptyFile", { name: file.name }));
+        await uploadPaymentDocument(requestId, file, getDocumentMimeType(file));
         setProgress({ done: index + 1, total: selected.length });
       }
       notify(t("prUploaded", { count: selected.length }), "success");

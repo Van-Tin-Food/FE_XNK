@@ -2,6 +2,7 @@ import { getStoredUser, GOOGLE_DRIVE_AUTH_REQUIRED_EVENT } from "@/services/auth
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 import type { PaymentCurrency } from "@/utils/paymentRequest";
+import { uploadFileToDriveSession, type UploadProgress } from "@/utils/driveResumableUpload";
 
 // Đề nghị thanh toán (BE: /api/payment-requests). Quy trình: 1 tạo (nháp) → 2 gửi lên Google Chat → 3 duyệt / từ chối
 // (trên Google Chat) → 4 lưu trữ hồ sơ (upload chứng từ vào thư mục Drive DNTT_xxx, bộ phận có quyền xác nhận).
@@ -451,12 +452,29 @@ export async function removePaymentDocument(id: string, fileId: string): Promise
   await request<unknown>("DELETE", `/${encodeURIComponent(id)}/documents/${encodeURIComponent(fileId)}`);
 }
 
-export async function uploadPaymentDocument(id: string, file: { name: string; type: string; data: string }): Promise<PaymentDocumentFile> {
-  const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/documents`, { fileName: file.name, mimeType: file.type, fileData: file.data });
+/**
+ * Upload một chứng từ thẳng lên Google Drive (như chứng từ XNK): BE mở phiên upload -> trình duyệt gửi file thẳng tới
+ * Google (từng phần 8 MB, tự gửi tiếp khi rớt mạng) -> BE kiểm tra và ghi nhận. File không đi qua gateway / proxy nên
+ * không bị giới hạn kích thước request ở các tầng đó (trước đây gửi Base64 qua gateway, file ~500 KB đã có thể bị 413).
+ */
+export async function uploadPaymentDocument(
+  id: string,
+  file: File,
+  mimeType: string,
+  options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal } = {},
+): Promise<PaymentDocumentFile> {
+  const base = `/${encodeURIComponent(id)}/documents`;
+  const startPayload = await request<unknown>("POST", `${base}/start-upload`, { fileName: file.name, fileSize: file.size, mimeType });
+  const session = isRecord(startPayload) && isRecord(startPayload.data) ? startPayload.data : {};
+  const uploadUrl = str(session.uploadUrl);
+  const uploadToken = str(session.uploadToken);
+  if (!uploadUrl || !uploadToken) throw new Error("Máy chủ chưa mở được phiên upload Google Drive");
+  const uploaded = await uploadFileToDriveSession(uploadUrl, file, options);
+  const payload = await request<unknown>("POST", `${base}/complete-upload`, { uploadToken, fileId: uploaded.id });
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
-  const uploaded = normalizeDocumentFile(data.file);
-  if (!uploaded) throw new Error("Phản hồi upload chứng từ không hợp lệ");
-  return uploaded;
+  const result = normalizeDocumentFile(data.file);
+  if (!result) throw new Error("Phản hồi upload chứng từ không hợp lệ");
+  return result;
 }
 
 /** Bản in Giấy đề nghị thanh toán (Mẫu 05-TT, layout công ty): trang HTML để xem trước rồi "In / Lưu PDF". */
