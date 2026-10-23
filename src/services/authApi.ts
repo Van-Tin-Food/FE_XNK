@@ -345,6 +345,19 @@ export async function fetchCurrentUser(): Promise<AuthUser> {
   return storeUserProfile({ ...stored, ...fresh, token: stored.token });
 }
 
+export async function updateMyProfile(changes: { name: string; username: string; email: string }): Promise<AuthUser> {
+  const stored = getStoredUser();
+  if (!stored?.token) throw new Error("ChÆ°a Ä‘Äƒng nháº­p");
+  const result = await authRequest("me", {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+  const source = isRecord(result) && isRecord(result.data) ? result.data : null;
+  if (!source) throw createInvalidResponseError("Cáº­p nháº­t tÃ i khoáº£n", "PATCH", "/api/auth/me", "");
+  const fresh = normalizeUser(source, changes.username);
+  return storeUserProfile({ ...stored, ...fresh, token: stored.token });
+}
+
 /** Quyền Google đã lưu hết hạn/lỗi: BE trả sẵn URL cấp quyền lại để FE chuyển hướng. */
 export class GoogleConsentRequiredError extends Error {
   readonly googleAuthUrl: string;

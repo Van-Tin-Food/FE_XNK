@@ -156,7 +156,8 @@ export default function DocumentSyncPage() {
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">{t("documentSync")}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("documentSyncDescription")}</p>
         </div>
-        {canSync && <button type="button" onClick={runScan} disabled={scanning} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60">
+        {canSync && <button type="button" onClick={runScan} disabled={scanning} aria-busy={scanning} className="inline-flex min-w-36 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-wait disabled:opacity-60">
+          {scanning && <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />}
           {scanning ? t("documentSyncScanning") : t("documentSyncScan")}
         </button>}
       </div>

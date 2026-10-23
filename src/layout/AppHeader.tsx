@@ -16,6 +16,8 @@ const AppHeader: React.FC = () => {
   const { language, toggleLanguage, t } = useLanguage();
   const { user, can } = useAuth();
   const canViewUserGuide = can("userGuide");
+  const canViewPaymentRequests = can("paymentRequests");
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
 
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
 
@@ -187,17 +189,35 @@ const AppHeader: React.FC = () => {
            <NotificationDropdown /> 
             {/* <!-- Notification Menu Area --> */}
           </div>
-          <div
-            className="flex shrink-0 items-center gap-3 text-gray-700 dark:text-gray-300"
-            title={`${user?.name || "User"} • ${user?.role || ""}`}
-          >
-            <AvatarText
-              name={user?.name || "User"}
-              className="h-11 w-11 ring-2 ring-white shadow-sm dark:ring-gray-900"
-            />
-            <span className="hidden max-w-36 truncate text-sm font-medium xl:block">
-              {user?.name || "User"}
-            </span>
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setProfileMenuOpen((open) => !open)}
+              className="flex items-center gap-3 rounded-lg p-1 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+              aria-expanded={profileMenuOpen}
+              aria-label={t("myProfile")}
+              title={`${user?.name || "User"} • ${user?.role || ""}`}
+            >
+              <AvatarText
+                name={user?.name || "User"}
+                className="h-11 w-11 ring-2 ring-white shadow-sm dark:ring-gray-900"
+              />
+              <span className="hidden max-w-36 truncate text-sm font-medium xl:block">
+                {user?.name || "User"}
+              </span>
+            </button>
+            {profileMenuOpen && (
+              <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                <Link href="/profile" onClick={() => setProfileMenuOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+                  {t("myProfile")}
+                </Link>
+                {canViewPaymentRequests && (
+                  <Link href="/payment-costs" onClick={() => setProfileMenuOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+                    {t("myCosts")}
+                  </Link>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -14,6 +14,7 @@ import { useShipmentListResetLinks } from "../utils/shipmentListState";
 
 const MARKET_RESEARCH_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbx9gxbHB-b5UMbF6x9NrdDmc-abshieQ5pZfhFQRbHXhLGw-Cxv91kkssrmz0hZBabNXA/exec";
 const LEGACY_ETA_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbwlTy4uv4eGx5beJfLKRwJj-VW0H5uFxSeRbhGOstoGn4bPjjJ2-0E0xqwghxvB3R3_7g/exec";
+const WAREHOUSE_SYNC_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbxQU59_Qmdkq7h3OPjK4r2OQbbHIQXi4SWK5OZWyjOj3JH4HJPE4Jl6AHnI9vZi3PiGUQ/exec";
 
 const AppSidebar: React.FC = () => {
   const { can, logout } = useAuth();
@@ -25,6 +26,7 @@ const AppSidebar: React.FC = () => {
   const isShipmentsActive = pathname === "/" || pathname.startsWith("/shipments/");
   const [supportOpen, setSupportOpen] = useState(pathname === "/email" || pathname === "/document-sync");
   const [catalogOpen, setCatalogOpen] = useState(pathname === "/master-data");
+  const [costOpen, setCostOpen] = useState(pathname === "/payment-costs" || (pathname === "/master-data" && searchParams.get("catalog") === "paymentCategories"));
   const [logsOpen, setLogsOpen] = useState(pathname === "/activity-logs");
   // Bấm logo (sidebar, header) hoặc menu "Mua hàng & ETA": danh sách đơn về bộ lọc mặc định.
   useShipmentListResetLinks();
@@ -38,6 +40,7 @@ const AppSidebar: React.FC = () => {
   const canManageUsers = can("users");
   const canManageMasterData = can("masterData");
   const canViewPaymentRequests = can("paymentRequests");
+  const canViewCostManagement = canManageMasterData || canViewPaymentRequests;
   const { t } = useLanguage();
 
   return (
@@ -113,24 +116,6 @@ const AppSidebar: React.FC = () => {
               </Link>
             </li>
           )}
-          {canViewPaymentRequests && (
-            <li>
-              <Link
-                href="/payment-costs"
-                className={`menu-item group ${
-                  pathname.startsWith("/payment-costs") ? "menu-item-active" : "menu-item-inactive"
-                } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
-              >
-                <span className={pathname.startsWith("/payment-costs") ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <rect x="3" y="5" width="18" height="14" rx="2" />
-                    <path d="M3 10h18M7 15h3" />
-                  </svg>
-                </span>
-                {showText && <span className="menu-item-text">{t("myCosts")}</span>}
-              </Link>
-            </li>
-          )}
           {/* <li>
             <Link
               href="/user-guide"
@@ -165,11 +150,28 @@ const AppSidebar: React.FC = () => {
                 <li><Link href="/master-data?catalog=suppliers" className={`menu-dropdown-item ${pathname === "/master-data" && !["carriers", "warehouses", "paymentCategories"].includes(searchParams.get("catalog") || "") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("suppliers")}</Link></li>
                 <li><Link href="/master-data?catalog=carriers" className={`menu-dropdown-item ${searchParams.get("catalog") === "carriers" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("carriers")}</Link></li>
                 <li><Link href="/master-data?catalog=warehouses" className={`menu-dropdown-item ${searchParams.get("catalog") === "warehouses" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("warehouses")}</Link></li>
-                <li><Link href="/master-data?catalog=paymentCategories" className={`menu-dropdown-item ${searchParams.get("catalog") === "paymentCategories" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("paymentCategories")}</Link></li>
               </ul>}
             </li>
           )}
 
+          {canViewCostManagement && (
+            <li>
+              <button type="button" onClick={() => setCostOpen((current) => !current)} className={`menu-item group w-full ${costOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={costOpen}>
+                <span className={costOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 6h16M4 12h16M4 18h10" />
+                    <circle cx="18" cy="18" r="2" />
+                  </svg>
+                </span>
+                {showText && <span className="menu-item-text">{t("costManagement")}</span>}
+                {showText && <span className="ml-auto text-xs">{costOpen ? "−" : "+"}</span>}
+              </button>
+              {costOpen && showText && <ul className="mt-1 space-y-1 pl-11">
+                {canManageMasterData && <li><Link href="/master-data?catalog=paymentCategories" className={`menu-dropdown-item ${searchParams.get("catalog") === "paymentCategories" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("paymentCategories")}</Link></li>}
+                {canViewPaymentRequests && <li><Link href="/payment-costs" className={`menu-dropdown-item ${pathname.startsWith("/payment-costs") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("myCosts")}</Link></li>}
+              </ul>}
+            </li>
+          )}
 
           {canManageUsers && (
             <li>
@@ -230,6 +232,13 @@ const AppSidebar: React.FC = () => {
             <li className="-mt-3 pl-11">
               <a href={MARKET_RESEARCH_HREF} target="_blank" rel="noopener noreferrer" className="block rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]">
                 {t("marketResearch")}
+              </a>
+            </li>
+          )}
+          {canViewLegacyEta && supportOpen && showText && (
+            <li className="-mt-3 pl-11">
+              <a href={WAREHOUSE_SYNC_HREF} target="_blank" rel="noopener noreferrer" className="block rounded-lg px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/[0.04]">
+                {t("warehouseSync")}
               </a>
             </li>
           )}

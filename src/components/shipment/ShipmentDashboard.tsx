@@ -430,7 +430,7 @@ export default function ShipmentDashboard() {
           </div>
         </div>
       ) : (
-        <ShipmentTable key={tableResetKey} shipments={filteredShipments} onRowClick={handleRowClick} />
+        <ShipmentTable key={tableResetKey} shipments={filteredShipments} onRowClick={handleRowClick} onShipmentUpdated={loadData} />
       )}
     </div>
   );

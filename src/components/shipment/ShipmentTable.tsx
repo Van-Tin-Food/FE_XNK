@@ -7,10 +7,13 @@ import PaginationControls from "@/components/common/PaginationControls";
 import { BillContainerTrackingList, hasTextSelection } from "./TrackingCodeButton";
 import { SHIPMENT_TABLE_STATE_KEY } from "@/utils/shipmentListState";
 import { getGoodsPaymentSummary, type GoodsPaymentListState, type GoodsPaymentSummary } from "@/services/paymentCostApi";
+import { databaseEndpoints, updateDatabaseRow } from "@/services/postgresShipmentApi";
+import { useAuth } from "@/context/AuthContext";
 
 interface ShipmentTableProps {
   shipments: Shipment[];
   onRowClick: (shipment: Shipment) => void;
+  onShipmentUpdated?: () => void | Promise<void>;
 }
 
 const DEFAULT_PAGE_SIZE = 15;
@@ -213,6 +216,32 @@ function getArrivalState(shipment: Shipment, language: "vi" | "en" = "vi"): { te
   };
 }
 
+function ArrivalCell({ shipment, language }: { shipment: Shipment; language: "vi" | "en" }) {
+  const arrivalState = getArrivalState(shipment, language);
+  const hasEta = Boolean(String(shipment.eta ?? "").trim());
+  const hasAta = Boolean(String(shipment.ata ?? "").trim());
+
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      {hasEta && (
+        <span className="text-[11px] font-medium text-gray-700 dark:text-gray-200">
+          ETA: {formatContractDate(shipment.eta)}
+        </span>
+      )}
+      <span className={`text-xs font-medium ${arrivalState.className}`}>{arrivalState.text}</span>
+      {hasAta && (
+        <span className="text-[10px] text-gray-500 dark:text-gray-400">
+          ATA: {formatContractDate(shipment.ata)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function primaryBillOf(shipment: Shipment) {
+  return [...(shipment.database?.bills || [])].sort((left, right) => String(left.eta || "9999-12-31").localeCompare(String(right.eta || "9999-12-31")))[0];
+}
+
 function DocBar({ total, received, missingList, missingLabel }: { total: number; received: number; missingList: string; missingLabel: string }) {
   const pct = total > 0 ? (received / total) * 100 : 0;
   const missing = total - received;
@@ -335,8 +364,11 @@ function ShipmentCard({
           </p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("arrivalDuration")}</p>
-          <p className={`mt-0.5 text-xs font-medium ${getArrivalState(shipment, language).className}`}>{getArrivalState(shipment, language).text}</p>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400">Thời gian</p>
+          <div className="mt-0.5">
+            <span className="mb-0.5 block text-[10px] text-gray-500 dark:text-gray-400">ETD: {formatContractDate(shipment.etd)}</span>
+            <ArrivalCell shipment={shipment} language={language} />
+          </div>
         </div>
       </div>
 
@@ -359,8 +391,14 @@ function ShipmentCard({
   );
 }
 
-export default function ShipmentTable({ shipments, onRowClick }: ShipmentTableProps) {
+export default function ShipmentTable({ shipments, onRowClick, onShipmentUpdated }: ShipmentTableProps) {
   const { language, t } = useLanguage();
+  const { can } = useAuth();
+  const canEditEta = can("shipments", "edit");
+  const [editingEtaId, setEditingEtaId] = useState<string | null>(null);
+  const [draftEta, setDraftEta] = useState("");
+  const [savingEtaId, setSavingEtaId] = useState<string | null>(null);
+  const [etaError, setEtaError] = useState<string | null>(null);
   // Đọc ngay ở lần render đầu (không đợi effect) để quay về từ chi tiết đơn thì đúng trang trước khi cuộn về chỗ cũ.
   const [savedState] = useState(() => readTableState());
   const [sortKey, setSortKey] = useState<SortKey>(() => savedState.sortKey || "eta");
@@ -369,6 +407,99 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
   const [pageSize, setPageSize] = useState(() => savedState.pageSize || DEFAULT_PAGE_SIZE);
   // Trạng thái cọc / còn lại của mọi đơn: tải một lần, tải lại khi quay lại tab (có thể vừa duyệt trên Google Chat).
   const [goodsPayments, setGoodsPayments] = useState<GoodsPaymentSummary | null>(null);
+  const beginEtaEdit = (event: React.SyntheticEvent, shipment: Shipment) => {
+    event.stopPropagation();
+    if (!canEditEta) return;
+    setEtaError(null);
+    setEditingEtaId(shipment.id);
+    setDraftEta(String(shipment.eta || "").slice(0, 10));
+  };
+
+  const cancelEtaEdit = (event?: React.SyntheticEvent) => {
+    event?.stopPropagation();
+    setEditingEtaId(null);
+    setDraftEta("");
+    setEtaError(null);
+  };
+
+  const saveEta = async (event: React.SyntheticEvent, shipment: Shipment) => {
+    event.stopPropagation();
+    if (savingEtaId === shipment.id) return;
+    const bill = primaryBillOf(shipment);
+    if (!bill?.id_xnk) {
+      setEtaError("Không xác định được B/L để cập nhật ETA");
+      return;
+    }
+    const eta = draftEta.trim() || null;
+    const etd = parseDateStart(bill.etd || undefined);
+    const etaDate = parseDateStart(eta || undefined);
+    if (etaDate !== null && etd !== null && etaDate < etd) {
+      setEtaError("ETA không được nhỏ hơn ETD");
+      return;
+    }
+    if (eta === String(shipment.eta || "").slice(0, 10)) {
+      cancelEtaEdit();
+      return;
+    }
+    setSavingEtaId(shipment.id);
+    setEtaError(null);
+    try {
+      await updateDatabaseRow(databaseEndpoints.bills, bill.id_xnk, { eta });
+      setEditingEtaId(null);
+      setDraftEta("");
+      await onShipmentUpdated?.();
+    } catch (error) {
+      setEtaError(error instanceof Error ? error.message : "Không thể cập nhật ETA");
+    } finally {
+      setSavingEtaId(null);
+    }
+  };
+
+  const renderTimeCell = (shipment: Shipment) => {
+    const isEditing = editingEtaId === shipment.id;
+    const isSaving = savingEtaId === shipment.id;
+    const bill = primaryBillOf(shipment);
+    if (isEditing) {
+      return (
+        <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-brand-200 bg-brand-50/40 p-1.5 dark:border-brand-500/40 dark:bg-brand-500/5" onClick={(event) => event.stopPropagation()}>
+          <span className="text-[10px] text-gray-500 dark:text-gray-400">ETD: {formatContractDate(shipment.etd)}</span>
+          <label className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300">ETA</span>
+            <input
+              type="date"
+              value={draftEta}
+              min={String(shipment.etd || "").slice(0, 10) || undefined}
+              autoFocus
+              disabled={isSaving}
+              onChange={(event) => { setDraftEta(event.target.value); setEtaError(null); }}
+              onBlur={(event) => { void saveEta(event, shipment); }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") { event.preventDefault(); void saveEta(event, shipment); }
+                if (event.key === "Escape") { event.preventDefault(); cancelEtaEdit(event); }
+              }}
+              className="h-8 w-full min-w-0 rounded-md border border-brand-300 bg-white px-2 text-xs font-medium tabular-nums text-gray-700 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-200 dark:border-brand-500/60 dark:bg-gray-800 dark:text-gray-200 dark:focus:ring-brand-500/30"
+            />
+          </label>
+          {etaError && <span className="text-[10px] leading-tight text-error-600">{etaError}</span>}
+        </div>
+      );
+    }
+    return (
+      <div
+        role={canEditEta && bill ? "button" : undefined}
+        tabIndex={canEditEta && bill ? 0 : undefined}
+        title={canEditEta && bill ? "Bấm để sửa ETA" : undefined}
+        onClick={(event) => beginEtaEdit(event, shipment)}
+        onKeyDown={(event) => {
+          if (canEditEta && bill && (event.key === "Enter" || event.key === " ")) beginEtaEdit(event, shipment);
+        }}
+        className={canEditEta && bill ? "cursor-text rounded-md outline-none hover:bg-brand-50/70 focus:ring-2 focus:ring-brand-200 dark:hover:bg-brand-500/10" : ""}
+      >
+        <span className="mb-0.5 block text-[10px] text-gray-500 dark:text-gray-400">ETD: {formatContractDate(shipment.etd)}</span>
+        <ArrivalCell shipment={shipment} language={language} />
+      </div>
+    );
+  };
   useEffect(() => {
     let active = true;
     const load = () => {
@@ -542,23 +673,23 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
               <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("contractDate")} title={t("sortByContractDate")}>
                 <div className="flex items-center gap-1.5">{t("orderNumber")} <SortIcon col="contractDate" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[20%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[17%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
                 <div className="flex items-center gap-1.5">{t("productAndFactory")} <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[14%] bg-gray-50/95 px-4 py-3 xl:max-2xl:px-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400" title={t("trackingColumnHint")}>{t("billContainerColumn")}</th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
+              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[13%] bg-gray-50/95 px-4 py-3 xl:max-2xl:px-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400" title={t("trackingColumnHint")}>{t("billContainerColumn")}</th>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
                 <div className="flex items-center gap-1.5">{t("supplier")} <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[9%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
-                <div className="flex items-center gap-1.5">{t("arrivalDuration")} <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[18%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
+                <div className="flex items-center gap-1.5">Thời gian <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
                 <div className="flex items-center gap-1.5">{t("status")} <SortIcon col="status" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[9%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
+              <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[8%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
                 <div className="flex items-center gap-1.5">{t("documents")} <SortIcon col="receivedDocs" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[10%] bg-gray-50/95 px-4 py-3 xl:max-2xl:px-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400" title={t("glpColumnHint")}>{t("glpColumn")}</th>
+              <th className="sticky top-[65px] z-40 xl:max-2xl:static w-[8%] bg-gray-50/95 px-4 py-3 xl:max-2xl:px-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400" title={t("glpColumnHint")}>{t("glpColumn")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
@@ -629,13 +760,9 @@ export default function ShipmentTable({ shipments, onRowClick }: ShipmentTablePr
                       </div>
                     </td>
 
-
                     {/* Arrival status */}
                     <td className="py-3.5 px-4 xl:max-2xl:px-2.5">
-                      {(() => {
-                        const arrivalState = getArrivalState(shipment, language);
-                        return <span className={`text-xs font-medium ${arrivalState.className}`}>{arrivalState.text}</span>;
-                      })()}
+                      {renderTimeCell(shipment)}
                     </td>
 
                     {/* Status */}
