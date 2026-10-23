@@ -1,7 +1,17 @@
 // Tiện ích đề nghị thanh toán: đọc số tiền người dùng gõ, cộng tổng chính xác (theo xu), định dạng hiển thị.
 // BE nhận số tiền dạng chuỗi "1250000" / "18500.5" (tối đa 2 chữ số thập phân, > 0).
 
+import type { PermissionFunction, PermissionLevel } from "@/config/shipmentActionPermissions";
+
 export type PaymentCurrency = "VND" | "USD";
+
+/**
+ * Được mở danh sách / chi tiết đề nghị: có quyền đề nghị, hoặc được uỷ quyền duyệt / xác nhận chứng từ
+ * (khớp requireAnyPermission của route GET /api/payment-requests ở BE).
+ */
+export function canOpenPaymentRequests(can: (fn: PermissionFunction, level?: PermissionLevel) => boolean): boolean {
+  return can("paymentRequests") || can("paymentApprove", "edit") || can("paymentDocuments", "edit");
+}
 
 const MAX_INTEGER_DIGITS = 16;
 

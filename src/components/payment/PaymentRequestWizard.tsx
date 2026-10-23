@@ -18,6 +18,8 @@ import {
   type PaymentMethod,
   type PaymentRequest,
   type PaymentRequestOptions,
+  type PaymentBeneficiarySuggestion,
+  type TransferField,
   type TransferKind,
 } from "@/services/paymentRequestApi";
 import { addVat, formatAmount, formatMoney, parseAmountLoose, parseVatInput, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
@@ -80,6 +82,7 @@ const isPrepared = (cost: PaymentCost) => Boolean(cost.container || cost.contrac
 const ORDER_COST_CODES = ["HD", "CONT"];
 const isOrderCode = (code: string) => ORDER_COST_CODES.includes(code.toUpperCase());
 const MAX_COSTS = 100;
+const BENEFICIARY_DEBOUNCE_MS = 250;
 
 /** Ngày (YYYY-MM-DD) theo giờ Việt Nam, cộng thêm số ngày. */
 function vnDate(addDays = 0): string {
@@ -175,7 +178,9 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">(editing?.paymentMethod || "");
   // Thông tin chuyển khoản (người thụ hưởng): một khối nhiều dòng, chọn chuyển khoản lần đầu thì điền sẵn khung mẫu.
   const [transferValues, setTransferValues] = useState<Record<string, string>>(() => parseTransferInfo(editing?.transferInfo || ""));
-  const [beneficiarySuggestions, setBeneficiarySuggestions] = useState<Array<Record<string, string>>>([]);
+  // Gợi ý người thụ hưởng theo số tài khoản / IBAN đang gõ (tìm trong các đề nghị đã lưu, chờ ngừng gõ mới gọi BE).
+  const [accountQuery, setAccountQuery] = useState("");
+  const [beneficiarySuggestions, setBeneficiarySuggestions] = useState<PaymentBeneficiarySuggestion[]>([]);
   const [active, setActive] = useState(editing ? SAVE_STEP : 0);
   const [reached, setReached] = useState(editing ? SAVE_STEP : 0);
   const [search, setSearch] = useState("");
@@ -248,6 +253,25 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const paymentDone = /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && Boolean(currency && paymentMethod && recipientValid);
   const complete = [costCount > 0 && otherValid && preparedVatValid, Boolean(content.trim()), paymentDone];
 
+  // Gợi ý người thụ hưởng: chờ ngừng gõ rồi mới gọi BE, huỷ lần gọi cũ để kết quả cũ không đè kết quả mới.
+  useEffect(() => {
+    const term = accountQuery.trim();
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (term.length < 2) {
+        setBeneficiarySuggestions([]);
+        return;
+      }
+      searchPaymentBeneficiaries(term, transferKind, controller.signal)
+        .then((rows) => { if (!controller.signal.aborted) setBeneficiarySuggestions(rows); })
+        .catch(() => { if (!controller.signal.aborted) setBeneficiarySuggestions([]); });
+    }, term.length < 2 ? 0 : BENEFICIARY_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [accountQuery, transferKind]);
+
   /** "Trước thuế X · VAT 8% Y" cho khoản có % VAT. */
   const vatLineOf = (amount: string | null, vat: string | null) => {
     if (!amount || vat === null) return "";
@@ -316,29 +340,19 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   ];
   const transferText = transfer ? buildTransferInfo(transferKind, transferValues) : "";
   const choosePaymentMethod = (value: PaymentMethod) => setPaymentMethod(value);
-  const updateTransferValue = async (field: typeof transferFields[number], value: string) => {
+  const updateTransferValue = (field: TransferField, value: string) => {
     setTransferValues((current) => ({ ...current, [field.label]: value }));
-    if (field.label !== "Số tài khoản" && field.label !== "Số IBAN người thụ hưởng") return;
-    if (value.trim().length < 2) return setBeneficiarySuggestions([]);
-    try {
-      const rows = await searchPaymentBeneficiaries(value, transferKind);
-      setBeneficiarySuggestions(rows.map((row) => Object.fromEntries(Object.entries(row).filter(([, value]) => value))));
-    } catch { setBeneficiarySuggestions([]); }
+    if (field.jsonKey === "so_tai_khoan") setAccountQuery(value);
   };
-  const applyBeneficiary = (row: Record<string, string>) => {
+  /** Chọn một gợi ý: điền mọi trường trừ nội dung thanh toán (nội dung mỗi lần mỗi khác). */
+  const applyBeneficiary = (row: PaymentBeneficiarySuggestion) => {
     const values: Record<string, string> = {};
     for (const field of transferFields) {
-      const key = field.label === "Số tài khoản" || field.label === "Số IBAN người thụ hưởng" ? "so_tai_khoan"
-        : field.label === "Tên người thụ hưởng" ? "ten_nguoi_thu_huong"
-          : field.label === "Tên ngân hàng" || field.label === "Tên ngân hàng thụ hưởng" ? "ten_ngan_hang"
-            : field.label === "Địa chỉ người thụ hưởng" ? "dia_chi_nguoi_thu_huong"
-              : field.label === "Mã SWIFT" ? "ma_swift"
-                : field.label === "Địa chỉ ngân hàng thụ hưởng" ? "dia_chi_ngan_hang"
-                  : field.label === "Ngân hàng trung gian" ? "ngan_hang_trung_gian" : "noi_dung_thanh_toan";
-      if (key !== "noi_dung_thanh_toan" && row[key]) values[field.label] = row[key];
+      const value = field.jsonKey === "noi_dung_thanh_toan" ? "" : row[field.jsonKey];
+      if (value) values[field.label] = value;
     }
     setTransferValues((current) => ({ ...current, ...values }));
-    setBeneficiarySuggestions([]);
+    setAccountQuery("");
   };
 
   const save = async () => {
@@ -662,25 +676,31 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                 {transferFields.map((field) => {
                   const value = transferValues[field.label] || "";
                   const id = `transfer-${field.key}`;
+                  // Các ô đều autoComplete="off": trình duyệt không gợi ý lại giá trị cũ (nhất là Nội dung thanh toán, mỗi đề nghị mỗi khác).
                   const className = "w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
                   return (
                     <label key={field.label} htmlFor={id} className={`min-w-0 ${field.multiline ? "sm:col-span-2" : ""}`}>
                       <span className="mb-1 block text-xs font-semibold text-gray-600 dark:text-gray-300">{t(field.key)}{field.required && <span className="text-error-500"> *</span>}</span>
                       {field.multiline ? (
                         <textarea id={id} value={value} rows={2} maxLength={300} placeholder={t("prTfOptional")}
-                          onChange={(event) => void updateTransferValue(field, event.target.value)}
+                          autoComplete="off"
+                          onChange={(event) => updateTransferValue(field, event.target.value)}
                           className={`${className} py-2`} />
                       ) : (
                         <input id={id} value={value} maxLength={300} placeholder={field.required ? "" : t("prTfOptional")}
-                          onChange={(event) => void updateTransferValue(field, event.target.value)}
+                          autoComplete="off"
+                          onChange={(event) => updateTransferValue(field, event.target.value)}
+                          onBlur={field.jsonKey === "so_tai_khoan" ? () => setAccountQuery("") : undefined}
+                          onKeyDown={field.jsonKey === "so_tai_khoan" ? (event) => { if (event.key === "Escape") setAccountQuery(""); } : undefined}
                           className={`${className} h-11`} />
                       )}
-                      {(field.label === "Số tài khoản" || field.label === "Số IBAN người thụ hưởng") && beneficiarySuggestions.length > 0 && (
+                      {field.jsonKey === "so_tai_khoan" && accountQuery.trim().length >= 2 && beneficiarySuggestions.length > 0 && (
                         <div className="relative z-10">
-                          <div className="absolute left-0 right-0 top-1 rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                          <div className="absolute left-0 right-0 top-1 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
                             {beneficiarySuggestions.map((row, index) => (
-                              <button key={`${row.so_tai_khoan}-${index}`} type="button" onClick={() => applyBeneficiary(row)} className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800">
-                                <span className="font-semibold">{row.so_tai_khoan}</span>{row.ten_nguoi_thu_huong && <span className="ml-2 text-gray-500">{row.ten_nguoi_thu_huong}</span>}{row.ten_ngan_hang && <span className="ml-2 text-gray-500">· {row.ten_ngan_hang}</span>}
+                              <button key={`${row.so_tai_khoan}-${index}`} type="button" onMouseDown={(event) => { event.preventDefault(); applyBeneficiary(row); }}
+                                className="block w-full min-w-0 break-words rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800">
+                                <span className="font-semibold text-gray-800 dark:text-white/90">{row.so_tai_khoan}</span>{row.ten_nguoi_thu_huong && <span className="ml-2 text-gray-500">{row.ten_nguoi_thu_huong}</span>}{row.ten_ngan_hang && <span className="ml-2 text-gray-500">· {row.ten_ngan_hang}</span>}
                               </button>
                             ))}
                           </div>

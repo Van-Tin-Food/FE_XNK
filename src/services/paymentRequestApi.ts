@@ -49,34 +49,37 @@ export interface PaymentCost {
 }
 
 /**
- * Thông tin người thụ hưởng khi chuyển khoản: mỗi trường một dòng "Nhãn: giá trị" trong cột thong_tin_chuyen_khoan.
- * Nhãn lưu (label) phải khớp TRANSFER_FIELDS ở BE (paymentRequestService.js) — BE kiểm tra trường bắt buộc theo nhãn.
- * Quốc tế = đề nghị có khoản Cọc hàng / Thanh toán tiền còn lại.
+ * Thông tin người thụ hưởng khi chuyển khoản: FE gửi khối "Nhãn: giá trị" mỗi dòng, BE đổi nhãn sang khoá JSON
+ * (TRANSFER_KEY_BY_LABEL ở paymentRequestService.js) và lưu cột JSONB thong_tin_chuyen_khoan; đọc ra lại dạng nhãn.
+ * Nhãn (label) và khoá (jsonKey) phải khớp BE. Quốc tế = đề nghị có khoản Cọc hàng / Thanh toán tiền còn lại.
  */
 export type TransferKind = "domestic" | "international";
 export interface TransferField {
   label: string;
   /** Khoá bản dịch nhãn hiển thị. */
   key: string;
+  /** Khoá trong JSON lưu ở BE (cũng là khoá của gợi ý người thụ hưởng). */
+  jsonKey: TransferJsonKey;
   required: boolean;
   multiline?: boolean;
 }
+export type TransferJsonKey = keyof PaymentBeneficiarySuggestion | "noi_dung_thanh_toan";
 export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
   domestic: [
-    { label: "Số tài khoản", key: "prTf_accountNumber", required: true },
-    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", required: true },
-    { label: "Tên ngân hàng", key: "prTf_bankName", required: true },
-    { label: "Nội dung thanh toán", key: "prTf_paymentNote", required: false },
+    { label: "Số tài khoản", key: "prTf_accountNumber", jsonKey: "so_tai_khoan", required: true },
+    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: true },
+    { label: "Tên ngân hàng", key: "prTf_bankName", jsonKey: "ten_ngan_hang", required: true },
+    { label: "Nội dung thanh toán", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
   ],
   international: [
-    { label: "Số IBAN người thụ hưởng", key: "prTf_iban", required: true },
-    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", required: true },
-    { label: "Tên ngân hàng thụ hưởng", key: "prTf_beneficiaryBank", required: true },
-    { label: "Mã SWIFT", key: "prTf_swift", required: true },
-    { label: "Địa chỉ người thụ hưởng", key: "prTf_beneficiaryAddress", required: false },
-    { label: "Địa chỉ ngân hàng thụ hưởng", key: "prTf_beneficiaryBankAddress", required: false },
-    { label: "Ngân hàng trung gian", key: "prTf_intermediaryBank", required: false, multiline: true },
-    { label: "Nội dung thanh toán", key: "prTf_paymentNote", required: false },
+    { label: "Số IBAN người thụ hưởng", key: "prTf_iban", jsonKey: "so_tai_khoan", required: true },
+    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: true },
+    { label: "Tên ngân hàng thụ hưởng", key: "prTf_beneficiaryBank", jsonKey: "ten_ngan_hang", required: true },
+    { label: "Mã SWIFT", key: "prTf_swift", jsonKey: "ma_swift", required: true },
+    { label: "Địa chỉ người thụ hưởng", key: "prTf_beneficiaryAddress", jsonKey: "dia_chi_nguoi_thu_huong", required: false },
+    { label: "Địa chỉ ngân hàng thụ hưởng", key: "prTf_beneficiaryBankAddress", jsonKey: "dia_chi_ngan_hang", required: false },
+    { label: "Ngân hàng trung gian", key: "prTf_intermediaryBank", jsonKey: "ngan_hang_trung_gian", required: false, multiline: true },
+    { label: "Nội dung thanh toán", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
   ],
 };
 
@@ -198,7 +201,14 @@ export interface PaymentRequestQuery {
   status?: PaymentRequestStatus;
   q?: string;
   mine?: boolean;
+  /** Lọc đề nghị có ít nhất một chi phí thuộc mã phí này (vd CONT). */
+  costCode?: string;
+  sort?: PaymentRequestSortKey;
+  dir?: "asc" | "desc";
 }
+
+/** Cột sắp xếp danh sách (BE chỉ nhận đúng các khoá này). */
+export type PaymentRequestSortKey = "id" | "creator" | "content" | "cost" | "total" | "due" | "status";
 
 const SCOPE = "Đề nghị thanh toán";
 
@@ -311,11 +321,16 @@ const toBody = (input: PaymentRequestInput) => ({
   })),
 });
 
-export async function listPaymentRequests(query: PaymentRequestQuery, signal?: AbortSignal): Promise<{ requests: PaymentRequest[]; total: number; viewAll: boolean }> {
+export async function listPaymentRequests(query: PaymentRequestQuery, signal?: AbortSignal): Promise<{ requests: PaymentRequest[]; total: number; viewAll: boolean; costCodes: string[] }> {
   const params = new URLSearchParams({ limit: String(query.limit), offset: String(query.offset) });
   if (query.status !== undefined) params.set("status", String(query.status));
   if (query.q) params.set("q", query.q);
   if (query.mine) params.set("mine", "1");
+  if (query.costCode) params.set("ma_phi", query.costCode);
+  if (query.sort) {
+    params.set("sort", query.sort);
+    params.set("dir", query.dir === "asc" ? "asc" : "desc");
+  }
   const payload = await request<unknown>("GET", `?${params.toString()}`, undefined, signal);
   const rows = isRecord(payload) && Array.isArray(payload.data) ? payload.data : [];
   const pagination = isRecord(payload) && isRecord(payload.pagination) ? payload.pagination : {};
@@ -324,6 +339,7 @@ export async function listPaymentRequests(query: PaymentRequestQuery, signal?: A
     requests,
     total: Number.isFinite(Number(pagination.total)) ? Number(pagination.total) : requests.length,
     viewAll: isRecord(payload) && payload.viewAll === true,
+    costCodes: isRecord(payload) && Array.isArray(payload.costCodes) ? payload.costCodes.map(str).filter(Boolean) : [],
   };
 }
 

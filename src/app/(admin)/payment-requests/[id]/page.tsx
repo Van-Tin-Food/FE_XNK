@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import PaymentRequestProcess from "@/components/payment/PaymentRequestProcess";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
+import { canOpenPaymentRequests } from "@/utils/paymentRequest";
 
 // Quy trình một đề nghị thanh toán (link "Mở trên hệ thống" trong thẻ Google Chat trỏ tới đây).
 export default function PaymentRequestPage() {
@@ -12,7 +13,7 @@ export default function PaymentRequestPage() {
   const params = useParams<{ id: string }>();
   const id = decodeURIComponent(String(params?.id || ""));
 
-  if (!can("paymentRequests")) {
+  if (!canOpenPaymentRequests(can)) {
     return (
       <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
         {t("prNoPermission")}

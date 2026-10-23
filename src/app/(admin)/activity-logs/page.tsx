@@ -32,7 +32,6 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   ARCHIVE_DOCUMENTS: "logArchiveDocuments",
   EDIT_RETURN_ITEM: "logEditContainerTransport",
   EDIT_SHIPMENT_DETAILS: "logEditShipmentDetails",
-  UPDATE_SHIPMENT_ETA: "logUpdateShipmentEta",
   CANCEL_SHIPMENT: "logCancelShipment",
   EXPORT_EXCEL: "logExportExcel",
   AI_CHAT: "logAiChat",

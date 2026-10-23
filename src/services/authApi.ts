@@ -347,13 +347,13 @@ export async function fetchCurrentUser(): Promise<AuthUser> {
 
 export async function updateMyProfile(changes: { name: string; username: string; email: string }): Promise<AuthUser> {
   const stored = getStoredUser();
-  if (!stored?.token) throw new Error("ChÆ°a Ä‘Äƒng nháº­p");
+  if (!stored?.token) throw new Error("Chưa đăng nhập");
   const result = await authRequest("me", {
     method: "PATCH",
     body: JSON.stringify(changes),
   });
   const source = isRecord(result) && isRecord(result.data) ? result.data : null;
-  if (!source) throw createInvalidResponseError("Cáº­p nháº­t tÃ i khoáº£n", "PATCH", "/api/auth/me", "");
+  if (!source) throw createInvalidResponseError("Cập nhật tài khoản", "PATCH", "/api/auth/me", "");
   const fresh = normalizeUser(source, changes.username);
   return storeUserProfile({ ...stored, ...fresh, token: stored.token });
 }

@@ -29,7 +29,7 @@ export function activityLogSummary(
 
   if (orderCode) {
     const subject = `${language === "en" ? "Order" : "Đơn"} ${orderCode}`;
-    if (["EDIT_SHIPMENT_DETAILS", "UPDATE_SHIPMENT_ETA"].includes(action.toUpperCase())) {
+    if (action.toUpperCase() === "EDIT_SHIPMENT_DETAILS") {
       const changes = detail.split(";").slice(1).join(";").trim();
       return changes ? compactChanges(subject, changes) : subject;
     }

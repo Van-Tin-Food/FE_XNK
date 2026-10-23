@@ -11,6 +11,7 @@ import { useSidebar } from "../context/SidebarContext";
 import { GridIcon, HorizontaLDots } from "../icons/index";
 import { useLanguage } from "../context/LanguageContext";
 import { useShipmentListResetLinks } from "../utils/shipmentListState";
+import { canOpenPaymentRequests } from "../utils/paymentRequest";
 
 const MARKET_RESEARCH_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbx9gxbHB-b5UMbF6x9NrdDmc-abshieQ5pZfhFQRbHXhLGw-Cxv91kkssrmz0hZBabNXA/exec";
 const LEGACY_ETA_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbwlTy4uv4eGx5beJfLKRwJj-VW0H5uFxSeRbhGOstoGn4bPjjJ2-0E0xqwghxvB3R3_7g/exec";
@@ -40,6 +41,8 @@ const AppSidebar: React.FC = () => {
   const canManageUsers = can("users");
   const canManageMasterData = can("masterData");
   const canViewPaymentRequests = can("paymentRequests");
+  // Menu Đề nghị thanh toán: thêm người được uỷ quyền duyệt / xác nhận chứng từ (khớp quyền xem danh sách ở BE).
+  const canOpenPaymentRequestList = canOpenPaymentRequests(can);
   const canViewCostManagement = canManageMasterData || canViewPaymentRequests;
   const { t } = useLanguage();
 
@@ -98,7 +101,7 @@ const AppSidebar: React.FC = () => {
               {showText && <span className="menu-item-text">{t("importExport")}</span>}
             </Link>
           </li>
-          {canViewPaymentRequests && (
+          {canOpenPaymentRequestList && (
             <li>
               <Link
                 href="/payment-requests"

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PaginationControls from "@/components/common/PaginationControls";
@@ -12,11 +12,12 @@ import {
   PAYMENT_STATUS_LABEL_KEYS,
   listPaymentRequests,
   type PaymentRequest,
+  type PaymentRequestSortKey,
   type PaymentRequestStatus,
 } from "@/services/paymentRequestApi";
-import { formatMoney } from "@/utils/paymentRequest";
+import { canOpenPaymentRequests, formatMoney } from "@/utils/paymentRequest";
 
-// Danh sách đề nghị thanh toán: lọc + phân trang phía server. Bấm một đề nghị -> trang quy trình /payment-requests/<mã>;
+// Danh sách đề nghị thanh toán: lọc (trạng thái, mã phí, từ khoá) + sắp xếp + phân trang đều phía server. Bấm một đề nghị -> trang quy trình /payment-requests/<mã>;
 // link cũ ?id=DNTT-001 tự chuyển sang trang đó.
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -30,24 +31,12 @@ function SortIcon({ active, direction }: { active: boolean; direction: "asc" | "
     : <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-500"><polyline points="6 9 12 15 18 9" /></svg>;
 }
 
-function amountForSort(value: string): number {
-  const raw = String(value || "").trim().replace(/\s/g, "");
-  if (raw.includes(".") && raw.includes(",")) {
-    const decimal = raw.lastIndexOf(",") > raw.lastIndexOf(".") ? "," : ".";
-    const thousands = decimal === "," ? /\./g : /,/g;
-    return Number(raw.replace(thousands, "").replace(decimal, ".")) || 0;
-  }
-  if (/^\d{1,3}(\.\d{3})+$/.test(raw)) return Number(raw.replace(/\./g, "")) || 0;
-  if (/^\d{1,3}(,\d{3})+$/.test(raw)) return Number(raw.replace(/,/g, "")) || 0;
-  return Number(raw.replace(/,/g, "")) || 0;
-}
-
 function PaymentRequestsContent() {
   const { t, language } = useLanguage();
   const { can } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const canView = can("paymentRequests");
+  const canView = canOpenPaymentRequests(can);
   const canCreate = can("paymentRequests", "edit");
 
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
@@ -59,7 +48,9 @@ function PaymentRequestsContent() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [status, setStatus] = useState<"" | `${PaymentRequestStatus}`>("");
   const [costCodeFilter, setCostCodeFilter] = useState("");
-  const [sort, setSort] = useState<{ key: "id" | "creator" | "content" | "cost" | "total" | "due" | "status"; direction: "asc" | "desc" }>({ key: "id", direction: "desc" });
+  const [costCodes, setCostCodes] = useState<string[]>([]);
+  // null = mặc định của BE (mới tạo trước).
+  const [sort, setSort] = useState<{ key: PaymentRequestSortKey; direction: "asc" | "desc" } | null>(null);
   const [mine, setMine] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -89,11 +80,15 @@ function PaymentRequestsContent() {
         status: status === "" ? undefined : Number(status) as PaymentRequestStatus,
         q: debouncedQuery || undefined,
         mine,
+        costCode: costCodeFilter || undefined,
+        sort: sort?.key,
+        dir: sort?.direction,
       }, controller.signal)
         .then((result) => {
           setRequests(result.requests);
           setTotal(result.total);
           setViewAll(result.viewAll);
+          setCostCodes(result.costCodes);
           // Trang hiện tại vượt quá số trang (vừa đổi bộ lọc): quay về trang cuối còn dữ liệu.
           const lastPage = Math.max(1, Math.ceil(result.total / pageSize));
           if (page > lastPage) setPage(lastPage);
@@ -109,7 +104,7 @@ function PaymentRequestsContent() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [canView, debouncedQuery, mine, page, pageSize, reloadKey, status, t]);
+  }, [canView, costCodeFilter, debouncedQuery, mine, page, pageSize, reloadKey, sort, status, t]);
 
   const reload = () => setReloadKey((key) => key + 1);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -134,26 +129,15 @@ function PaymentRequestsContent() {
   });
   const costTargetText = (request: PaymentRequest) => [...costTargets(request).contracts, ...costTargets(request).containers].join(", ");
   const costNames = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => cost.categoryName).filter(Boolean))];
-  const costCodes = useMemo(() => [...new Set(requests.flatMap((request) => request.costs.map((cost) => cost.code).filter(Boolean)))].sort(), [requests]);
-  const visibleRequests = useMemo(() => {
-    const filtered = costCodeFilter ? requests.filter((request) => request.costs.some((cost) => cost.code === costCodeFilter)) : requests;
-    const valueOf = (request: PaymentRequest): string | number => {
-      if (sort.key === "creator") return request.creatorName;
-      if (sort.key === "content") return request.content;
-      if (sort.key === "cost") return costGroups(request).join(", ");
-      if (sort.key === "total") return amountForSort(request.total);
-      if (sort.key === "due") return request.dueDate;
-      if (sort.key === "status") return request.status;
-      return request.id;
-    };
-    return [...filtered].sort((a, b) => {
-      const left = valueOf(a); const right = valueOf(b);
-      const result = typeof left === "number" && typeof right === "number" ? left - right : String(left).localeCompare(String(right), "vi", { numeric: true });
-      return sort.direction === "asc" ? result : -result;
-    });
-  }, [costCodeFilter, requests, sort, costGroups]);
-  const toggleSort = (key: typeof sort.key) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" });
-  const sortLabel = (key: typeof sort.key, label: string) => <button type="button" onClick={() => toggleSort(key)} className="inline-flex items-center gap-1.5 text-left hover:text-brand-600">{label}<SortIcon active={sort.key === key} direction={sort.direction} /></button>;
+  const toggleSort = (key: PaymentRequestSortKey) => {
+    setSort((current) => (current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }));
+    setPage(1);
+  };
+  const sortLabel = (key: PaymentRequestSortKey, label: string) => (
+    <button type="button" onClick={() => toggleSort(key)} className="inline-flex items-center gap-1.5 text-left hover:text-brand-600">
+      {label}<SortIcon active={sort?.key === key} direction={sort?.direction ?? "desc"} />
+    </button>
+  );
 
   return (
     <div className="space-y-5">
@@ -178,8 +162,8 @@ function PaymentRequestsContent() {
             <option value="">{t("prAllStatuses")}</option>
             {PAYMENT_STATUSES.map((value) => <option key={value} value={value}>{t(PAYMENT_STATUS_LABEL_KEYS[value])}</option>)}
           </select>
-          <select value={costCodeFilter} onChange={(event) => setCostCodeFilter(event.target.value)} aria-label={t("prCostCodeLabel")} className={SELECT_CLASS}>
-            <option value="">{t("prCostCodeLabel")}: tất cả</option>
+          <select value={costCodeFilter} onChange={(event) => { setCostCodeFilter(event.target.value); setPage(1); }} aria-label={t("prCostCodeLabel")} className={SELECT_CLASS}>
+            <option value="">{t("prAllCostCodes")}</option>
             {costCodes.map((code) => <option key={code} value={code}>{code}</option>)}
           </select>
           {viewAll && (
@@ -203,7 +187,7 @@ function PaymentRequestsContent() {
           <div className={loading ? "opacity-60 transition-opacity" : ""}>
             {/* Điện thoại / tablet: thẻ */}
             <ul className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 lg:hidden">
-              {visibleRequests.map((request) => (
+              {requests.map((request) => (
                 <li key={request.id}>
                   <button type="button" onClick={() => openDetail(request.id)}
                     className="flex h-full w-full min-w-0 flex-col gap-2 rounded-xl border border-gray-200 p-4 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/30 dark:border-gray-700 dark:hover:border-brand-500/50">
@@ -248,7 +232,7 @@ function PaymentRequestsContent() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {visibleRequests.map((request) => (
+                  {requests.map((request) => (
                     <tr key={request.id} onClick={() => openDetail(request.id)} className="cursor-pointer hover:bg-brand-50/40 dark:hover:bg-brand-500/5">
                       <td className="px-4 py-3">
                         <button type="button" onClick={(event) => { event.stopPropagation(); openDetail(request.id); }} className="font-mono text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400">{request.id}</button>

@@ -364,7 +364,7 @@ function ShipmentCard({
           </p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-wide text-gray-400">Thời gian</p>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("time")}</p>
           <div className="mt-0.5">
             <span className="mb-0.5 block text-[10px] text-gray-500 dark:text-gray-400">ETD: {formatContractDate(shipment.etd)}</span>
             <ArrivalCell shipment={shipment} language={language} />
@@ -427,14 +427,14 @@ export default function ShipmentTable({ shipments, onRowClick, onShipmentUpdated
     if (savingEtaId === shipment.id) return;
     const bill = primaryBillOf(shipment);
     if (!bill?.id_xnk) {
-      setEtaError("Không xác định được B/L để cập nhật ETA");
+      setEtaError(t("etaNoBill"));
       return;
     }
     const eta = draftEta.trim() || null;
     const etd = parseDateStart(bill.etd || undefined);
     const etaDate = parseDateStart(eta || undefined);
     if (etaDate !== null && etd !== null && etaDate < etd) {
-      setEtaError("ETA không được nhỏ hơn ETD");
+      setEtaError(t("etaBeforeEtd"));
       return;
     }
     if (eta === String(shipment.eta || "").slice(0, 10)) {
@@ -449,7 +449,7 @@ export default function ShipmentTable({ shipments, onRowClick, onShipmentUpdated
       setDraftEta("");
       await onShipmentUpdated?.();
     } catch (error) {
-      setEtaError(error instanceof Error ? error.message : "Không thể cập nhật ETA");
+      setEtaError(error instanceof Error ? error.message : t("etaUpdateFailed"));
     } finally {
       setSavingEtaId(null);
     }
@@ -488,7 +488,7 @@ export default function ShipmentTable({ shipments, onRowClick, onShipmentUpdated
       <div
         role={canEditEta && bill ? "button" : undefined}
         tabIndex={canEditEta && bill ? 0 : undefined}
-        title={canEditEta && bill ? "Bấm để sửa ETA" : undefined}
+        title={canEditEta && bill ? t("etaEditHint") : undefined}
         onClick={(event) => beginEtaEdit(event, shipment)}
         onKeyDown={(event) => {
           if (canEditEta && bill && (event.key === "Enter" || event.key === " ")) beginEtaEdit(event, shipment);
@@ -681,7 +681,7 @@ export default function ShipmentTable({ shipments, onRowClick, onShipmentUpdated
                 <div className="flex items-center gap-1.5">{t("supplier")} <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[18%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
-                <div className="flex items-center gap-1.5">Thời gian <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
+                <div className="flex items-center gap-1.5">{t("time")} <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 xl:max-2xl:static bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
                 <div className="flex items-center gap-1.5">{t("status")} <SortIcon col="status" sortKey={sortKey} sortDir={sortDir} /></div>
