@@ -3,6 +3,7 @@
 import {
   clearStoredUser,
   fetchCurrentUser,
+  forgetGoogleReauth,
   getStoredUser,
   GOOGLE_DRIVE_AUTH_REQUIRED_EVENT,
   GOOGLE_MFA_STORAGE_KEY,
@@ -92,7 +93,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Đăng xuất không ghi nhật ký thao tác (nhật ký chỉ ghi thao tác nghiệp vụ).
-  const logout = clearSession;
+  const logout = useCallback(() => {
+    // Tự đăng xuất thì không tự đăng nhập lại bằng Google (chỉ áp dụng khi phiên hết hạn).
+    forgetGoogleReauth();
+    clearSession();
+  }, [clearSession]);
 
   useEffect(() => {
     let active = true;

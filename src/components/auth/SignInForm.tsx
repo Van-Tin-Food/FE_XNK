@@ -2,12 +2,12 @@
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
-import { login, startGoogleSignIn, GOOGLE_MFA_STORAGE_KEY } from "@/services/authApi";
+import { login, startGoogleSignIn, takeGoogleReauth, GOOGLE_MFA_STORAGE_KEY } from "@/services/authApi";
 import type { LoginMfaInfo } from "@/types/auth";
 import { ChevronLeftIcon, EyeCloseIcon, EyeIcon } from "@/icons";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 /** true nếu kết quả login là nhánh cần xác thực thêm bằng Google. */
 function isLoginMfaInfo(value: unknown): value is LoginMfaInfo {
@@ -75,6 +75,15 @@ export default function SignInForm() {
       setGoogleLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Phiên đăng nhập hết hạn (không phải tự đăng xuất) của tài khoản có email Google: kiểm tra xác thực Google
+    // thay vì bắt nhập lại mật khẩu. Google lỗi / từ chối thì quay về đăng nhập mật khẩu như thường.
+    if (!takeGoogleReauth()) return;
+    // Không huỷ timer ở cleanup: StrictMode chạy effect hai lần, lần hai cờ đã bị xoá nên sẽ không chuyển trang.
+    window.setTimeout(() => void handleGoogleSignIn(), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex flex-col flex-1 lg:w-1/2 w-full">

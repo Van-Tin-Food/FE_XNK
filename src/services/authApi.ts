@@ -16,6 +16,8 @@ export const AUTH_TOKEN_COOKIE_KEY = "xnk_auth_token";
 /** sessionStorage giữ state giữa luồng Google trực tiếp hoặc bước MFA Google. */
 export const GOOGLE_MFA_STORAGE_KEY = "xnk_google_mfa_pending";
 export const GOOGLE_DRIVE_AUTH_REQUIRED_EVENT = "xnk:google-drive-auth-required";
+/** localStorage: tài khoản đăng nhập gần nhất có email Google, còn giữ sau khi phiên hết hạn (xoá khi tự đăng xuất). */
+const GOOGLE_REAUTH_STORAGE_KEY = "xnk_google_reauth";
 
 /**
  * Lấy URL đăng nhập Google. consent=true ép màn hình cấp quyền (khi quyền Drive đã mất);
@@ -54,8 +56,26 @@ function storeUser(user: AuthUser): AuthUser {
   if (typeof window !== "undefined") {
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
     storeTokenCookie(user.token || "");
+    if (String(user.email || "").trim()) localStorage.setItem(GOOGLE_REAUTH_STORAGE_KEY, "1");
+    else localStorage.removeItem(GOOGLE_REAUTH_STORAGE_KEY);
   }
   return user;
+}
+
+/** Tự đăng xuất: lần sau vào màn đăng nhập không tự chuyển sang Google. */
+export function forgetGoogleReauth(): void {
+  if (typeof window !== "undefined") localStorage.removeItem(GOOGLE_REAUTH_STORAGE_KEY);
+}
+
+/**
+ * true nếu phiên vừa hết hạn của tài khoản có email Google: màn đăng nhập kiểm tra lại bằng Google thay vì bắt nhập
+ * mật khẩu. Chỉ thử một lần (xoá cờ ngay), Google lỗi thì người dùng đăng nhập bằng mật khẩu như thường.
+ */
+export function takeGoogleReauth(): boolean {
+  if (typeof window === "undefined") return false;
+  const pending = localStorage.getItem(GOOGLE_REAUTH_STORAGE_KEY) === "1";
+  localStorage.removeItem(GOOGLE_REAUTH_STORAGE_KEY);
+  return pending;
 }
 
 /**
