@@ -10,6 +10,7 @@ export const preferredRegion = "sin1";
 type RouteContext = { params: Promise<{ path: string[] }> };
 
 const GOOGLE_CHAT_EVENTS_ROUTE = "POST api/google-chat/events";
+const DOCUMENT_PREVIEW_ROUTE = "GET api/document-preview";
 
 const PUBLIC_ROUTES = new Set([
   "POST api/auth/login",
@@ -19,6 +20,8 @@ const PUBLIC_ROUTES = new Set([
   "POST api/auth/google/verify",
   // Google Chat gửi sự kiện nút Duyệt / Từ chối đề nghị thanh toán; BE tự kiểm tra token của Google.
   GOOGLE_CHAT_EVENTS_ROUTE,
+  // Google Chat tải ảnh trang đầu chứng từ trên thẻ thông báo; BE tự kiểm tra vé có chữ ký (?t=).
+  DOCUMENT_PREVIEW_ROUTE,
   "GET health",
   "GET api/health",
   "GET node/health",
@@ -143,7 +146,11 @@ async function forward(request: NextRequest, { params }: RouteContext) {
   }
 
   const responseHeaders = new Headers({ "Cache-Control": "no-store" });
-  for (const name of ["content-type", "content-disposition"]) {
+  // Ảnh xem trước: giữ Cache-Control của BE để Google Chat không tải lại ảnh mỗi lần mở tin.
+  const passThroughHeaders = `${request.method} ${joinedPath}` === DOCUMENT_PREVIEW_ROUTE
+    ? ["content-type", "content-disposition", "cache-control"]
+    : ["content-type", "content-disposition"];
+  for (const name of passThroughHeaders) {
     const value = response.headers.get(name);
     if (value) responseHeaders.set(name, value);
   }
