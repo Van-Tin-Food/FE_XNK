@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, createUploadBatch, finishDocumentUploadBatch, MAX_DOCUMENT_UPLOAD_BYTES, MAX_OCR_FILE_BYTES, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, deleteDocumentFile, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, createUploadBatch, finishDocumentUploadBatch, MAX_DOCUMENT_UPLOAD_BYTES, MAX_OCR_FILE_BYTES, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listCatalogRows, passDriveDocument, returnItemsFromRelations, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord, XnkRecord } from "@/types/postgresShipment";
@@ -14,7 +14,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { getMissingArchiveDetailFields, getMissingArchiveTransportFields } from "@/utils/shipmentArchiveValidation";
 import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
 import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCatalogOptions";
-import { toDocumentDownloadUrl, toDocumentPreviewUrl } from "@/utils/documentPreview";
+import { driveFileIdFromUrl, toDocumentDownloadUrl, toDocumentPreviewUrl } from "@/utils/documentPreview";
 import { shouldValidateContainerPackages } from "@/utils/containerPackageValidation";
 import { canUploadDocumentType } from "@/config/shipmentActionPermissions";
 import {
@@ -47,7 +47,8 @@ interface ShipmentDetailViewProps {
 type ModalTab = "overview" | "documents" | "return" | "details" | "costs" | "folder";
 const DETAIL_TABS: ModalTab[] = ["overview", "documents", "return", "details", "costs", "folder"];
 /** Một file trong khung xem bên phải. Chứng từ nhiều file xem lần lượt bằng ‹ › hoặc phím ← →. */
-type PreviewItem = { url: string; name: string; label?: string; meta?: string; downloadUrl?: string; fileName?: string };
+// fileId + documentCode: file chứng từ trên Drive (có thể xoá nếu có quyền); file vừa chọn ở máy thì không có.
+type PreviewItem = { url: string; name: string; label?: string; meta?: string; downloadUrl?: string; fileName?: string; fileId?: string; documentCode?: string };
 
 const TAB_LIST: { key: ModalTab; labelKey: string; icon: React.ReactNode }[] = [
   {
@@ -1238,6 +1239,9 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   });
   const [previewItems, setPreviewItems] = useState<PreviewItem[]>([]);
   const [previewIndex, setPreviewIndex] = useState(0);
+  // File vừa xoá: ẩn ngay khỏi danh sách trong lúc chờ tải lại dữ liệu đơn.
+  const [deletedDocumentFileIds, setDeletedDocumentFileIds] = useState<string[]>([]);
+  const [deletingPreviewFileId, setDeletingPreviewFileId] = useState<string | null>(null);
   const previewItem = previewItems[previewIndex] || null;
   const previewUrl = previewItem?.url || null;
   const previewName = previewItem?.name || "";
@@ -1332,8 +1336,10 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   const documentPreviewItems = (
     documentName: string,
     documentId: string,
-    files: Array<{ url: string; fileName: string; label: string; uploadedBy: string; uploadedAt: string }>,
+    files: Array<{ url: string; fileName: string; label: string; uploadedBy: string; uploadedAt: string; fileId?: string }>,
   ): PreviewItem[] => files.map((file, index) => ({
+    fileId: file.fileId || undefined,
+    documentCode: documentId,
     url: toDocumentPreviewUrl(file.url),
     downloadUrl: toDocumentDownloadUrl(file.url),
     name: files.length > 1 ? `${documentName} — ${file.label}` : (file.fileName || documentName),
@@ -1550,6 +1556,8 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   const canUploadDocuments = isEditableState && canViewDocuments && (can("documents", "edit") || can("shipments", "edit"));
   const canPassDocuments = isEditableState && can("documents", "edit");
   const canArchiveDocuments = !isCancelled && !isArchived && can("documentArchive", "edit");
+  // Xoá file chứng từ: quyền riêng (mặc định chỉ admin), đơn đã hủy / đã lưu trữ thì không xoá.
+  const canDeleteDocumentFiles = isEditableState && can("documentDelete", "edit");
   const canEditReturnItem = isEditableState && can("containerTransport", "edit");
   const canEditDetails = isEditableState && can("shipments", "edit");
   const canCancelShipment = isEditableState && can("shipmentCancel", "edit");
@@ -1665,6 +1673,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   const documentFileGroups = documentsSorted.map((document) => {
     const databaseFiles = (document.files?.length ? document.files : (document.urls?.length ? document.urls : document.url ? [document.url] : []).map((url) => ({
       fileUrl: url,
+      fileId: undefined,
       referenceCode: undefined,
       idChiTiet: undefined,
       fileName: undefined,
@@ -1674,6 +1683,8 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
       folderName: undefined,
     }))).map((file, index) => ({
       url: file.fileUrl,
+      // Dữ liệu cũ chỉ lưu link: lấy fileId từ link Drive.
+      fileId: file.fileId || driveFileIdFromUrl(file.fileUrl || ""),
       fileName: file.fileName?.trim() || "",
       uploadedAt: file.uploadedAt || "",
       uploadedBy: file.uploadedBy || file.uploadedByEmail || "",
@@ -1692,10 +1703,12 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     const sourceFiles = [
       ...databaseFiles,
       ...(localUploads[document.id] && !document.url
-        ? [{ url: localUploads[document.id], fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
+        ? [{ url: localUploads[document.id], fileId: "", fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
         : []),
     ];
-    const files = sourceFiles.filter((file, index, allFiles) => file.url && allFiles.findIndex((other) => other.url === file.url) === index);
+    const files = sourceFiles.filter((file, index, allFiles) => file.url
+      && !(file.fileId && deletedDocumentFileIds.includes(file.fileId))
+      && allFiles.findIndex((other) => other.url === file.url) === index);
     return { document, files };
   });
   // Thư mục ảnh kiểm dịch đã tạo (lấy từ metadata DB) để hôm sau chọn lại, không phải nhập tay.
@@ -1888,6 +1901,46 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
       notify(error instanceof Error ? error.message : t("passDocumentError"), "error");
     } finally {
       setPassingDocumentId(null);
+    }
+  };
+
+  // Xoá file đang xem: BE chuyển file vào thùng rác Drive rồi bỏ khỏi chung_tu_drive (BE tự ghi nhật ký thao tác).
+  const handleDeletePreviewFile = async () => {
+    const item = previewItem;
+    const fileId = item?.fileId;
+    if (!item || !fileId || !item.documentCode || !canDeleteDocumentFiles || deletingPreviewFileId) return;
+    const fileName = item.fileName || item.name;
+    const confirmed = await confirm({
+      title: t("deleteDocumentFileTitle"),
+      message: t("deleteDocumentFileMessage", { file: fileName, document: item.documentCode, orderCode: shipment.orderCode }),
+      confirmText: t("deleteDocumentFileAction"),
+      cancelText: t("goBack"),
+      tone: "danger",
+    });
+    if (!confirmed) return;
+
+    setDeletingPreviewFileId(fileId);
+    try {
+      const result = await deleteDocumentFile({ orderCode: shipment.orderCode, documentCode: item.documentCode, fileId });
+      setDeletedDocumentFileIds((current) => current.includes(fileId) ? current : [...current, fileId]);
+      // Bỏ file khỏi khung xem; hết file thì đóng khung.
+      const remaining = previewItems.filter((other) => other.fileId !== fileId);
+      if (remaining.length === 0) closePreview();
+      else {
+        setPreviewItems(remaining);
+        setPreviewIndex((current) => Math.min(current, remaining.length - 1));
+      }
+      if (result.documentProgress) {
+        setDocumentProgress(result.documentProgress);
+        setDocumentProgressError("");
+      }
+      await onRefresh?.();
+      window.dispatchEvent(new Event(NOTIFICATIONS_SYNC_EVENT));
+      notify(t("deleteDocumentFileSuccess", { file: fileName }), "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : t("deleteDocumentFileError"), "error");
+    } finally {
+      setDeletingPreviewFileId(null);
     }
   };
 
@@ -3834,6 +3887,24 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
               <a href={previewItem.downloadUrl} download={previewItem.fileName || undefined} target="_blank" rel="noopener noreferrer" title={t("downloadDocument")} aria-label={`${t("downloadDocument")} ${previewItem.fileName || previewName}`} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>
               </a>
+            )}
+            {/* Xoá file trên Drive: chỉ hiện với tài khoản có quyền documentDelete, file chứng từ đã lưu trên Drive. */}
+            {canDeleteDocumentFiles && previewItem?.fileId && previewItem.documentCode && (
+              <button
+                type="button"
+                onClick={() => void handleDeletePreviewFile()}
+                disabled={Boolean(deletingPreviewFileId)}
+                aria-label={`${t("deleteDocumentFile")} ${previewItem.fileName || previewName}`}
+                title={deletingPreviewFileId ? t("deletingDocumentFile") : t("deleteDocumentFile")}
+                className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-error-200 px-2 text-xs font-semibold text-error-600 hover:bg-error-50 disabled:cursor-not-allowed disabled:opacity-60 sm:px-2.5 dark:border-error-500/30 dark:text-error-400 dark:hover:bg-error-500/10"
+              >
+                {deletingPreviewFileId ? (
+                  <span aria-hidden="true" className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                ) : (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /></svg>
+                )}
+                <span className="hidden sm:inline">{t("deleteDocumentFile")}</span>
+              </button>
             )}
             <button type="button" onClick={() => setIsPreviewMaximized((current) => !current)} className="hidden shrink-0 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 sm:inline-flex dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={isPreviewMaximized ? t("minimize") : t("maximize")}>
               {isPreviewMaximized ? t("minimize") : t("maximize")}

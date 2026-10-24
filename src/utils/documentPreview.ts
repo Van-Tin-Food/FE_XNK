@@ -69,3 +69,8 @@ export function toDocumentDownloadUrl(value: string): string {
     ? `https://docs.google.com/${link.editor}/d/${fileId}/${GOOGLE_EDITOR_EXPORTS[link.editor]}`
     : `https://drive.google.com/uc?export=download&id=${fileId}`;
 }
+
+/** fileId Drive trong link xem / chia sẻ (dữ liệu cũ chỉ lưu link); không phải link Drive thì trả chuỗi rỗng. */
+export function driveFileIdFromUrl(value: string): string {
+  return parseGoogleDriveUrl(String(value || "").trim())?.fileId || "";
+}

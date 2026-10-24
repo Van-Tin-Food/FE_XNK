@@ -175,7 +175,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = `/api/${path.replace(/^\//, "")}`;
   const scope = path.startsWith("ocr/")
     ? "OCR"
-    : ["uploadDocument", "startDocumentUpload", "completeDocumentUpload", "finishDocumentUploadBatch", "checkDocumentFileNames", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
+    : ["uploadDocument", "startDocumentUpload", "completeDocumentUpload", "finishDocumentUploadBatch", "checkDocumentFileNames", "getArchivedDocuments", "moveCompletedOrder", "deleteDocumentFile"].some((name) => path.startsWith(name))
       ? "Drive"
       : "Backend";
   try {
@@ -484,6 +484,25 @@ export function getArchivedDocuments(orderCode: string): Promise<ArchivedDocumen
 
 export function moveCompletedOrder(orderCode: string): Promise<DriveDataResponse> {
   return requestJson<DriveDataResponse>(`moveCompletedOrder?orderCode=${encodeURIComponent(orderCode)}`, { method: "POST" });
+}
+
+export interface DeleteDocumentFileResponse {
+  success: boolean;
+  orderCode: string;
+  documentCode: string;
+  file: { fileId: string; fileName: string };
+  /** Tiến độ chứng từ sau khi xoá; null nếu BE chưa tính lại được (việc xoá vẫn đã xong). */
+  documentProgress: DocumentProgressResponse | null;
+  files: DriveDocumentFileRecord[];
+}
+
+/** Xoá một file chứng từ: chuyển vào thùng rác Google Drive + bỏ khỏi chung_tu_drive (quyền documentDelete:edit). */
+export function deleteDocumentFile(payload: { orderCode: string; documentCode: string; fileId: string }): Promise<DeleteDocumentFileResponse> {
+  return requestJson<DeleteDocumentFileResponse>("deleteDocumentFile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export interface DocumentSyncCandidate {

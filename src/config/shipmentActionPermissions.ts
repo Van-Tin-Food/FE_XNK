@@ -16,6 +16,7 @@ export const PERMISSION_FUNCTIONS = {
   shipmentCancel: ["none", "edit"], // Hủy đơn
   documents: ["none", "view", "edit"], // Chứng từ: xem; edit = upload (trừ PI), PASS
   documentArchive: ["none", "edit"], // Lưu trữ hồ sơ đơn đã đủ chứng từ
+  documentDelete: ["none", "edit"], // Xoá file chứng từ (thùng rác Drive): không role nào có sẵn, cấp riêng từng tài khoản
   containerTransport: ["none", "view", "edit"], // Vận chuyển / trả container
   tracking: ["none", "view"], // Theo dõi hành trình tàu
   exportShipments: ["none", "view"], // Xuất Excel
@@ -48,7 +49,7 @@ export const PERMISSION_FUNCTION_KEYS = Object.keys(PERMISSION_FUNCTIONS) as Per
 // Nhóm hiển thị trên màn quản lý tài khoản.
 export const PERMISSION_GROUPS: ReadonlyArray<{ key: string; functions: readonly PermissionFunction[] }> = [
   { key: "permissionGroupShipments", functions: ["shipments", "shipmentCancel", "tracking", "exportShipments", "aiChat"] },
-  { key: "permissionGroupDocuments", functions: ["documents", "documentArchive", "containerTransport"] },
+  { key: "permissionGroupDocuments", functions: ["documents", "documentArchive", "documentDelete", "containerTransport"] },
   // Khớp đúng 4 mục của menu "Công cụ hỗ trợ" trên sidebar.
   { key: "supportTools", functions: ["email", "documentSync", "marketResearch", "legacyEtaOrders"] },
   { key: "permissionGroupPayments", functions: ["paymentRequests", "paymentRequestsAll", "paymentApprove", "paymentDocuments", "containerCosts", "costReports"] },

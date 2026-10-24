@@ -83,6 +83,14 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Chưa nhập đủ thông tin đổi tên file.";
     case "ORDER_ARCHIVED":
       return "Đơn hàng đã hoàn thành và được lưu trữ, không thể bổ sung thêm file.";
+    case "INVALID_DOCUMENT_DELETE":
+      return "Thiếu thông tin file cần xoá. Vui lòng mở lại file rồi thử lại.";
+    case "DOCUMENT_FILE_NOT_FOUND":
+      return "File không còn trong chứng từ của đơn (có thể vừa bị xoá). Vui lòng tải lại trang.";
+    case "DOCUMENT_ORDER_ARCHIVED":
+      return "Hồ sơ đơn đã lưu trữ, không xoá được file chứng từ.";
+    case "DOCUMENT_FILE_NOT_ON_DRIVE":
+      return "File không còn trên Google Drive (đã bị xoá hoặc đang nằm trong thùng rác). Hệ thống chưa xoá gì.";
     // Thông báo backend đã kèm tên file/thư mục cụ thể nên giữ nguyên để người dùng biết cần đổi tên gì.
     case "DUPLICATE_FILE_NAME":
       return backendMessage || "Tên file đã tồn tại trong thư mục chứng từ. Vui lòng đổi tên file rồi thử lại.";
