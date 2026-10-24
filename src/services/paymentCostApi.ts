@@ -1,3 +1,4 @@
+import { COST_BASES, type ContractInfo, type CostBasis, type CostKind, type MonthlyCost, type OpenRequest, type TrendPoint } from "@/utils/costStatistics";
 import { getStoredUser } from "@/services/authApi";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
@@ -59,7 +60,7 @@ const isRecord = (value: unknown): value is JsonRecord => typeof value === "obje
 const str = (value: unknown) => (value === null || value === undefined ? "" : String(value));
 const flag = (value: unknown) => value === true;
 
-async function request(method: "GET" | "PUT" | "DELETE", path: string, body?: unknown): Promise<unknown> {
+async function request(method: "GET" | "PUT" | "DELETE", path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
   const apiPath = `/api/payment-costs${path}`;
   const token = getStoredUser()?.token?.trim();
   let response: Response;
@@ -73,6 +74,7 @@ async function request(method: "GET" | "PUT" | "DELETE", path: string, body?: un
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: "no-store",
+      signal,
     });
   } catch (error) {
     if (error instanceof TypeError) throw createNetworkApiError(SCOPE, method, apiPath, error);
@@ -276,4 +278,83 @@ export async function updateMyCost(id: string, amount: string, note: string): Pr
 /** Xóa chi phí của mình (chỉ khi chưa thuộc đề nghị nào). */
 export async function deleteMyCost(id: string): Promise<void> {
   await request("DELETE", `/mine/${encodeURIComponent(id)}`);
+}
+
+export interface CostOverview {
+  month: string;
+  basis: CostBasis;
+  costs: MonthlyCost[];
+  trend: TrendPoint[];
+  payables: OpenRequest[];
+  contracts: ContractInfo[];
+  /** Không có quyền xem tiền hàng: số tiền cọc / còn lại (và tổng đề nghị có tiền hàng) bị ẩn (null). */
+  amountsHidden: boolean;
+  /** Tháng có quá nhiều khoản, BE chỉ trả 10.000 khoản mới nhất. */
+  truncated: boolean;
+}
+
+const kindOf = (value: unknown): CostKind => (value === "goods" || value === "incident" ? value : "operating");
+const nullableAmount = (value: unknown) => (value === null || value === undefined ? null : str(value));
+
+/**
+ * Trang Quản lý chi phí: chi phí của tháng (YYYY-MM) theo mốc basis (ngày nhập / ngày đề nghị / ngày duyệt), xu hướng
+ * 6 tháng, đề nghị đang mở, thông tin hợp đồng — một lần gọi.
+ */
+export async function getCostOverview(month: string, basis: CostBasis, signal?: AbortSignal): Promise<CostOverview> {
+  const payload = await request("GET", `/overview?month=${encodeURIComponent(month)}&basis=${encodeURIComponent(basis)}`, undefined, signal);
+  const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
+  const list = (value: unknown) => (Array.isArray(value) ? value.filter(isRecord) : []);
+  return {
+    month: str(data.month) || month,
+    basis: COST_BASES.includes(data.basis as CostBasis) ? data.basis as CostBasis : basis,
+    amountsHidden: data.amountsHidden === true,
+    truncated: data.truncated === true,
+    costs: list(data.rows).map((row): MonthlyCost => ({
+      id: str(row.id_payment_cost),
+      createdAt: str(row.ngay_tao),
+      basisDate: str(row.ngay_tinh) || str(row.ngay_tao),
+      contract: str(row.id_mua_hang),
+      container: str(row.id_container),
+      amount: nullableAmount(row.so_tien),
+      vat: str(row.phan_tram_vat),
+      note: str(row.noi_dung),
+      type: str(row.loai_phi),
+      code: str(row.ma_phi).toUpperCase(),
+      categoryName: str(row.ten_phi),
+      flow: str(row.vung_phi),
+      userName: str(row.nguoi_nhap),
+      requestId: str(row.id_payment_request),
+      requestStatus: row.request_status === null || row.request_status === undefined ? null : Number(row.request_status),
+      requestSent: row.request_sent === true,
+      currency: str(row.currency) || "VND",
+      currencyInferred: row.currency_inferred === true,
+      kind: kindOf(row.nhom),
+    })).filter((cost) => cost.id),
+    trend: list(data.trend).map((row): TrendPoint => ({
+      month: str(row.month),
+      kind: kindOf(row.nhom),
+      currency: str(row.currency) || "VND",
+      count: Number(row.so_khoan) || 0,
+      amount: nullableAmount(row.so_tien),
+    })),
+    payables: list(data.payables).map((row): OpenRequest => ({
+      id: str(row.id_payment_request),
+      content: str(row.noi_dung),
+      currency: str(row.loai_tien) || "VND",
+      total: nullableAmount(row.tong_tien),
+      dueDate: str(row.han_thanh_toan),
+      status: Number(row.status),
+      sent: row.da_gui === true,
+      createdAt: str(row.ngay_tao),
+      approvedAt: str(row.ngay_cap_nhat),
+      requester: str(row.nguoi_de_nghi),
+      hasRed: row.has_red === true,
+      hasGoods: row.has_goods === true,
+    })).filter((item) => item.id),
+    contracts: list(data.contracts).map((row): ContractInfo => ({
+      contract: str(row.ma_hop_dong),
+      supplier: str(row.ten_ncc),
+      containers: Number(row.so_container) || 0,
+    })).filter((item) => item.contract),
+  };
 }

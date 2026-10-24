@@ -43,7 +43,9 @@ const AppSidebar: React.FC = () => {
   const canViewPaymentRequests = can("paymentRequests");
   // Menu Đề nghị thanh toán: thêm người được uỷ quyền duyệt / xác nhận chứng từ (khớp quyền xem danh sách ở BE).
   const canOpenPaymentRequestList = canOpenPaymentRequests(can);
-  const canViewCostManagement = canManageMasterData || canViewPaymentRequests;
+  // Tổng quan chi phí (toàn công ty): quyền costReports (ban giám đốc) hoặc xem đề nghị của mọi người (kế toán, admin).
+  const canViewMonthlyCosts = can("costReports") || can("paymentRequestsAll");
+  const canViewCostManagement = canManageMasterData || canViewPaymentRequests || canViewMonthlyCosts;
   const { t } = useLanguage();
 
   return (
@@ -170,6 +172,7 @@ const AppSidebar: React.FC = () => {
                 {showText && <span className="ml-auto text-xs">{costOpen ? "−" : "+"}</span>}
               </button>
               {costOpen && showText && <ul className="mt-1 space-y-1 pl-11">
+                {canViewMonthlyCosts && <li><Link href="/cost-management" className={`menu-dropdown-item ${pathname.startsWith("/cost-management") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("costOverview")}</Link></li>}
                 {canManageMasterData && <li><Link href="/master-data?catalog=paymentCategories" className={`menu-dropdown-item ${searchParams.get("catalog") === "paymentCategories" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("paymentCategories")}</Link></li>}
                 {canViewPaymentRequests && <li><Link href="/payment-costs" className={`menu-dropdown-item ${pathname.startsWith("/payment-costs") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("myCosts")}</Link></li>}
               </ul>}
