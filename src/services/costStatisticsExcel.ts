@@ -1,18 +1,18 @@
 import type { CostOverview } from "@/services/paymentCostApi";
-import { costState, rankContracts, summarizeCosts, summarizePayables, todayVn } from "@/utils/costStatistics";
+import { compareCurrency, costState, fromCents, groupByRequest, summarizeCosts, summarizeShipments, toCents, type Money } from "@/utils/costStatistics";
 import { splitVat } from "@/utils/paymentRequest";
 
-// Xuất Excel trang Quản lý chi phí của một tháng: "Tổng hợp" (theo nhóm vận hành / phát sinh / tiền hàng × loại tiền ×
-// tình trạng, theo khoản phí), "Theo hợp đồng" (chi phí vận hành + phát sinh, bình quân mỗi container), "Đề nghị đang
-// mở" (chờ duyệt / đã duyệt chưa hoàn thành, hạn thanh toán, quá hạn) và "Chi tiết" (từng khoản). Số tiền ghi dạng số
-// (#,##0 / #,##0.00) để Excel cộng / lọc được. xlsx (SheetJS) nạp khi bấm xuất, không đóng gói vào trang.
+// Xuất Excel trang Quản lý chi phí của một tháng: Tổng hợp, Theo đề nghị, Theo khoản phí, Theo lô hàng, Theo container
+// (lũy kế, chi phí chung chia đều cho container), Chi tiết. Số tiền ghi dạng số, mỗi loại tiền một cột (#,##0 cho VND,
+// #,##0.00 cho USD) để Excel cộng / lọc được. xlsx (SheetJS) nạp khi bấm xuất, không đóng gói vào trang.
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 type Cell = string | number;
-type AmountCells = Array<{ row: number; columns: number[]; currency: string }>;
+interface Column<T> { label: string; value: (row: T) => Cell; currency?: string; width?: number }
 
 const AMOUNT_FORMAT = (currency: string) => (currency === "USD" ? "#,##0.00" : "#,##0");
 const toNumber = (value: string | null | undefined): Cell => (value === null || value === undefined || value === "" ? "" : Number(value));
+const amountIn = (money: Money, currency: string): Cell => toNumber(money.find((item) => item.currency === currency)?.total ?? null);
 
 function formatDateTime(value: string): string {
   const date = new Date(value);
@@ -21,117 +21,144 @@ function formatDateTime(value: string): string {
     timeZone: "Asia/Bangkok", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
   }).format(date);
 }
-
 const formatDate = (value: string) => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value.slice(8, 10)}/${value.slice(5, 7)}/${value.slice(0, 4)}` : value);
 
-export async function exportCostOverviewExcel({ overview, t, basisLabel }: { overview: CostOverview; t: Translate; basisLabel: string }): Promise<string> {
-  // Tính theo ngày nhập thì ngày tính = ngày nhập: không lặp cột.
-  const withBasisDate = overview.basis !== "created";
+/** Cột tiền: một cột cho mỗi loại tiền có trong dữ liệu ("Chi phí (VND)", "Chi phí (USD)"). */
+function moneyColumns<T>(rows: T[], label: string, pick: (row: T) => Money): Array<Column<T>> {
+  const currencies = [...new Set(rows.flatMap((row) => pick(row).map((item) => item.currency)))].sort(compareCurrency);
+  return (currencies.length ? currencies : ["VND"]).map((currency) => ({ label: `${label} (${currency})`, value: (row: T) => amountIn(pick(row), currency), currency, width: 18 }));
+}
+
+export async function exportCostOverviewExcel({ overview, t }: { overview: CostOverview; t: Translate }): Promise<string> {
   const XLSX = await import("xlsx");
   type Sheet = ReturnType<typeof XLSX.utils.aoa_to_sheet>;
-  const sheetOf = (rows: Cell[][], widths: number[], amounts: AmountCells, filter = false): Sheet => {
-    const sheet = XLSX.utils.aoa_to_sheet(rows);
-    sheet["!cols"] = widths.map((wch) => ({ wch }));
-    for (const { row, columns, currency } of amounts) {
-      for (const column of columns) {
-        const cell = sheet[XLSX.utils.encode_cell({ r: row, c: column })];
-        if (cell && cell.t === "n") cell.z = AMOUNT_FORMAT(currency);
-      }
-    }
-    if (filter && rows.length > 1) {
-      sheet["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: rows[0].length - 1 } }) };
-    }
+  /** Bảng có tiêu đề + bộ lọc; ô tiền theo định dạng loại tiền của cột. */
+  function table<T>(rows: T[], columns: Array<Column<T>>): Sheet {
+    const sheet = XLSX.utils.aoa_to_sheet([columns.map((column) => column.label), ...rows.map((row) => columns.map((column) => column.value(row)))]);
+    sheet["!cols"] = columns.map((column) => ({ wch: column.width ?? 16 }));
+    columns.forEach((column, index) => {
+      if (!column.currency) return;
+      rows.forEach((_, rowIndex) => {
+        const cell = sheet[XLSX.utils.encode_cell({ r: rowIndex + 1, c: index })];
+        if (cell && cell.t === "n") cell.z = AMOUNT_FORMAT(column.currency as string);
+      });
+    });
+    if (rows.length) sheet["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: columns.length - 1 } }) };
     return sheet;
-  };
+  }
 
-  const { month, costs, payables: openRequests } = overview;
+  const { month, costs } = overview;
   const monthLabel = `${month.slice(5, 7)}/${month.slice(0, 4)}`;
   const kindLabel = (kind: string) => t(`cmKind_${kind}`);
-  const typeLabel = (type: string) => (type ? t(`prType_${type}`) : "—");
   const summary = summarizeCosts(costs);
-  const contracts = rankContracts(costs, overview.contracts, Number.MAX_SAFE_INTEGER);
-  const payables = summarizePayables(openRequests, todayVn());
+  const byRequest = groupByRequest(costs);
+  const shipments = summarizeShipments(overview.shipments, overview.shipmentCosts);
 
   // ---------- Tổng hợp ----------
   const summaryRows: Cell[][] = [
     [t("cmExcelTitle", { month: monthLabel })],
-    [t("cmExcelBasis", { basis: basisLabel })],
     [t("cmExcelExportedAt", { time: formatDateTime(new Date().toISOString()) })],
     [],
-    [t("cmKind"), t("cmCurrency"), t("cmCount"), t("cmGroup_paid"), t("cmGroup_processing"), t("cmGroup_unrequested"), t("cmTotal")],
+    ["", t("cmCurrency"), t("cmCount"), t("cmGroup_paid"), t("cmNotPaid"), t("cmTotal")],
   ];
-  const summaryAmounts: AmountCells = [];
-  for (const item of summary.byKind) {
-    summaryAmounts.push({ row: summaryRows.length, columns: [3, 4, 5, 6], currency: item.currency });
-    summaryRows.push([kindLabel(item.kind), item.currency, item.count, toNumber(item.paid), toNumber(item.processing), toNumber(item.unrequested), toNumber(item.total)]);
-  }
-  for (const item of summary.currencies) {
-    summaryAmounts.push({ row: summaryRows.length, columns: [3, 4, 5, 6], currency: item.currency });
-    summaryRows.push([t("cmTotal"), item.currency, item.count, toNumber(item.paid), toNumber(item.processing), toNumber(item.unrequested), toNumber(item.total)]);
-  }
-  summaryRows.push([], [t("cmByFee")], [t("cmKind"), t("cmType"), t("prCostCodeLabel"), t("mcFee"), t("cmCurrency"), t("cmCount"), t("cmTotal")]);
-  for (const fee of summary.byFee) {
-    summaryAmounts.push({ row: summaryRows.length, columns: [6], currency: fee.currency });
-    summaryRows.push([kindLabel(fee.kind), typeLabel(fee.type), fee.code, fee.name, fee.currency, fee.count, toNumber(fee.total)]);
+  const summaryFormats: Array<{ row: number; currency: string }> = [];
+  for (const [label, items] of [[t("cmTotalCost"), summary.costs], [t("cmGoods"), summary.goods]] as const) {
+    for (const item of items) {
+      summaryFormats.push({ row: summaryRows.length, currency: item.currency });
+      summaryRows.push([label, item.currency, item.count, toNumber(item.paid), toNumber(fromCents(toCents(item.processing) + toCents(item.unrequested))), toNumber(item.total)]);
+    }
   }
   const notes = [
     summary.cancelledCount ? t("cmCancelledNote", { count: summary.cancelledCount }) : "",
     summary.hiddenCount ? t("cmHiddenNote") : "",
     costs.some((cost) => cost.currencyInferred) ? t("cmInferredNote") : "",
+    t("cmShipmentHint"),
   ].filter(Boolean);
-  if (notes.length) summaryRows.push([], ...notes.map((note) => [note]));
-
-  // ---------- Theo hợp đồng ----------
-  const contractRows: Cell[][] = [[t("cmContract"), t("supplier"), t("cmCurrency"), t("cmCount"), t("cmTotal"), t("cmContainers"), t("cmPerContainer")]];
-  const contractAmounts: AmountCells = [];
-  for (const item of contracts) {
-    contractAmounts.push({ row: contractRows.length, columns: [4, 6], currency: item.currency });
-    contractRows.push([item.contract, item.supplier, item.currency, item.count, toNumber(item.total), item.containers || "", toNumber(item.perContainer)]);
+  summaryRows.push([], ...notes.map((note) => [note]));
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
+  summarySheet["!cols"] = [{ wch: 34 }, { wch: 10 }, { wch: 10 }, { wch: 22 }, { wch: 22 }, { wch: 20 }];
+  for (const { row, currency } of summaryFormats) {
+    for (const column of [3, 4, 5]) {
+      const cell = summarySheet[XLSX.utils.encode_cell({ r: row, c: column })];
+      if (cell && cell.t === "n") cell.z = AMOUNT_FORMAT(currency);
+    }
   }
 
-  // ---------- Đề nghị đang mở ----------
-  const overdueIds = new Set(payables.overdue.requests.map((request) => request.id));
-  const dueSoonIds = new Set(payables.dueSoon.requests.map((request) => request.id));
-  const payableRows: Cell[][] = [[t("cmRequest"), t("prContent"), t("cmState"), t("cmRequester"), t("prDueDate"), t("cmDueStatus"), t("cmCurrency"), t("cmTotal")]];
-  const payableAmounts: AmountCells = [];
-  for (const request of payables.all.requests) {
-    payableAmounts.push({ row: payableRows.length, columns: [7], currency: request.currency });
-    payableRows.push([
-      request.id,
-      request.content,
-      request.status === 0 ? t("cmState_pending") : t("cmApprovedOpen"),
-      request.requester,
-      formatDate(request.dueDate),
-      overdueIds.has(request.id) ? t("cmOverdue") : dueSoonIds.has(request.id) ? t("cmDueSoon") : "",
-      request.currency,
-      request.total === null ? t("cmHidden") : toNumber(request.total),
-    ]);
-  }
+  // ---------- Theo đề nghị ----------
+  type RequestRow = { id: string; content: string; requester: string; due: string; state: string; count: number; total: Money };
+  const requestRows: RequestRow[] = [
+    ...byRequest.requests.map((item) => ({ id: item.requestId, content: item.content, requester: item.requester, due: formatDate(item.dueDate), state: t(`cmState_${item.state}`), count: item.count, total: item.total })),
+    ...(byRequest.unrequested.count ? [{ id: "", content: t("cmUnrequested"), requester: "", due: "", state: t("cmState_none"), count: byRequest.unrequested.count, total: byRequest.unrequested.total }] : []),
+  ];
+  const requestSheet = table(requestRows, [
+    { label: t("cmRequest"), value: (row) => row.id, width: 12 },
+    { label: t("prContent"), value: (row) => row.content, width: 40 },
+    { label: t("cmRequester"), value: (row) => row.requester, width: 20 },
+    { label: t("prDueDate"), value: (row) => row.due, width: 14 },
+    { label: t("cmState"), value: (row) => row.state, width: 16 },
+    { label: t("cmCount"), value: (row) => row.count, width: 10 },
+    ...moneyColumns(requestRows, t("cmTotal"), (row) => row.total),
+  ]);
+
+  // ---------- Theo khoản phí ----------
+  const feeSheet = table(summary.byFee, [
+    { label: t("cmKind"), value: (row) => kindLabel(row.kind), width: 28 },
+    { label: t("prCostCodeLabel"), value: (row) => row.code, width: 10 },
+    { label: t("mcFee"), value: (row) => row.name, width: 32 },
+    { label: t("cmCount"), value: (row) => row.count, width: 10 },
+    ...["VND", "USD"].filter((currency) => summary.byFee.some((fee) => fee.currency === currency)).map((currency) => ({
+      label: `${t("cmTotal")} (${currency})`, value: (row: (typeof summary.byFee)[number]) => (row.currency === currency ? toNumber(row.total) : ""), currency, width: 18,
+    })),
+  ]);
+
+  // ---------- Theo lô hàng / theo container ----------
+  const lotSheet = table(shipments.lots, [
+    { label: t("cmLot"), value: (row) => row.contract, width: 14 },
+    { label: t("supplier"), value: (row) => row.supplier, width: 30 },
+    { label: t("cmContainers"), value: (row) => row.containerCount || "", width: 10 },
+    ...moneyColumns(shipments.lots, t("cmLotCost"), (row) => row.cost),
+    ...moneyColumns(shipments.lots, t("cmCostPerContainer"), (row) => row.costPerContainer),
+    ...moneyColumns(shipments.lots, t("cmGoods"), (row) => row.goods),
+    ...moneyColumns(shipments.lots, t("cmGoodsPerContainer"), (row) => row.goodsPerContainer),
+  ]);
+  const containerSheet = table(shipments.containers, [
+    { label: t("cmContainer"), value: (row) => row.container, width: 16 },
+    { label: t("cmLot"), value: (row) => row.contract, width: 14 },
+    { label: t("supplier"), value: (row) => row.supplier, width: 30 },
+    ...moneyColumns(shipments.containers, t("cmDirectCost"), (row) => row.direct),
+    ...moneyColumns(shipments.containers, t("cmSharedCost"), (row) => row.shared),
+    ...moneyColumns(shipments.containers, t("cmContainerTotal"), (row) => row.total),
+    ...moneyColumns(shipments.containers, t("cmGoodsPerContainer"), (row) => row.goodsShare),
+  ]);
 
   // ---------- Chi tiết ----------
-  const detailRows: Cell[][] = [[
-    ...(withBasisDate ? [basisLabel] : []), t("mcCreatedAt"), t("cmCostId"), t("cmKind"), t("cmType"), t("prCostCodeLabel"), t("mcFee"), t("cmFlow"), t("cmContract"), t("cmContainer"),
-    t("prCostNote"), t("cmAmount"), t("cmCurrency"), t("cmInferredCol"), t("cmVatRate"), t("cmBase"), t("cmTax"), t("cmState"), t("cmRequest"), t("cmEnteredBy"),
-  ]];
-  const detailAmounts: AmountCells = [];
-  for (const cost of costs) {
-    const split = cost.amount !== null && cost.vat ? splitVat(cost.amount, cost.vat, cost.currency === "USD" || cost.currency === "VND" ? cost.currency : "") : null;
-    const shift = withBasisDate ? 1 : 0;
-    detailAmounts.push({ row: detailRows.length, columns: [10 + shift, 14 + shift, 15 + shift], currency: cost.currency });
-    detailRows.push([
-      ...(withBasisDate ? [formatDateTime(cost.basisDate)] : []), formatDateTime(cost.createdAt), cost.id, kindLabel(cost.kind), typeLabel(cost.type), cost.code, cost.categoryName,
-      cost.flow ? t(`prFlow_${cost.flow}`) : "", cost.contract, cost.container, cost.note,
-      cost.amount === null ? t("cmHidden") : toNumber(cost.amount), cost.currency, cost.currencyInferred ? t("cmYes") : "",
-      cost.vat ? Number(cost.vat) : "", split ? toNumber(split.base) : "", split ? toNumber(split.tax) : "",
-      t(`cmState_${costState(cost)}`), cost.requestId, cost.userName,
-    ]);
-  }
+  const detailSheet = table(costs, [
+    { label: t("mcCreatedAt"), value: (row) => formatDateTime(row.createdAt), width: 16 },
+    { label: t("cmCostId"), value: (row) => row.id, width: 20 },
+    { label: t("cmKind"), value: (row) => kindLabel(row.kind), width: 26 },
+    { label: t("prCostCodeLabel"), value: (row) => row.code, width: 10 },
+    { label: t("mcFee"), value: (row) => row.categoryName, width: 28 },
+    { label: t("cmLot"), value: (row) => row.contract, width: 12 },
+    { label: t("cmContainer"), value: (row) => row.container, width: 16 },
+    { label: t("prCostNote"), value: (row) => row.note, width: 28 },
+    ...["VND", "USD"].map((currency) => ({
+      label: `${t("cmAmount")} (${currency})`, value: (row: (typeof costs)[number]) => (row.currency !== currency ? "" : row.amount === null ? t("cmHidden") : toNumber(row.amount)), currency, width: 18,
+    })),
+    { label: t("cmInferredCol"), value: (row) => (row.currencyInferred ? t("cmYes") : ""), width: 12 },
+    { label: t("cmVatRate"), value: (row) => (row.vat ? Number(row.vat) : ""), width: 8 },
+    { label: t("cmTax"), value: (row) => (row.amount !== null && row.vat ? toNumber(splitVat(row.amount, row.vat, row.currency === "USD" || row.currency === "VND" ? row.currency : "").tax) : ""), width: 14 },
+    { label: t("cmState"), value: (row) => t(`cmState_${costState(row)}`), width: 16 },
+    { label: t("cmRequest"), value: (row) => row.requestId, width: 12 },
+    { label: t("cmEnteredBy"), value: (row) => row.userName, width: 20 },
+  ]);
 
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheetOf(summaryRows, [26, 10, 10, 22, 26, 20, 20], summaryAmounts), t("cmExcelSummarySheet"));
-  XLSX.utils.book_append_sheet(workbook, sheetOf(contractRows, [14, 30, 9, 10, 18, 12, 18], contractAmounts, true), t("cmExcelContractSheet"));
-  XLSX.utils.book_append_sheet(workbook, sheetOf(payableRows, [12, 40, 22, 20, 12, 12, 9, 18], payableAmounts, true), t("cmExcelPayableSheet"));
-  XLSX.utils.book_append_sheet(workbook, sheetOf(detailRows, [...(withBasisDate ? [16] : []), 16, 20, 18, 12, 10, 28, 12, 12, 16, 28, 16, 9, 10, 8, 16, 14, 18, 12, 20], detailAmounts, true), t("cmExcelDetailSheet"));
+  XLSX.utils.book_append_sheet(workbook, summarySheet, t("cmExcelSummarySheet"));
+  XLSX.utils.book_append_sheet(workbook, requestSheet, t("cmExcelRequestSheet"));
+  XLSX.utils.book_append_sheet(workbook, feeSheet, t("cmExcelFeeSheet"));
+  XLSX.utils.book_append_sheet(workbook, lotSheet, t("cmExcelLotSheet"));
+  XLSX.utils.book_append_sheet(workbook, containerSheet, t("cmExcelContainerSheet"));
+  XLSX.utils.book_append_sheet(workbook, detailSheet, t("cmExcelDetailSheet"));
   const fileName = `Chi-phi-${month}.xlsx`;
   XLSX.writeFile(workbook, fileName);
   return fileName;
