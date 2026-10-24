@@ -626,7 +626,7 @@ export const translations = {
     exportExcelEmpty: "Không có dữ liệu để xuất",
     etaDataNotice: "Dữ liệu được cập nhật từ bảng ETA tháng 8/2026, bắt đầu từ đơn 684131 (dòng 227).",
     legacyEtaOrders: "Dữ liệu hợp đồng cũ",
-    warehouseSync: "Đồng bộ kho",
+    warehouseSync: "Kiểm kho thuê ngoài",
     justNow: "Vừa xong",
     minutesAgo: "{count} phút trước",
     hoursAgo: "{count} giờ trước",
