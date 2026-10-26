@@ -136,6 +136,26 @@ function CostLine({ name, note, target, amount, vatLine }: { name: string; note:
   );
 }
 
+/** Danh sách lỗi của một bước (hiện sau khi bấm Tiếp tục / Lưu); đọc cho trình đọc màn hình nhờ role="alert". */
+function IssueList({ issues }: { issues: string[] }) {
+  const { t } = useLanguage();
+  if (!issues.length) return null;
+  return (
+    <div role="alert" className="mt-3 rounded-lg bg-error-50 px-3 py-2 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-300">
+      <p className="font-semibold">{t("prErrTitle")}</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5">
+        {issues.map((issue, index) => <li key={`${index}-${issue}`} className="break-words">{issue}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+/** Dòng lỗi nhỏ ngay dưới ô nhập. */
+function FieldError({ message }: { message: string }) {
+  if (!message) return null;
+  return <span className="mt-1 block text-xs text-error-600 dark:text-error-400">{message}</span>;
+}
+
 /** Ô % VAT + nút mức hay dùng. */
 function VatInput({ value, onChange, invalid, label }: { value: string; onChange: (value: string) => void; invalid: boolean; label: string }) {
   return (
@@ -185,8 +205,10 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [reached, setReached] = useState(editing ? SAVE_STEP : 0);
   const [search, setSearch] = useState("");
   const [openGroups, setOpenGroups] = useState<string[]>([]);
-  // Đã bấm "Tiếp tục" ở bước chi phí: tô đỏ các ô còn thiếu (khoản phí, số tiền, % VAT).
+  // Đã bấm "Tiếp tục" / "Lưu" ở từng bước: tô đỏ ô còn thiếu và hiện danh sách lỗi của bước đó.
   const [costsTouched, setOthersTouched] = useState(false);
+  const [contentTouched, setContentTouched] = useState(false);
+  const [paymentTouched, setPaymentTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -333,6 +355,42 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const codeLabel = (code: string) => (code === "HD" ? `HD · ${t("prCode_HD")}` : code === "CONT" ? `CONT · ${t("prCode_CONT")}` : code);
   const targetOf = (cost: PaymentCost) => [cost.container && `${t("prContainer")} ${cost.container}`, cost.contract && `${t("prContract")} ${cost.contract}`].filter(Boolean).join(" · ");
 
+  // Lỗi từng bước (cùng điều kiện với complete): hiện thành danh sách khi người dùng bấm Tiếp tục / Lưu, để biết phải sửa gì.
+  const costIssues: string[] = [];
+  if (!costType) costIssues.push(t("prErrCostType"));
+  else if (!costCode) costIssues.push(t("prErrCostCode"));
+  else if (costCount === 0) costIssues.push(t(orderMode ? "prErrNoPrepared" : "prErrNoManual"));
+  manualRows.forEach((row, index) => {
+    const n = index + 1;
+    if (!row.categoryId) costIssues.push(t("prErrRowCategory", { n }));
+    if (!row.amount.trim()) costIssues.push(t("prErrRowAmountEmpty", { n }));
+    else if (otherAmounts[index] === null) costIssues.push(t("prErrRowAmountInvalid", { n }));
+    if (row.categoryId && isTaxed(row.categoryId) && otherVats[index] === null) costIssues.push(t("prErrRowVat", { n }));
+  });
+  selectedCosts.forEach((cost) => {
+    if (preparedTaxed(cost) && preparedVat(cost) === null) costIssues.push(t("prErrPreparedVat", { name: costLabel(cost) }));
+  });
+  const contentIssues = content.trim() ? [] : [t("prErrContent")];
+  const dueDateValid = /^\d{4}-\d{2}-\d{2}$/.test(dueDate);
+  const paymentIssues = [
+    !dueDateValid && t("prErrDueDate"),
+    !currency && t("prErrCurrency"),
+    !paymentMethod && t("prErrMethod"),
+    missingTransfer.length > 0 && t("prErrTransfer", { fields: missingTransfer.map((field) => t(field.key)).join(", ") }),
+  ].filter((issue): issue is string => Boolean(issue));
+  const stepIssues = [costIssues, contentIssues, paymentIssues];
+  const touchStep = (step: number) => [setOthersTouched, setContentTouched, setPaymentTouched][step](true);
+
+  /** Bấm Tiếp tục ở một bước: thiếu / sai thì báo (toast + danh sách trong bước), đủ thì sang câu tiếp theo. */
+  const continueFrom = (step: number) => {
+    touchStep(step);
+    if (stepIssues[step].length) {
+      notify(t("prErrToast"), "error");
+      return;
+    }
+    advance();
+  };
+
   // Các khoản đã chọn dạng dòng hiển thị (dùng cho tóm tắt bước chi phí và bản nháp ở bước lưu).
   const chosenLines = [
     ...selectedCosts.map((cost) => ({ key: cost.id, name: costLabel(cost), note: cost.note, target: targetOf(cost), amount: cost.amount, vatLine: vatLineOf(cost.amount, preparedVat(cost)) })),
@@ -356,7 +414,16 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   };
 
   const save = async () => {
-    if (saving || complete.some((done) => !done) || !currency || !paymentMethod) return;
+    if (saving) return;
+    // Còn bước thiếu / sai (ví dụ sửa lại chi phí sau khi đã tới bước lưu): mở bước đó, tô đỏ và báo.
+    const firstIncomplete = complete.findIndex((done) => !done);
+    if (firstIncomplete !== -1 || !currency || !paymentMethod) {
+      const step = firstIncomplete === -1 ? 2 : firstIncomplete;
+      touchStep(step);
+      setActive(step);
+      notify(t("prErrToast"), "error");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -375,7 +442,9 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
       notify(t(editing ? "prChangesSaved" : "prDraftSaved", { id: saved.id }), "success");
       onSaved(saved);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : String(saveError));
+      const message = saveError instanceof Error ? saveError.message : String(saveError);
+      setError(message);
+      notify(message, "error");
     } finally {
       setSaving(false);
     }
@@ -507,12 +576,14 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                               <div className="ml-8 mr-1 flex flex-col gap-1">
                                                 <span className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
                                                   <span className="font-semibold">VAT</span>
-                                                  <VatInput value={vatTextOf(cost)} label={`${t("prVatRate")} ${costLabel(cost)}`} invalid={rate === null && costsTouched}
+                                                  <VatInput value={vatTextOf(cost)} label={`${t("prVatRate")} ${costLabel(cost)}`} invalid={rate === null && (Boolean(vatTextOf(cost).trim()) || costsTouched)}
                                                     onChange={(value) => setVats((current) => ({ ...current, [cost.id]: value }))} />
                                                 </span>
                                                 {rate !== null
                                                   ? <span className="text-xs text-gray-500">{vatLineOf(cost.amount, rate)}</span>
-                                                  : <span className="text-xs text-warning-700 dark:text-warning-300">{t("prVatRequired")}</span>}
+                                                  : vatTextOf(cost).trim() || costsTouched
+                                                    ? <span className="text-xs text-error-600 dark:text-error-400">{t("prVatInvalidShort")}</span>
+                                                    : <span className="text-xs text-warning-700 dark:text-warning-300">{t("prVatRequired")}</span>}
                                               </div>
                                             )}
                                           </li>
@@ -541,8 +612,14 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                     {others.map((row, index) => {
                       const category = categoriesById.get(row.categoryId);
                       const taxed = Boolean(category?.taxed);
-                      const amountInvalid = costsTouched && otherAmounts[index] === null;
-                      const vatInvalid = costsTouched && taxed && otherVats[index] === null;
+                      // Số tiền / % VAT gõ sai báo ngay; để trống chỉ báo sau khi bấm Tiếp tục.
+                      const amountError = row.amount.trim()
+                        ? (otherAmounts[index] === null ? t("prAmountInvalidShort") : "")
+                        : (costsTouched ? t("prFieldRequired") : "");
+                      const amountInvalid = Boolean(amountError);
+                      const vatError = taxed && otherVats[index] === null && (row.vat.trim() || costsTouched) ? t("prVatInvalidShort") : "";
+                      const vatInvalid = Boolean(vatError);
+                      const categoryError = costsTouched && !row.categoryId ? t("prFieldRequired") : "";
                       const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-400";
                       return (
                         <li key={row.key} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
@@ -551,16 +628,20 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                             <label className="min-w-0">
                               <span className={label}>{t("pcFeeLabel")}</span>
                               <select value={row.categoryId} onChange={(event) => updateVatRow(row, { categoryId: event.target.value })}
-                                className={`${INPUT} ${costsTouched && !row.categoryId ? "border-error-400" : ""}`}>
+                                aria-invalid={Boolean(categoryError)}
+                                className={`${INPUT} ${categoryError ? "border-error-400" : ""}`}>
                                 <option value="">{t("prSelectCategory")}</option>
                                 {manualCategories.map((item: PaymentCategory) => <option key={item.id} value={item.id}>{item.name}{item.flow === "do" ? " ⚠" : ""}</option>)}
                               </select>
+                              <FieldError message={categoryError} />
                             </label>
                             <label className="min-w-0">
                               <span className={label}>{taxed ? t("prVatTotal") : t("pcAmountLabel")}</span>
                               <input inputMode="decimal" value={row.amount} placeholder={taxed ? "1.080.000" : "1.250.000"}
                                 onChange={(event) => updateRow(row.key, { amount: event.target.value, basis: "amount" })}
+                                aria-invalid={amountInvalid}
                                 className={`${INPUT} text-right font-semibold tabular-nums ${amountInvalid ? "border-error-400" : ""}`} />
+                              <FieldError message={amountError} />
                             </label>
                             <label className="min-w-0">
                               <span className={label}>{t("pcNoteLabel")}</span>
@@ -586,9 +667,13 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                   onChange={(event) => updateVatRow(row, { base: event.target.value, basis: "base" })}
                                   className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-right text-sm tabular-nums text-gray-800 outline-none focus:border-brand-400 sm:w-36 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                               </label>
-                              <span className="text-xs text-gray-500">
-                                {otherAmounts[index] && otherVats[index] !== null ? vatLineOf(otherAmounts[index], otherVats[index]) : t("prVatHint")}
-                              </span>
+                              {vatError
+                                ? <span className="text-xs text-error-600 dark:text-error-400">{vatError}</span>
+                                : (
+                                  <span className="text-xs text-gray-500">
+                                    {otherAmounts[index] && otherVats[index] !== null ? vatLineOf(otherAmounts[index], otherVats[index]) : t("prVatHint")}
+                                  </span>
+                                )}
                             </div>
                           )}
                         </li>
@@ -603,10 +688,10 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
           </>
         )}
 
+        {costsTouched && <IssueList issues={costIssues} />}
         <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-3 sm:flex-row sm:items-center sm:justify-between dark:border-gray-800">
           <p className="text-sm text-gray-600 dark:text-gray-300">{t("prSelectedCount", { count: costCount, total: money(total) })}</p>
-          <button type="button" className={PRIMARY} disabled={costCount === 0}
-            onClick={() => { setOthersTouched(true); if (complete[0]) advance(); }}>{t("prContinue")}</button>
+          <button type="button" className={PRIMARY} disabled={!options} onClick={() => continueFrom(0)}>{t("prContinue")}</button>
         </div>
       </StepCard>
 
@@ -615,9 +700,14 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         <StepCard index={1} title={titles[1]} state={stepState(1)} onChange={() => setActive(1)}
           summary={<p className="whitespace-pre-line">{content}</p>}>
           <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={3} autoFocus placeholder={t("prContentPlaceholder")}
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+            aria-invalid={contentTouched && contentIssues.length > 0} aria-label={titles[1]}
+            className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-400 dark:bg-gray-900 dark:text-white ${contentTouched && contentIssues.length ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
+          <div className="flex justify-between gap-2 text-xs">
+            <FieldError message={contentTouched ? contentIssues[0] || "" : ""} />
+            <span className="ml-auto mt-1 shrink-0 tabular-nums text-gray-400">{content.length}/2000</span>
+          </div>
           <div className="mt-3 flex justify-end">
-            <button type="button" className={`${PRIMARY} w-full sm:w-auto`} disabled={!content.trim()} onClick={() => advance()}>{t("prContinue")}</button>
+            <button type="button" className={`${PRIMARY} w-full sm:w-auto`} onClick={() => continueFrom(1)}>{t("prContinue")}</button>
           </div>
         </StepCard>
       )}
@@ -634,7 +724,12 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)_minmax(0,1.1fr)]">
             <div className="min-w-0">
               <p className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prDueDate")}</p>
-              <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} aria-label={t("prDueDate")} className={INPUT} />
+              <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} aria-label={t("prDueDate")}
+                aria-invalid={paymentTouched && !dueDateValid}
+                className={`${INPUT} ${paymentTouched && !dueDateValid ? "border-error-400" : ""}`} />
+              <FieldError message={paymentTouched && !dueDateValid ? t("prErrDueDate") : ""} />
+              {/* Hạn đã qua: chỉ nhắc, không chặn (có thể lập đề nghị cho khoản đã tới hạn). */}
+              {dueDateValid && dueDate < vnDate() && <span className="mt-1 block text-xs text-warning-700 dark:text-warning-300">{t("prDueDatePast")}</span>}
               <div className="mt-2 flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5">
                 {([["prQuickToday", vnDate()], ["prQuick3", vnDate(3)]] as const).map(([key, value]) => (
                   <button key={key} type="button" onClick={() => setDueDate(value)} className={`h-8 shrink-0 whitespace-nowrap rounded-full border px-3 text-xs font-medium ${dueDate === value ? CHIP_ON : CHIP_OFF}`}>
@@ -653,6 +748,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                   </button>
                 ))}
               </div>
+              <FieldError message={paymentTouched && !currency ? t("prErrCurrency") : ""} />
             </div>
             <div className="min-w-0">
               <p className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prPaymentMethod")}</p>
@@ -664,6 +760,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                   </button>
                 ))}
               </div>
+              <FieldError message={paymentTouched && !paymentMethod ? t("prErrMethod") : ""} />
             </div>
           </div>
           {/* Chuyển khoản: thông tin người thụ hưởng theo từng trường (trong nước / quốc tế), dấu * là bắt buộc */}
@@ -676,8 +773,9 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                 {transferFields.map((field) => {
                   const value = transferValues[field.label] || "";
                   const id = `transfer-${field.key}`;
+                  const missing = paymentTouched && field.required && !value.trim();
                   // Các ô đều autoComplete="off": trình duyệt không gợi ý lại giá trị cũ (nhất là Nội dung thanh toán, mỗi đề nghị mỗi khác).
-                  const className = "w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
+                  const className = `w-full rounded-lg border bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:bg-gray-900 dark:text-white ${missing ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`;
                   return (
                     <label key={field.label} htmlFor={id} className={`min-w-0 ${field.multiline ? "sm:col-span-2" : ""}`}>
                       <span className="mb-1 block text-xs font-semibold text-gray-600 dark:text-gray-300">{t(field.key)}{field.required && <span className="text-error-500"> *</span>}</span>
@@ -692,8 +790,10 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                           onChange={(event) => updateTransferValue(field, event.target.value)}
                           onBlur={field.jsonKey === "so_tai_khoan" ? () => setAccountQuery("") : undefined}
                           onKeyDown={field.jsonKey === "so_tai_khoan" ? (event) => { if (event.key === "Escape") setAccountQuery(""); } : undefined}
+                          aria-invalid={missing}
                           className={`${className} h-11`} />
                       )}
+                      <FieldError message={missing ? t("prFieldRequired") : ""} />
                       {field.jsonKey === "so_tai_khoan" && accountQuery.trim().length >= 2 && beneficiarySuggestions.length > 0 && (
                         <div className="relative z-10">
                           <div className="absolute left-0 right-0 top-1 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
@@ -710,13 +810,14 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                   );
                 })}
               </div>
-              {missingTransfer.length > 0 && (
+              {missingTransfer.length > 0 && !paymentTouched && (
                 <p className="mt-2 text-xs text-warning-700 dark:text-warning-300">{t("prTfMissing", { fields: missingTransfer.map((field) => t(field.key)).join(", ") })}</p>
               )}
             </div>
           )}
+          {paymentTouched && <IssueList issues={paymentIssues} />}
           <div className="mt-4 flex justify-end">
-            <button type="button" className={`${PRIMARY} w-full sm:w-auto`} disabled={!complete[2]} onClick={() => advance()}>{t("prContinue")}</button>
+            <button type="button" className={`${PRIMARY} w-full sm:w-auto`} onClick={() => continueFrom(2)}>{t("prContinue")}</button>
           </div>
         </StepCard>
       )}
@@ -746,7 +847,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
           {error && <p role="alert" className="mt-3 break-words rounded-lg bg-error-50 px-3 py-2 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-300">{error}</p>}
           <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             {onCancel && <button type="button" className={SECONDARY} onClick={onCancel} disabled={saving}>{t("cancel")}</button>}
-            <button type="button" className={PRIMARY} onClick={() => void save()} disabled={saving || complete.some((done) => !done)}>
+            <button type="button" className={PRIMARY} onClick={() => void save()} disabled={saving}>
               {saving ? t("prSaving") : editing ? t("prSaveChanges") : t("prSaveDraft")}
             </button>
           </div>

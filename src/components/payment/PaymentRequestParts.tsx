@@ -9,6 +9,7 @@ import { PAYMENT_STATUS_LABEL_KEYS, type PaymentFlow, type PaymentRequestStatus 
 const STATUS_STYLES: Record<PaymentRequestStatus, string> = {
   0: "bg-warning-50 text-warning-700 dark:bg-warning-500/10 dark:text-warning-300",
   1: "bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-300",
+  3: "bg-blue-light-50 text-blue-light-700 dark:bg-blue-light-500/10 dark:text-blue-light-300",
   [-1]: "bg-error-50 text-error-700 dark:bg-error-500/10 dark:text-error-300",
   2: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
   [-2]: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
@@ -61,9 +62,9 @@ export function formatDateTime(value: string, language: "vi" | "en" = "vi"): str
   }).format(date);
 }
 
-/** Hạn thanh toán đã qua (so theo ngày giờ Việt Nam). */
+/** Hạn thanh toán đã qua (so theo ngày giờ Việt Nam). Đã chi tiền / lưu trữ / từ chối / hủy thì không còn quá hạn. */
 export function isOverdue(dueDate: string, status: PaymentRequestStatus): boolean {
-  if (!dueDate || status === 2 || status === -1 || status === -2) return false;
+  if (!dueDate || status === 2 || status === 3 || status === -1 || status === -2) return false;
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
   return dueDate < today;
 }

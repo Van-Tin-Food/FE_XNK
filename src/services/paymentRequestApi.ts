@@ -4,20 +4,25 @@ import { createHttpApiError, createInvalidResponseError, createNetworkApiError, 
 import type { PaymentCurrency } from "@/utils/paymentRequest";
 import { uploadFileToDriveSession, type UploadProgress } from "@/utils/driveResumableUpload";
 
-// Đề nghị thanh toán (BE: /api/payment-requests). Quy trình: 1 tạo (nháp) → 2 gửi lên Google Chat → 3 duyệt / từ chối
-// (trên Google Chat) → 4 lưu trữ hồ sơ (upload chứng từ vào thư mục Drive DNTT_xxx, bộ phận có quyền xác nhận).
+// Đề nghị thanh toán (BE: /api/payment-requests). Quy trình 4 giai đoạn: 1 lên đề nghị (nháp) và gửi lên Google Chat →
+// 2 duyệt / từ chối → 3 chi tiền (người có quyền upload ủy nhiệm chi / ảnh chuyển tiền, trên hệ thống hoặc gửi file vào thread
+// Chat) → 4 lưu trữ hồ sơ (chứng từ trong thư mục Drive DNTT_xxx, bộ phận có quyền xác nhận đầy đủ).
 
-/** -2 đã hủy, -1 không duyệt, 0 chưa duyệt (nháp nếu chưa gửi), 1 đã duyệt, 2 đã lưu trữ. */
-export type PaymentRequestStatus = -2 | -1 | 0 | 1 | 2;
+/** -2 đã hủy, -1 không duyệt, 0 chưa duyệt (nháp nếu chưa gửi), 1 đã duyệt (chờ chi tiền), 3 đã chi tiền, 2 đã lưu trữ. */
+export type PaymentRequestStatus = -2 | -1 | 0 | 1 | 2 | 3;
 export type PaymentFlow = "xanh" | "vang" | "do";
-export const PAYMENT_STATUSES: readonly PaymentRequestStatus[] = [0, 1, -1, 2, -2];
+export const PAYMENT_STATUSES: readonly PaymentRequestStatus[] = [0, 1, 3, -1, 2, -2];
 export const PAYMENT_STATUS_LABEL_KEYS: Record<PaymentRequestStatus, string> = {
   0: "prStatusPending",
   1: "prStatusApproved",
+  3: "prStatusPaid",
   [-1]: "prStatusRejected",
   2: "prStatusCompleted",
   [-2]: "prStatusCancelled",
 };
+/** Loại chứng từ: ủy nhiệm chi / ảnh chuyển tiền (bước chi tiền). Chứng từ hồ sơ không có loại. */
+export const PAYMENT_PROOF = "payment_proof" as const;
+export type PaymentDocumentKind = typeof PAYMENT_PROOF | null;
 
 export interface PaymentCategory {
   id: string;
@@ -132,6 +137,10 @@ export interface PaymentRequest {
   /** Ghi chú duyệt (cột ghi_chu_duyet): lý do khi từ chối, ghi chú (không bắt buộc) khi duyệt. */
   decisionNote: string;
   hasRed: boolean;
+  /** Người đang xem được duyệt / từ chối đề nghị này (luồng đỏ chỉ kế toán); null = BE không trả (danh sách, kết quả duyệt). */
+  canDecide: boolean | null;
+  /** Người đang xem được chi tiền (upload ủy nhiệm chi); null = BE không trả (danh sách). */
+  canRecordPayment: boolean | null;
   costCount: number;
   costs: PaymentCost[];
 }
@@ -182,6 +191,7 @@ export interface PaymentDocumentFile {
   fileUrl: string;
   uploadedAt: string;
   uploadedBy: string;
+  kind: PaymentDocumentKind;
 }
 
 export interface PaymentDocuments {
@@ -294,6 +304,8 @@ function normalizeRequest(row: unknown): PaymentRequest | null {
     status: (PAYMENT_STATUSES as readonly number[]).includes(status) ? status as PaymentRequestStatus : 0,
     decisionNote: str(row.ghi_chu_duyet),
     hasRed: row.has_red === true,
+    canDecide: row.can_decide === undefined || row.can_decide === null ? null : row.can_decide === true,
+    canRecordPayment: row.can_record_payment === undefined || row.can_record_payment === null ? null : row.can_record_payment === true,
     costCount: Number(row.cost_count ?? costs.length) || 0,
     costs,
   };
@@ -408,13 +420,13 @@ export async function confirmPaymentRequestDocuments(id: string): Promise<Paymen
 }
 
 /**
- * Báo thiếu chứng từ (bước lưu trữ hồ sơ): BE gửi vào thread Google Chat của đề nghị, tag người đề nghị.
- * mentioned = false khi người đề nghị chưa đăng nhập Google lần nào sau khi có tính năng (chưa có ID Google để tag).
+ * Báo thiếu chứng từ: BE gửi vào hộp chat Google Chat cá nhân của người tạo đề nghị (webhook users.space_google; người đề
+ * nghị không ở trong nhóm Chat duyệt). Người tạo chưa có webhook: lỗi 409 PAYMENT_REQUESTER_NO_CHAT.
  */
-export async function notifyMissingPaymentDocuments(id: string, note: string): Promise<{ mentioned: boolean; requesterName: string }> {
+export async function notifyMissingPaymentDocuments(id: string, note: string): Promise<{ requesterName: string }> {
   const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/missing-documents`, { note });
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
-  return { mentioned: data.mentioned === true, requesterName: str(data.requesterName) };
+  return { requesterName: str(data.requesterName) };
 }
 
 export async function approvePaymentRequest(id: string): Promise<PaymentRequest> {
@@ -433,11 +445,14 @@ function normalizeDocumentFile(row: unknown): PaymentDocumentFile | null {
     fileUrl: str(row.fileUrl),
     uploadedAt: str(row.uploadedAt),
     uploadedBy: str(row.uploadedBy),
+    kind: row.kind === PAYMENT_PROOF ? PAYMENT_PROOF : null,
   };
 }
 
-export async function listPaymentDocuments(id: string, signal?: AbortSignal): Promise<PaymentDocuments> {
-  const payload = await request<unknown>("GET", `/${encodeURIComponent(id)}/documents`, undefined, signal);
+/** Danh sách chứng từ (BE đọc bảng chứng từ); refresh = true: BE đọc lại thư mục Drive (file sửa thẳng trên Drive). */
+export async function listPaymentDocuments(id: string, signal?: AbortSignal, options: { refresh?: boolean } = {}): Promise<PaymentDocuments> {
+  const query = options.refresh ? "?refresh=1" : "";
+  const payload = await request<unknown>("GET", `/${encodeURIComponent(id)}/documents${query}`, undefined, signal);
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   return {
     folderName: str(data.folderName),
@@ -447,8 +462,8 @@ export async function listPaymentDocuments(id: string, signal?: AbortSignal): Pr
 }
 
 /** Kiểm tra trùng tên trước khi upload (như chứng từ XNK). */
-export async function checkPaymentDocumentNames(id: string, fileNames: string[]): Promise<PaymentDocumentNameCheck[]> {
-  const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/documents/check-names`, { fileNames });
+export async function checkPaymentDocumentNames(id: string, fileNames: string[], kind: PaymentDocumentKind = null): Promise<PaymentDocumentNameCheck[]> {
+  const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/documents/check-names`, { fileNames, ...(kind ? { kind } : {}) });
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   return (Array.isArray(data.files) ? data.files : []).filter(isRecord).map((row) => ({
     fileName: str(row.fileName),
@@ -466,21 +481,74 @@ export async function removePaymentDocument(id: string, fileId: string): Promise
  * Upload một chứng từ thẳng lên Google Drive (như chứng từ XNK): BE mở phiên upload -> trình duyệt gửi file thẳng tới
  * Google (từng phần 8 MB, tự gửi tiếp khi rớt mạng) -> BE kiểm tra và ghi nhận. File không đi qua gateway / proxy nên
  * không bị giới hạn kích thước request ở các tầng đó (trước đây gửi Base64 qua gateway, file ~500 KB đã có thể bị 413).
+ * kind = payment_proof: ủy nhiệm chi / ảnh chuyển tiền — BE chuyển đề nghị sang đã chi tiền; announce = false khi còn file
+ * khác trong cùng lượt (BE chỉ báo "Đã chi tiền" lên Google Chat ở file cuối).
  */
 export async function uploadPaymentDocument(
   id: string,
   file: File,
   mimeType: string,
-  options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal } = {},
+  options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal; kind?: PaymentDocumentKind; announce?: boolean } = {},
 ): Promise<PaymentDocumentFile> {
   const base = `/${encodeURIComponent(id)}/documents`;
-  const startPayload = await request<unknown>("POST", `${base}/start-upload`, { fileName: file.name, fileSize: file.size, mimeType });
+  const kind = options.kind ? { kind: options.kind } : {};
+  const startPayload = await request<unknown>("POST", `${base}/start-upload`, { fileName: file.name, fileSize: file.size, mimeType, ...kind });
   const session = isRecord(startPayload) && isRecord(startPayload.data) ? startPayload.data : {};
   const uploadUrl = str(session.uploadUrl);
   const uploadToken = str(session.uploadToken);
   if (!uploadUrl || !uploadToken) throw new Error("Máy chủ chưa mở được phiên upload Google Drive");
-  const uploaded = await uploadFileToDriveSession(uploadUrl, file, options);
-  const payload = await request<unknown>("POST", `${base}/complete-upload`, { uploadToken, fileId: uploaded.id });
+  return sendPaymentDocument(id, { fileName: file.name, uploadUrl, uploadToken }, file, options);
+}
+
+/** Phiên upload Google Drive BE đã mở cho một file của lượt upload. */
+export interface PaymentUploadSession {
+  fileName: string;
+  uploadUrl: string;
+  uploadToken: string;
+}
+
+/**
+ * Bước 1 cho cả lượt chọn file (một lần gọi BE): kiểm tra trùng tên (với thư mục + trong lượt) và mở phiên upload cho mọi
+ * file. Có file trùng: duplicates khác rỗng, sessions rỗng. sessions cùng thứ tự với files.
+ */
+export async function startPaymentDocumentUploads(
+  id: string,
+  files: Array<{ file: File; mimeType: string }>,
+  kind: PaymentDocumentKind = null,
+): Promise<{ duplicates: string[]; sessions: PaymentUploadSession[] }> {
+  const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/documents/start-uploads`, {
+    files: files.map(({ file, mimeType }) => ({ fileName: file.name, fileSize: file.size, mimeType })),
+    ...(kind ? { kind } : {}),
+  });
+  const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
+  const duplicates = (Array.isArray(data.duplicates) ? data.duplicates : []).filter(isRecord).map((row) => str(row.fileName));
+  const sessions = (Array.isArray(data.sessions) ? data.sessions : []).filter(isRecord).map((row) => ({
+    fileName: str(row.fileName),
+    uploadUrl: str(row.uploadUrl),
+    uploadToken: str(row.uploadToken),
+  }));
+  if (!duplicates.length && (sessions.length !== files.length || sessions.some((session) => !session.uploadUrl || !session.uploadToken))) {
+    throw new Error("Máy chủ chưa mở được phiên upload Google Drive");
+  }
+  return { duplicates, sessions };
+}
+
+/**
+ * Bước 2 + 3 cho một file: gửi file thẳng tới phiên upload Google Drive (từng phần, tự gửi tiếp khi rớt mạng), rồi BE kiểm
+ * tra và ghi nhận. announce = false: ủy nhiệm chi còn file khác trong lượt (BE chỉ báo "Đã chi tiền" ở file cuối).
+ */
+export async function sendPaymentDocument(
+  id: string,
+  session: PaymentUploadSession,
+  file: File,
+  options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal; announce?: boolean } = {},
+): Promise<PaymentDocumentFile> {
+  const uploaded = await uploadFileToDriveSession(session.uploadUrl, file, options);
+  const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/documents/complete-upload`, {
+    uploadToken: session.uploadToken,
+    fileId: uploaded.id,
+    ...(options.announce === false ? { announce: false } : {}),
+  });
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   const result = normalizeDocumentFile(data.file);
   if (!result) throw new Error("Phản hồi upload chứng từ không hợp lệ");

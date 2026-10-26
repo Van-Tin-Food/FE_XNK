@@ -151,7 +151,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
 
   const addEntry = (target: Target) => {
     const entry = newEntry[target];
-    if (!entry?.categoryId) return;
+    if (!entry?.categoryId) return notify(t("pcFeeRequired"), "error");
     if (parseAmountLoose(entry.amount) === null) return notify(t("pcAmountRequired"), "error");
     const key = cellKey(target, entry.categoryId);
     setAmount(key, entry.amount);
@@ -235,6 +235,8 @@ export default function ShipmentCostsTab({ contract }: Props) {
     const groups = optionGroups(target);
     const isContract = target === CONTRACT_TARGET;
     const entryKind = goodsPaymentKind(categoriesById.get(entry.categoryId));
+    // Số tiền khoản mới gõ sai: báo ngay dưới ô (để trống thì báo khi bấm Thêm).
+    const entryAmountInvalid = Boolean(entry.amount.trim()) && parseAmountLoose(entry.amount) === null;
     const showGoodsSplit = isContract && goodsTotal && (depositCategory || balanceCategory);
     return (
       <div key={target} className={`@container rounded-xl border border-gray-200 bg-white p-3 sm:p-4 dark:border-gray-700 dark:bg-white/[0.02] ${fill ? "lg:flex-1" : ""}`}>
@@ -268,9 +270,12 @@ export default function ShipmentCostsTab({ contract }: Props) {
                     {/* Một hàng: khoản phí | số tiền | nội dung | xoá; thẻ hẹp thì nội dung xuống dòng dưới */}
                     <div className={ENTRY_GRID}>
                       <span className="line-clamp-2 min-w-0 break-words text-sm font-medium text-gray-800 dark:text-gray-100" title={category.name}>{category.name}</span>
-                      <input inputMode="decimal" aria-label={`${t("pcAmountLabel")} ${category.name}`} value={valueOf(key)} disabled={!editable}
-                        onChange={(event) => setAmount(key, event.target.value)}
-                        className={`${INPUT} w-full text-right font-semibold tabular-nums ${invalidKeys.has(key) ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
+                      <span className="min-w-0">
+                        <input inputMode="decimal" aria-label={`${t("pcAmountLabel")} ${category.name}`} value={valueOf(key)} disabled={!editable}
+                          onChange={(event) => setAmount(key, event.target.value)} aria-invalid={invalidKeys.has(key)}
+                          className={`${INPUT} w-full text-right font-semibold tabular-nums ${invalidKeys.has(key) ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
+                        {invalidKeys.has(key) && <span className="mt-0.5 block text-right text-[11px] text-error-600 dark:text-error-400">{t("prAmountInvalidShort")}</span>}
+                      </span>
                       {(editable || noteOf(key)) ? (
                         <input value={noteOf(key)} maxLength={500} disabled={!editable} placeholder={t("pcNotePlaceholder")} aria-label={`${t("prCostNote")} ${category.name}`}
                           onChange={(event) => setNoteDrafts((current) => ({ ...current, [key]: event.target.value }))}
@@ -334,7 +339,9 @@ export default function ShipmentCostsTab({ contract }: Props) {
                 <input inputMode="decimal" value={entry.amount} placeholder="1.250.000"
                   onChange={(event) => setNewEntry((current) => ({ ...current, [target]: { ...entry, amount: event.target.value } }))}
                   onKeyDown={(event) => { if (event.key === "Enter") addEntry(target); }}
-                  className={`${INPUT} w-full border-gray-200 text-right tabular-nums dark:border-gray-700`} />
+                  aria-invalid={entryAmountInvalid}
+                  className={`${INPUT} w-full text-right tabular-nums ${entryAmountInvalid ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
+                {entryAmountInvalid && <span className="mt-0.5 block text-right text-[11px] text-error-600 dark:text-error-400">{t("prAmountInvalidShort")}</span>}
               </label>
               <label className="min-w-0">
                 <span className={LABEL}>{t("pcNoteLabel")}</span>
@@ -343,7 +350,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
                   onKeyDown={(event) => { if (event.key === "Enter") addEntry(target); }}
                   className={`${INPUT} w-full border-gray-200 dark:border-gray-700`} />
               </label>
-              <button type="button" onClick={() => addEntry(target)} disabled={!entry.categoryId || !entry.amount.trim()}
+              <button type="button" onClick={() => addEntry(target)}
                 aria-label={t("pcAddFee")} title={t("pcAddFee")}
                 className="h-10 w-full whitespace-nowrap rounded-lg bg-brand-50 px-4 text-sm font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50 @sm:w-10 @sm:px-0 dark:bg-brand-500/10 dark:text-brand-300">
                 +<span className="@sm:hidden"> {t("pcAddFee")}</span>

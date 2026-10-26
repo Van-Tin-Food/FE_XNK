@@ -115,7 +115,8 @@ export function costState(cost: Pick<MonthlyCost, "requestId" | "requestStatus" 
   if (cost.requestStatus === -2) return "cancelled";
   if (cost.requestStatus === -1) return "rejected";
   if (cost.requestStatus === 2) return "completed";
-  if (cost.requestStatus === 1) return "approved";
+  // Đã duyệt, gồm cả đã chi tiền (3) chờ lưu trữ.
+  if (cost.requestStatus === 1 || cost.requestStatus === 3) return "approved";
   return cost.requestSent ? "pending" : "draft";
 }
 

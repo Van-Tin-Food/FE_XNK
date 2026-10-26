@@ -11,6 +11,7 @@ import {
   confirmPaymentRequestDocuments,
   fetchPaymentRequestPrintHtml,
   PAYMENT_METHOD_LABEL_KEYS,
+  PAYMENT_PROOF,
   getPaymentRequest,
   approvePaymentRequest,
   notifyMissingPaymentDocuments,
@@ -23,8 +24,9 @@ import PaymentDocumentsPanel from "./PaymentDocumentsPanel";
 import PaymentRequestWizard from "./PaymentRequestWizard";
 import { PaymentFlowBadge, PaymentStatusBadge, RedFlowBadge, formatDateTime, formatDueDate, isOverdue } from "./PaymentRequestParts";
 
-// Quy trình một đề nghị thanh toán, 4 nút: 1 tạo → 2 gửi → 3 duyệt / từ chối → 4 lưu trữ hồ sơ.
-// Nút đang ở mở ra để thao tác, nút đã xong thu gọn kết quả, nút chưa tới bị khoá.
+// Quy trình một đề nghị thanh toán, 4 nút: 1 lên đề nghị & gửi → 2 duyệt / từ chối → 3 chi tiền (upload ủy nhiệm chi / ảnh
+// chuyển tiền) → 4 lưu trữ hồ sơ. Nút đang ở mở ra để thao tác, nút đã xong thu gọn kết quả, nút chưa tới bị khoá.
+// Thông báo bổ sung chứng từ gửi vào hộp chat Google Chat cá nhân của người đề nghị (họ không ở trong nhóm Chat duyệt).
 
 type NodeState = "done" | "current" | "rejected" | "locked";
 
@@ -35,6 +37,8 @@ const NODE_STYLES: Record<NodeState, { circle: string; line: string; label: stri
   locked: { circle: "bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400", line: "bg-gray-200 dark:bg-gray-700", label: "text-gray-400" },
 };
 
+/** Mỏ neo bước chi tiền (nút "Upload UNC" trên thẻ Google Chat mở .../payment-requests/<mã>#chi-tien). */
+const PAYMENT_ANCHOR = "chi-tien";
 const nodeIcon = (state: NodeState, index: number) => (state === "done" ? "✓" : state === "rejected" ? "✕" : String(index + 1));
 /** Chờ duyệt trên Google Chat: chu kỳ hỏi lại trạng thái đề nghị. */
 const POLL_MS = 8000;
@@ -57,11 +61,11 @@ function Stepper({ titles, states }: { titles: string[]; states: NodeState[] }) 
   );
 }
 
-function NodeCard({ index, title, state, last = false, children }: { index: number; title: string; state: NodeState; last?: boolean; children: React.ReactNode }) {
+function NodeCard({ index, title, state, last = false, anchor, children }: { index: number; title: string; state: NodeState; last?: boolean; anchor?: string; children: React.ReactNode }) {
   const { t } = useLanguage();
   const open = state === "current" || state === "rejected";
   return (
-    <li className="relative flex gap-3 sm:gap-4">
+    <li id={anchor} className="relative flex scroll-mt-20 gap-3 sm:gap-4">
       {!last && <span className={`absolute left-4 top-9 bottom-0 w-0.5 -translate-x-1/2 ${state === "done" ? NODE_STYLES.done.line : NODE_STYLES.locked.line}`} aria-hidden="true" />}
       <span className={`relative z-[1] flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${NODE_STYLES[state].circle}`}>{nodeIcon(state, index)}</span>
       <section className={`mb-4 min-w-0 flex-1 rounded-2xl border p-4 sm:p-5 ${open ? (state === "rejected" ? "border-error-200 bg-white dark:border-error-500/30 dark:bg-white/[0.03]" : "border-brand-300 bg-white shadow-theme-xs dark:border-brand-500/40 dark:bg-white/[0.03]") : state === "locked" ? "border-dashed border-gray-200 bg-gray-50/60 dark:border-gray-800 dark:bg-transparent" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"}`}>
@@ -69,6 +73,75 @@ function NodeCard({ index, title, state, last = false, children }: { index: numb
         <div className="mt-2">{state === "locked" ? <p className="text-sm text-gray-400">{t("prNodeLocked")}</p> : children}</div>
       </section>
     </li>
+  );
+}
+
+/**
+ * Nút "Báo thiếu chứng từ" + ô nhập mở ngay dưới nút: gửi vào hộp chat Google Chat cá nhân của người đề nghị (người kiểm
+ * tra hồ sơ / người duyệt dùng khi cần bổ sung chứng từ để duyệt hoặc lưu trữ).
+ */
+function MissingDocumentsNotice({ requestId, creatorName, disabled }: { requestId: string; creatorName: string; disabled: boolean }) {
+  const { t } = useLanguage();
+  const { notify } = useSystemNotification();
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [sending, setSending] = useState(false);
+  const [touched, setTouched] = useState(false);
+  const inputId = `pr-missing-note-${requestId}`;
+  const noteError = touched && !note.trim() ? t("prMissingNoteRequired") : "";
+
+  const send = async () => {
+    const text = note.trim();
+    setTouched(true);
+    if (sending) return;
+    if (!text) {
+      notify(t("prMissingNoteRequired"), "error");
+      return;
+    }
+    setSending(true);
+    try {
+      const result = await notifyMissingPaymentDocuments(requestId, text);
+      notify(t("prMissingSent", { name: result.requesterName || creatorName || "—" }), "success");
+      setNote("");
+      setTouched(false);
+      setOpen(false);
+    } catch (missingError) {
+      notify(missingError instanceof Error ? missingError.message : String(missingError), "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen((value) => !value)} disabled={disabled || sending} aria-expanded={open}
+        className="h-11 w-full rounded-lg border border-warning-300 px-5 text-sm font-semibold text-warning-700 hover:bg-warning-50 disabled:opacity-50 sm:w-auto dark:border-warning-500/40 dark:text-warning-300 dark:hover:bg-warning-500/10">
+        {t("prMissingButton")}
+      </button>
+      {open && (
+        <div className="mt-3 rounded-xl border border-warning-200 bg-warning-50/60 p-3 dark:border-warning-500/30 dark:bg-warning-500/5">
+          <label htmlFor={inputId} className="block text-sm font-semibold text-gray-800 dark:text-white/90">{t("prMissingLabel")}</label>
+          <p className="mt-0.5 text-xs text-gray-500">{t("prMissingHint", { name: creatorName || "—" })}</p>
+          <textarea id={inputId} value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={1000}
+            placeholder={t("prMissingPlaceholder")} autoFocus aria-invalid={Boolean(noteError)}
+            className={`mt-2 w-full min-w-0 rounded-lg border bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-400 dark:bg-gray-900 dark:text-white ${noteError ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
+          <div className="flex justify-between gap-2 text-xs">
+            {noteError ? <span className="text-error-600 dark:text-error-400">{noteError}</span> : <span />}
+            <span className="shrink-0 tabular-nums text-gray-400">{note.length}/1000</span>
+          </div>
+          <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={() => { setOpen(false); setNote(""); setTouched(false); }} disabled={sending}
+              className="h-10 w-full rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 sm:w-auto dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">
+              {t("cancel")}
+            </button>
+            <button type="button" onClick={() => void send()} disabled={sending}
+              className="h-10 w-full rounded-lg bg-warning-600 px-4 text-sm font-semibold text-white hover:bg-warning-700 disabled:opacity-50 sm:w-auto">
+              {sending ? t("prSaving") : t("prMissingSend")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -81,10 +154,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "download" | "approve" | "reject" | "missing">("");
-  // Báo thiếu chứng từ (bước lưu trữ): ô nhập mở ngay dưới nút, gửi lên Google Chat kèm tag người đề nghị.
-  const [missingOpen, setMissingOpen] = useState(false);
-  const [missingNote, setMissingNote] = useState("");
+  const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "download" | "approve" | "reject">("");
   const [fileCount, setFileCount] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -100,12 +170,14 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
 
   const reload = useCallback(() => setReloadKey((key) => key + 1), []);
 
-  // Đã gửi, đang chờ duyệt trên Google Chat: hỏi lại BE mỗi POLL_MS (tab đang mở) và ngay khi quay lại tab, có kết quả
-  // duyệt / từ chối (hoặc ai đó sửa / hủy) thì cập nhật trang luôn, không cần F5. Đang sửa đề nghị thì không hỏi.
+  // Đã gửi, đang chờ duyệt hoặc chờ chi tiền (duyệt / gửi ủy nhiệm chi có thể làm trên Google Chat): hỏi lại BE mỗi POLL_MS
+  // (tab đang mở) và ngay khi quay lại tab, có thay đổi thì cập nhật trang luôn, không cần F5. Đang sửa đề nghị thì không hỏi.
   const awaitingDecision = Boolean(request && request.sent && request.status === 0 && !editing);
+  const awaitingUpdate = Boolean(request && request.sent && (request.status === 0 || request.status === 1) && !editing);
   const currentVersion = request?.updatedAt || "";
+  const currentStatus = request?.status ?? 0;
   useEffect(() => {
-    if (!awaitingDecision) return undefined;
+    if (!awaitingUpdate) return undefined;
     let stopped = false;
     let running = false;
     const check = async () => {
@@ -113,9 +185,10 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
       running = true;
       try {
         const fresh = await getPaymentRequest(id);
-        if (stopped || (fresh.status === 0 && fresh.updatedAt === currentVersion && fresh.sent)) return;
+        if (stopped || (fresh.status === currentStatus && fresh.updatedAt === currentVersion && fresh.sent)) return;
         setRequest(fresh);
         if (fresh.status === 1) notify(t("prLiveApproved", { id: fresh.id, name: fresh.approverName || "—" }), "success");
+        else if (fresh.status === 3) notify(t("prLivePaid", { id: fresh.id }), "success");
         else if (fresh.status === -1) notify(t("prLiveRejected", { id: fresh.id, name: fresh.approverName || "—" }), "error");
       } catch {
         // Lỗi mạng tạm thời: lần sau hỏi lại.
@@ -131,7 +204,14 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [awaitingDecision, currentVersion, id, notify, t]);
+  }, [awaitingUpdate, currentStatus, currentVersion, id, notify, t]);
+
+  // Link từ nút "Upload UNC" trên thẻ Google Chat (#chi-tien): cuộn tới bước chi tiền khi trang đã tải xong.
+  const loaded = Boolean(request);
+  useEffect(() => {
+    if (!loaded || window.location.hash !== `#${PAYMENT_ANCHOR}`) return;
+    document.getElementById(PAYMENT_ANCHOR)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [loaded]);
 
   if (error && !request) {
     return (
@@ -155,14 +235,28 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const canEdit = canManage && (request.status === 0 || request.status === -1);
   // Chứng từ upload dần (tạm) cho tới khi bấm "Đầy đủ chứng từ"; đề nghị đã hủy / hoàn thành thì khóa.
   const canUploadDocs = (isOwner || can("paymentDocuments", "edit")) && request.status !== 2 && !cancelled;
-  const canArchive = can("paymentDocuments", "edit") && request.status === 1;
-  const canApprove = can("paymentApprove", "edit") && request.status === 0 && request.sent;
+  // Chi tiền (upload ủy nhiệm chi): người duyệt / được ủy quyền / người lưu trữ chứng từ — BE trả can_record_payment.
+  const canRecordPayment = request.canRecordPayment === true;
+  const canUploadProof = canRecordPayment && (request.status === 1 || request.status === 3);
+  // Lưu trữ (đầy đủ chứng từ) chỉ sau khi đã chi tiền.
+  const canArchive = can("paymentDocuments", "edit") && request.status === 3;
+  // Báo thiếu chứng từ vào Chat cá nhân người đề nghị: khi đã gửi và chưa lưu trữ / hủy.
+  const canSendMissing = canRecordPayment && ((request.status === 0 && sent) || request.status === 1 || request.status === 3);
+  // Luồng đỏ chỉ kế toán được duyệt / từ chối: BE trả can_decide theo người đang xem.
+  const awaitingSentDecision = request.status === 0 && request.sent;
+  const canApprove = can("paymentApprove", "edit") && request.canDecide !== false && awaitingSentDecision;
+  const redFlowBlocked = can("paymentApprove", "edit") && request.canDecide === false && awaitingSentDecision;
   const money = (value: string) => formatMoney(value, request.currency, language);
+  const paidOrArchived = request.status === 3 || request.status === 2;
   const states: NodeState[] = [
-    editing ? "current" : "done",
-    editing || (cancelled && !sent) ? "locked" : !sent ? "current" : "done",
-    editing ? "locked" : cancelled ? "rejected" : !sent ? "locked" : request.status === 0 ? "current" : request.status === -1 ? "rejected" : "done",
-    editing ? "locked" : request.status === 1 ? "current" : request.status === 2 ? "done" : "locked",
+    // 1 Lên đề nghị & gửi
+    editing ? "current" : cancelled && !sent ? "rejected" : !sent ? "current" : "done",
+    // 2 Duyệt
+    editing || !sent ? "locked" : cancelled ? "rejected" : request.status === 0 ? "current" : request.status === -1 ? "rejected" : "done",
+    // 3 Chi tiền
+    editing ? "locked" : request.status === 1 ? "current" : paidOrArchived ? "done" : "locked",
+    // 4 Lưu trữ hồ sơ
+    editing ? "locked" : request.status === 3 ? "current" : request.status === 2 ? "done" : "locked",
   ];
   const titles = [t("prNode1"), t("prNode2"), t("prNode3"), t("prNode4")];
 
@@ -236,7 +330,11 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const rejectRequest = async () => {
     if (busy || !canApprove) return;
     const note = window.prompt(t("prRejectReason"));
-    if (!note?.trim()) return;
+    if (note === null) return; // bấm Huỷ
+    if (!note.trim()) {
+      notify(t("prRejectReasonRequired"), "error");
+      return;
+    }
     setBusy("reject");
     try {
       setRequest(await rejectPaymentRequest(request.id, note.trim()));
@@ -255,23 +353,6 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
       notify(t("prArchived", { id: request.id }), "success");
     } catch (archiveError) {
       notify(archiveError instanceof Error ? archiveError.message : String(archiveError), "error");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const sendMissingDocuments = async () => {
-    const note = missingNote.trim();
-    if (busy || !note) return;
-    setBusy("missing");
-    try {
-      const result = await notifyMissingPaymentDocuments(request.id, note);
-      const name = result.requesterName || request.creatorName || "—";
-      notify(result.mentioned ? t("prMissingSent", { name }) : t("prMissingSentNoTag", { name }), result.mentioned ? "success" : "warning");
-      setMissingNote("");
-      setMissingOpen(false);
-    } catch (missingError) {
-      notify(missingError instanceof Error ? missingError.message : String(missingError), "error");
     } finally {
       setBusy("");
     }
@@ -356,53 +437,52 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                 ))}
               </ul>
               {canEdit && <button type="button" onClick={startEdit} className={`${BUTTON_SECONDARY} w-full sm:w-auto`}>✎ {t("prEditRequest")}</button>}
-            </div>
-          )}
-        </NodeCard>
 
-        {/* 2. Gửi đề nghị (kèm nút in / lưu PDF Giấy đề nghị thanh toán) */}
-        <NodeCard index={1} title={titles[1]} state={states[1]}>
-          {!sent ? (
-            canManage && !cancelled ? (
-              <div className="space-y-3">
-                {/* Đính kèm hóa đơn nháp / chứng từ trước khi gửi: thẻ Google Chat hiện link từng file. */}
-                <div className="rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
-                  <p className="mb-2 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prAttachBeforeSend")}</p>
-                  <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} onFilesChange={setFileCount} onUploaded={reload} />
-                </div>
-                <p className="text-sm text-gray-600 dark:text-gray-300">{t("prReviewHint")}</p>
-                <button type="button" onClick={() => void send()} disabled={busy !== ""} className={`${BUTTON_PRIMARY} w-full sm:w-auto`}>
-                  {busy === "send" ? t("prSending") : `➤ ${t("prConfirmSend")}`}
+              {/* Gửi đề nghị lên Google Chat (kèm chứng từ đính kèm) */}
+              <div className="border-t border-gray-100 pt-3 dark:border-gray-800">
+                {!sent ? (
+                  canManage && !cancelled ? (
+                    <div className="space-y-3">
+                      {/* Đính kèm hóa đơn nháp / chứng từ trước khi gửi: thẻ Google Chat hiện link từng file. */}
+                      <div className="rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
+                        <p className="mb-2 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prAttachBeforeSend")}</p>
+                        <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} onFilesChange={setFileCount} onUploaded={reload} />
+                      </div>
+                      <p className="text-sm text-gray-600 dark:text-gray-300">{t("prReviewHint")}</p>
+                      <button type="button" onClick={() => void send()} disabled={busy !== ""} className={`${BUTTON_PRIMARY} w-full sm:w-auto`}>
+                        {busy === "send" ? t("prSending") : `➤ ${t("prConfirmSend")}`}
+                      </button>
+                    </div>
+                  ) : <p className="text-sm text-gray-500">{cancelled ? `🚫 ${t("prCancelledInfo", { time: formatDateTime(request.updatedAt, language) })}` : t("prDraftOther")}</p>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm text-gray-700 dark:text-gray-200">✓ {t("prSentAt")}</p>
+                    {canManage && request.status === 0 && (
+                      <button type="button" onClick={() => void send()} disabled={busy !== ""} className={BUTTON_SECONDARY}>{busy === "send" ? t("prSending") : t("prResendChat")}</button>
+                    )}
+                  </div>
+                )}
+                <button type="button" onClick={() => void openPrint()} disabled={busy !== ""} title={t("prDownloadHint")}
+                  className="mt-2 inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium text-brand-600 hover:bg-brand-50 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-500/10">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2" />
+                    <rect x="6" y="14" width="12" height="7" />
+                  </svg>
+                  {busy === "download" ? t("prDownloading") : t("prDownload")}
                 </button>
               </div>
-            ) : <p className="text-sm text-gray-500">{t("prDraftOther")}</p>
-          ) : (
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm text-gray-700 dark:text-gray-200">✓ {t("prSentAt")}</p>
-              {canManage && request.status === 0 && (
-                <button type="button" onClick={() => void send()} disabled={busy !== ""} className={BUTTON_SECONDARY}>{busy === "send" ? t("prSending") : t("prResendChat")}</button>
-              )}
             </div>
           )}
-          <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
-            <button type="button" onClick={() => void openPrint()} disabled={busy !== ""} title={t("prDownloadHint")}
-              className="inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium text-brand-600 hover:bg-brand-50 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-500/10">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2" />
-                <rect x="6" y="14" width="12" height="7" />
-              </svg>
-              {busy === "download" ? t("prDownloading") : t("prDownload")}
-            </button>
-          </div>
         </NodeCard>
 
-        {/* 3. Duyệt / từ chối */}
-        <NodeCard index={2} title={titles[2]} state={states[2]}>
+        {/* 2. Duyệt / từ chối */}
+        <NodeCard index={1} title={titles[1]} state={states[1]}>
           {request.status === 0 && (
             <div className="space-y-2">
               <p className="flex items-center gap-2 text-sm font-medium text-warning-700 dark:text-warning-300"><span className="h-2 w-2 animate-pulse rounded-full bg-warning-500" />{t("prWaitingApproval")}</p>
               <p className="text-sm text-gray-600 dark:text-gray-300">{t("prHowToApprove")}</p>
               {awaitingDecision && <p className="text-xs text-gray-500">{t("prLiveHint")}</p>}
+              {redFlowBlocked && <p className="border-t border-gray-100 pt-3 text-sm text-error-600 dark:border-gray-800 dark:text-error-400">{t("prRedFlowAccountantOnly")}</p>}
               {canApprove && (
                 <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-gray-800">
                   <p className="w-full text-xs text-gray-500">{t("prSystemApprovalHint")}</p>
@@ -418,9 +498,21 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                 <code className="rounded-lg bg-gray-100 px-3 py-2 font-mono text-sm text-gray-800 dark:bg-gray-800 dark:text-gray-100">@… {request.id}</code>
                 <button type="button" onClick={() => void copyCode()} className="h-9 rounded-lg px-3 text-sm font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-500/10">{copied ? t("prCopied") : t("prCopy")}</button>
               </div>
+              {/* Đang chờ duyệt: người đề nghị bổ sung chứng từ khi người duyệt yêu cầu (thông báo gửi vào Chat cá nhân của họ). */}
+              {sent && (canUploadDocs || canSendMissing) && (
+                <div className="space-y-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+                  {canUploadDocs && (
+                    <>
+                      <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prDocsDuringApproval")}</p>
+                      <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} onFilesChange={setFileCount} onUploaded={reload} />
+                    </>
+                  )}
+                  {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
+                </div>
+              )}
             </div>
           )}
-          {(request.status === 1 || request.status === 2) && (
+          {(request.status === 1 || paidOrArchived) && (
             <div className="space-y-2">
               <p className="text-sm text-success-700 dark:text-success-300">✓ {t("prApprovedBy", { name: request.approverName || "—", time: formatDateTime(request.updatedAt, language) })}</p>
               {/* Ghi chú người duyệt nhập trên Google Chat (không bắt buộc) */}
@@ -439,45 +531,49 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
           )}
         </NodeCard>
 
-        {/* 4. Lưu trữ hồ sơ */}
+        {/* 3. Chi tiền: upload ủy nhiệm chi / ảnh chuyển tiền -> đã chi tiền (thẻ Google Chat có nút mở thẳng bước này) */}
+        <NodeCard index={2} title={titles[2]} state={states[2]} anchor={PAYMENT_ANCHOR}>
+          <div className="space-y-3">
+            {request.status === 1 && (
+              <p className="flex items-center gap-2 text-sm font-medium text-warning-700 dark:text-warning-300"><span className="h-2 w-2 animate-pulse rounded-full bg-warning-500" />{t("prWaitPayment")}</p>
+            )}
+            {paidOrArchived && <p className="text-sm font-medium text-success-700 dark:text-success-300">✓ {t("prPaidDone")}</p>}
+            <div className="rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
+              <p className="mb-2 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prProofTitle")}</p>
+              <PaymentDocumentsPanel requestId={request.id} kind={PAYMENT_PROOF} canUpload={canUploadProof} onUploaded={reload} />
+              {canUploadProof && request.status === 1 && <p className="mt-2 text-xs text-gray-500">{t("prPaymentChatHint", { id: request.id })}</p>}
+            </div>
+            {/* Chờ chi tiền: vẫn bổ sung được chứng từ hồ sơ / báo người đề nghị bổ sung. */}
+            {request.status === 1 && (canUploadDocs || canSendMissing) && (
+              <div className="space-y-3 rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
+                {canUploadDocs && (
+                  <>
+                    <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prDocsTitle")}</p>
+                    <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} onFilesChange={setFileCount} onUploaded={reload} />
+                  </>
+                )}
+                {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
+              </div>
+            )}
+          </div>
+        </NodeCard>
+
+        {/* 4. Lưu trữ hồ sơ (sau khi đã chi tiền) */}
         <NodeCard index={3} title={titles[3]} state={states[3]} last>
-          <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} onFilesChange={setFileCount} onUploaded={reload} />
-          {request.status === 1 && (
+          <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} onFilesChange={setFileCount} onUploaded={reload} />
+          {request.status === 3 && (
             <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
               {fileCount > 0 && <p className="mb-3 rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("prDocsDraftHint", { count: fileCount })}</p>}
-              {canArchive ? (
-                <>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                    <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0} className={`h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto`}>
-                      {busy === "archive" ? t("prSaving") : `🗄 ${t("prArchive")}`}
-                    </button>
-                    <button type="button" onClick={() => setMissingOpen((open) => !open)} disabled={busy !== ""} aria-expanded={missingOpen}
-                      className="h-11 w-full rounded-lg border border-warning-300 px-5 text-sm font-semibold text-warning-700 hover:bg-warning-50 disabled:opacity-50 sm:w-auto dark:border-warning-500/40 dark:text-warning-300 dark:hover:bg-warning-500/10">
-                      {t("prMissingButton")}
-                    </button>
-                  </div>
-                  {fileCount === 0 && <p className="mt-2 text-xs text-gray-500">{t("prArchiveNeedsFile")}</p>}
-                  {missingOpen && (
-                    <div className="mt-3 rounded-xl border border-warning-200 bg-warning-50/60 p-3 dark:border-warning-500/30 dark:bg-warning-500/5">
-                      <label htmlFor="pr-missing-note" className="block text-sm font-semibold text-gray-800 dark:text-white/90">{t("prMissingLabel")}</label>
-                      <p className="mt-0.5 text-xs text-gray-500">{t("prMissingHint", { name: request.creatorName || "—" })}</p>
-                      <textarea id="pr-missing-note" value={missingNote} onChange={(event) => setMissingNote(event.target.value)} rows={3} maxLength={1000}
-                        placeholder={t("prMissingPlaceholder")} autoFocus
-                        className="mt-2 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
-                      <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                        <button type="button" onClick={() => { setMissingOpen(false); setMissingNote(""); }} disabled={busy === "missing"}
-                          className="h-10 w-full rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 sm:w-auto dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">
-                          {t("cancel")}
-                        </button>
-                        <button type="button" onClick={() => void sendMissingDocuments()} disabled={busy !== "" || !missingNote.trim()}
-                          className="h-10 w-full rounded-lg bg-warning-600 px-4 text-sm font-semibold text-white hover:bg-warning-700 disabled:opacity-50 sm:w-auto">
-                          {busy === "missing" ? t("prSaving") : t("prMissingSend")}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : <p className="text-sm text-gray-500">{t("prWaitArchive")}</p>}
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
+                {canArchive && (
+                  <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0} className="h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto">
+                    {busy === "archive" ? t("prSaving") : `🗄 ${t("prArchive")}`}
+                  </button>
+                )}
+                {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
+              </div>
+              {canArchive && fileCount === 0 && <p className="mt-2 text-xs text-gray-500">{t("prArchiveNeedsFile")}</p>}
+              {!canArchive && <p className="mt-2 text-sm text-gray-500">{t("prWaitArchive")}</p>}
             </div>
           )}
           {request.status === 2 && <p className="mt-3 text-sm font-medium text-success-700 dark:text-success-300">✓ {t("prCompletedHint")}</p>}

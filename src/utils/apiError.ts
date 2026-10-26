@@ -149,13 +149,19 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
     case "PAYMENT_REQUEST_NOT_FOUND":
       return "Không tìm thấy đề nghị thanh toán (có thể bạn không có quyền xem).";
     case "PAYMENT_REQUEST_FORBIDDEN":
-      return "Chỉ người tạo đề nghị hoặc kế toán được thao tác.";
+      return backendMessage || "Chỉ người tạo đề nghị hoặc kế toán được thao tác.";
     case "PAYMENT_REQUEST_CANCELLED":
     case "PAYMENT_REQUEST_LOCKED":
     case "PAYMENT_REQUEST_ALREADY_DECIDED":
     case "PAYMENT_REQUEST_NOT_APPROVED":
+    case "PAYMENT_REQUEST_NOT_PAID":
     case "PAYMENT_REQUEST_LINK_REQUIRED":
+    case "PAYMENT_REQUEST_NOTICE_NOT_ALLOWED":
       return backendMessage || "Trạng thái đề nghị đã thay đổi. Vui lòng tải lại.";
+    case "PAYMENT_REQUESTER_NO_CHAT":
+      return backendMessage || "Người đề nghị chưa mở chat với app Đề nghị thanh toán trên Google Chat, nên app chưa nhắn riêng được.";
+    case "GOOGLE_CHAT_SEND_FAILED":
+      return backendMessage || "Không gửi được thông báo vào Google Chat. Vui lòng thử lại.";
     case "PAYMENT_DOCUMENT_NOT_FOUND":
       return "Chứng từ không còn trong hồ sơ đề nghị. Vui lòng tải lại.";
     case "INVALID_FILE_ID":
