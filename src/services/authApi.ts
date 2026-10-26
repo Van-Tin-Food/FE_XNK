@@ -33,10 +33,15 @@ export async function startGoogleSignIn(consent = false): Promise<{ googleAuthUr
   return { googleAuthUrl: json.googleAuthUrl, state: json.state };
 }
 
-function storeTokenCookie(token: string): void {
+// Cookie phiên: tài khoản có email Google giữ lâu, vì phiên được gia hạn nhờ token Google (POST /api/auth/refresh, BE nhận
+// JWT hết hạn chưa quá 30 ngày). Tài khoản không có Google giữ 8 giờ như cũ. Hạn thật vẫn do JWT + BE quyết định.
+const GOOGLE_SESSION_COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
+const PASSWORD_SESSION_COOKIE_MAX_AGE = 8 * 60 * 60;
+
+function storeTokenCookie(token: string, maxAgeSeconds: number): void {
   if (typeof document === "undefined") return;
   const secure = window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${AUTH_TOKEN_COOKIE_KEY}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=28800${secure}`;
+  document.cookie = `${AUTH_TOKEN_COOKIE_KEY}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
 }
 
 function clearTokenCookie(): void {
@@ -54,12 +59,78 @@ function getTokenCookie(): string {
 
 function storeUser(user: AuthUser): AuthUser {
   if (typeof window !== "undefined") {
+    const hasGoogleEmail = Boolean(String(user.email || "").trim());
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
-    storeTokenCookie(user.token || "");
-    if (String(user.email || "").trim()) localStorage.setItem(GOOGLE_REAUTH_STORAGE_KEY, "1");
+    storeTokenCookie(user.token || "", hasGoogleEmail ? GOOGLE_SESSION_COOKIE_MAX_AGE : PASSWORD_SESSION_COOKIE_MAX_AGE);
+    if (hasGoogleEmail) localStorage.setItem(GOOGLE_REAUTH_STORAGE_KEY, "1");
     else localStorage.removeItem(GOOGLE_REAUTH_STORAGE_KEY);
   }
   return user;
+}
+
+/** Thời điểm cấp / hết hạn (ms) đọc từ payload JWT; null nếu không đọc được. Chỉ để hẹn giờ gia hạn, không để tin quyền. */
+function tokenTimes(token: string): { issuedAt: number; expiresAt: number } | null {
+  try {
+    const payload = token.split(".")[1] || "";
+    const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=")));
+    const issuedAt = Number(json.iat) * 1000;
+    const expiresAt = Number(json.exp) * 1000;
+    return Number.isFinite(issuedAt) && Number.isFinite(expiresAt) ? { issuedAt, expiresAt } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isTokenExpired(token: string): boolean {
+  const times = tokenTimes(token);
+  return Boolean(times && Date.now() >= times.expiresAt);
+}
+
+/** Còn dưới 1/4 thời hạn JWT (JWT 1 ngày: còn dưới 6 giờ) thì nên gia hạn. */
+export function sessionNeedsRefresh(token: string): boolean {
+  const times = tokenTimes(token);
+  if (!times) return false;
+  return Date.now() >= times.expiresAt - (times.expiresAt - times.issuedAt) / 4;
+}
+
+const refreshInFlight = new Map<string, Promise<AuthUser>>();
+
+/**
+ * Giữ phiên nhờ token Google: gửi JWT đang dùng (còn hạn hoặc vừa hết hạn) lên POST /api/auth/refresh, BE cấp JWT mới nếu
+ * tài khoản còn quyền Google. Chưa lưu vào trình duyệt — gọi saveRefreshedSession khi phiên vẫn là phiên đó.
+ * Gộp các lần gọi trùng cho cùng một token. Lỗi 401 = BE từ chối (không có / mất quyền Google, hết hạn quá lâu).
+ */
+export function refreshSession(token: string): Promise<AuthUser> {
+  const pending = refreshInFlight.get(token);
+  if (pending) return pending;
+  const apiPath = "/api/auth/refresh";
+  const task = (async () => {
+    try {
+      const res = await fetch(backendApiUrl(apiPath), {
+        method: "POST",
+        headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const { data, nonJsonPreview } = await parseApiResponse(res);
+      if (!res.ok) throw createHttpApiError("Gia hạn phiên đăng nhập", "POST", apiPath, res, data, nonJsonPreview);
+      if (data === null) throw createInvalidResponseError("Gia hạn phiên đăng nhập", "POST", apiPath, nonJsonPreview);
+      const user = extractUser(data as LoginResponse, "");
+      if (!user.token) throw new Error("Máy chủ chưa trả về token khi gia hạn phiên đăng nhập");
+      return user;
+    } catch (error) {
+      if (error instanceof TypeError) throw createNetworkApiError("Gia hạn phiên đăng nhập", "POST", apiPath, error);
+      throw error;
+    }
+  })().finally(() => {
+    refreshInFlight.delete(token);
+  });
+  refreshInFlight.set(token, task);
+  return task;
+}
+
+/** Lưu phiên vừa gia hạn (token mới + cookie mới). */
+export function saveRefreshedSession(user: AuthUser): AuthUser {
+  return storeUser(user);
 }
 
 /** Tự đăng xuất: lần sau vào màn đăng nhập không tự chuyển sang Google. */
@@ -80,7 +151,7 @@ export function takeGoogleReauth(): boolean {
 
 /**
  * Cập nhật role / quyền của phiên đang đăng nhập. Chỉ ghi localStorage, KHÔNG ghi lại cookie token:
- * ghi cookie sẽ đặt lại hạn 8 giờ mỗi lần tải trang, làm phiên đăng nhập kéo dài mãi.
+ * ghi cookie sẽ đặt lại hạn cookie mỗi lần tải trang. Phiên chỉ được kéo dài qua refreshSession (cần quyền Google).
  */
 function storeUserProfile(user: AuthUser): AuthUser {
   if (typeof window !== "undefined") localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
