@@ -133,6 +133,7 @@ export async function exportCostOverviewExcel({ overview, t }: { overview: CostO
 
   // ---------- Chi tiết ----------
   const detailSheet = table(costs, [
+    { label: t("cmRequest"), value: (row) => row.requestId, width: 12 },
     { label: t("mcCreatedAt"), value: (row) => formatDateTime(row.createdAt), width: 16 },
     { label: t("cmCostId"), value: (row) => row.id, width: 20 },
     { label: t("cmKind"), value: (row) => kindLabel(row.kind), width: 26 },
@@ -148,7 +149,6 @@ export async function exportCostOverviewExcel({ overview, t }: { overview: CostO
     { label: t("cmVatRate"), value: (row) => (row.vat ? Number(row.vat) : ""), width: 8 },
     { label: t("cmTax"), value: (row) => (row.amount !== null && row.vat ? toNumber(splitVat(row.amount, row.vat, row.currency === "USD" || row.currency === "VND" ? row.currency : "").tax) : ""), width: 14 },
     { label: t("cmState"), value: (row) => t(`cmState_${costState(row)}`), width: 16 },
-    { label: t("cmRequest"), value: (row) => row.requestId, width: 12 },
     { label: t("cmEnteredBy"), value: (row) => row.userName, width: 20 },
   ]);
 

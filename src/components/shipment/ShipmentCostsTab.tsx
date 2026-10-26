@@ -296,11 +296,12 @@ export default function ShipmentCostsTab({ contract }: Props) {
                   <li key={cost.id} className="rounded-lg border border-dashed border-gray-200 p-2.5 dark:border-gray-700">
                     <div className="flex items-start gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="break-words text-sm font-medium text-gray-600 dark:text-gray-300" title={name}>{name}</p>
-                        {cost.note && <p className="break-words text-xs text-gray-500">{cost.note}</p>}
-                        <Link href={`/payment-requests/${encodeURIComponent(cost.requestId)}`} className="mt-1 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-brand-600 hover:underline dark:bg-gray-800 dark:text-brand-400">
+                        {/* Mã đề nghị chứa khoản này lên đầu (như các bảng chi phí khác). */}
+                        <Link href={`/payment-requests/${encodeURIComponent(cost.requestId)}`} className="mb-1 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-brand-600 hover:underline dark:bg-gray-800 dark:text-brand-400">
                           🔒 {t("pcLockedIn", { id: cost.requestId })}
                         </Link>
+                        <p className="break-words text-sm font-medium text-gray-600 dark:text-gray-300" title={name}>{name}</p>
+                        {cost.note && <p className="break-words text-xs text-gray-500">{cost.note}</p>}
                       </div>
                       <span className="shrink-0 pt-0.5 text-sm font-semibold tabular-nums text-gray-700 dark:text-gray-200">{money(cost.amount)}</span>
                     </div>

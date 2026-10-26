@@ -138,15 +138,17 @@ export default function MyCostsPage() {
       className={`${INPUT} mt-1`} />
   ) : cost.note ? <p className="break-words text-xs text-gray-600 dark:text-gray-300">{cost.note}</p> : null);
 
+  /** Mã đề nghị (cột đầu bảng / dòng đầu thẻ): link + trạng thái; khoản chưa vào đề nghị ghi "Chưa vào đề nghị". */
+  const requestCell = (cost: MyCost) => (cost.requestId ? (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <Link href={`/payment-requests/${encodeURIComponent(cost.requestId)}`} className="font-mono text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400">{cost.requestId}</Link>
+      {cost.requestStatus !== null && <PaymentStatusBadge status={cost.requestStatus} draft={!cost.requestSent} />}
+    </span>
+  ) : <span className="text-xs text-gray-400">{t("mcScope_free")}</span>);
+
+  /** Sửa / xóa: chỉ khoản chưa vào đề nghị. */
   const actions = (cost: MyCost) => {
-    if (cost.requestId) {
-      return (
-        <span className="flex flex-wrap items-center gap-2">
-          <Link href={`/payment-requests/${encodeURIComponent(cost.requestId)}`} className="font-mono text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400">{cost.requestId}</Link>
-          {cost.requestStatus !== null && <PaymentStatusBadge status={cost.requestStatus} draft={!cost.requestSent} />}
-        </span>
-      );
-    }
+    if (cost.requestId) return null;
     if (editing?.id === cost.id) {
       return (
         <span className="flex gap-2">
@@ -207,6 +209,7 @@ export default function MyCostsPage() {
             <ul className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 lg:hidden">
               {costs.map((cost) => (
                 <li key={cost.id} className="flex min-w-0 flex-col gap-2 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+                  {requestCell(cost)}
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="break-words text-sm font-medium text-gray-800 dark:text-white/90">{cost.categoryName}</p>
@@ -229,16 +232,18 @@ export default function MyCostsPage() {
               <table className="w-full min-w-[960px] table-fixed text-left">
                 <thead className="bg-gray-50 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:bg-gray-900 dark:text-gray-400">
                   <tr>
-                    <th className="w-[26%] px-4 py-3">{t("mcFee")}</th>
-                    <th className="w-[24%] px-4 py-3">{t("mcTarget")}</th>
-                    <th className="w-[16%] px-4 py-3 text-right">{t("prCostAmount")}</th>
+                    <th className="w-[17%] px-4 py-3">{t("mcRequestCode")}</th>
+                    <th className="w-[23%] px-4 py-3">{t("mcFee")}</th>
+                    <th className="w-[19%] px-4 py-3">{t("mcTarget")}</th>
+                    <th className="w-[14%] px-4 py-3 text-right">{t("prCostAmount")}</th>
                     <th className="w-[12%] px-4 py-3">{t("mcCreatedAt")}</th>
-                    <th className="w-[22%] px-4 py-3">{t("mcRequest")}</th>
+                    <th className="w-[15%] px-4 py-3">{t("mcActions")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {costs.map((cost) => (
                     <tr key={cost.id} className="align-middle">
+                      <td className="px-4 py-3">{requestCell(cost)}</td>
                       <td className="px-4 py-3">
                         <p className="truncate text-sm font-medium text-gray-800 dark:text-white/90" title={cost.categoryName}>{cost.categoryName}</p>
                         {noteCell(cost)}
