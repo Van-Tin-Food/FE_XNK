@@ -30,6 +30,8 @@ import {
 } from "@/utils/internationalNumber";
 import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@/utils/documentFile";
 import UploadProgressToast from "@/components/common/UploadProgressToast";
+import UploadBatchProgressToast, { type UploadBatchFile } from "@/components/common/UploadBatchProgressToast";
+import { runWithConcurrency } from "@/utils/concurrency";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import ShipmentCostsTab from "./ShipmentCostsTab";
 import OcrLoadingCard, { InlineSpinner } from "./OcrLoadingCard";
@@ -429,6 +431,15 @@ function formatUploadDateTime(value: string | null | undefined, language: string
 
 /** File đang gửi lên Google Drive: hiện thanh tiến độ trong modal. */
 type UploadProgressState = { fileName: string; index: number; total: number; loaded: number; size: number };
+type UploadTargetParams = { transportCode?: string; folderNote?: string; containerFolderName?: string };
+/** Số file upload cùng lúc trong một lượt (nhiều hơn dễ nghẽn mạng / bị Google giới hạn tốc độ). */
+const UPLOAD_CONCURRENCY = 3;
+
+/** Số file của một chứng từ trong kết quả tiến độ (để không ghi đè kết quả mới hơn bằng kết quả về muộn). */
+function progressFileCount(progress: DocumentProgressResponse | null | undefined, docId: string): number {
+  const entry = progress?.documents?.[docId.toUpperCase()] as { files?: unknown[] } | undefined;
+  return Array.isArray(entry?.files) ? entry.files.length : 0;
+}
 
 type OcrDocumentType = "PI" | "INV" | "PKL" | "BL";
 
@@ -1252,7 +1263,11 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   const [ocrUploadDocId, setOcrUploadDocId] = useState<string | null>(null);
   const [ocrUploadFile, setOcrUploadFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
-  const isUploadingFile = uploadProgress !== null;
+  // Lượt upload nhiều file (chạy song song): trạng thái từng file cho thẻ tiến độ.
+  const [batchUploadFiles, setBatchUploadFiles] = useState<UploadBatchFile[] | null>(null);
+  // Lượt upload có file lỗi: giữ lại file để bấm "Thử lại" mà không phải chọn lại.
+  const [failedUploadRetry, setFailedUploadRetry] = useState<{ docId: string; files: File[]; target: UploadTargetParams } | null>(null);
+  const isUploadingFile = uploadProgress !== null || batchUploadFiles !== null;
   const [ocrUploadRequestId, setOcrUploadRequestId] = useState("");
   const pendingUploadRequestIds = React.useRef(new Map<string, string>());
   const [ocrUploadRows, setOcrUploadRows] = useState<Array<Record<string, string>>>([]);
@@ -1734,7 +1749,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   const isUploadTargetReady = (docId: string) => !CONTAINER_FOLDER_DOCUMENT_CODES.has(docId)
     || Boolean(docId === "INSPECTION" && selectedInspectionFolder)
     || Boolean(getContainerCode(docId));
-  const getUploadTargetParams = (docId: string): { transportCode?: string; folderNote?: string; containerFolderName?: string } => {
+  const getUploadTargetParams = (docId: string): UploadTargetParams => {
     if (docId === "INSPECTION" && selectedInspectionFolder) {
       return {
         containerFolderName: selectedInspectionFolder.folderName,
@@ -1944,6 +1959,121 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     }
   };
 
+  /**
+   * Upload nhiều file chứng từ (không OCR) thẳng lên Google Drive. File đầu chạy một mình (tạo thư mục container nếu
+   * cần, tránh hai file cùng tạo trùng thư mục), các file sau chạy song song tối đa UPLOAD_CONCURRENCY. Một file lỗi
+   * không dừng file khác; file nào lưu xong hiện ngay trong danh sách chứng từ. Gọi sau khi đã kiểm tra trùng tên.
+   */
+  const uploadDocumentFiles = async (docId: string, files: File[], uploadTarget: UploadTargetParams) => {
+    // Cả lượt chỉ thành một thông báo Google Chat ("đã upload N file").
+    const uploadBatch = createUploadBatch(files.length);
+    const uploadedNames: string[] = [];
+    const failures: string[] = [];
+    const failedFiles: File[] = [];
+    let lastContainerFolderName = "";
+    const updateFile = (index: number, patch: Partial<UploadBatchFile>) => setBatchUploadFiles((current) => (
+      current ? current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)) : current
+    ));
+    setFailedUploadRetry(null);
+    setBatchUploadFiles(files.map((selectedFile, index) => ({
+      key: `${index}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`,
+      fileName: selectedFile.name,
+      size: selectedFile.size,
+      loaded: 0,
+      status: "queued",
+    })));
+
+    const uploadOne = async (selectedFile: File, index: number) => {
+      const fingerprint = `${shipment.orderCode}:${docId}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`;
+      const requestId = pendingUploadRequestIds.current.get(fingerprint) || crypto.randomUUID();
+      pendingUploadRequestIds.current.set(fingerprint, requestId);
+      updateFile(index, { status: "uploading" });
+      try {
+        const result = await uploadDocument(
+          { orderCode: shipment.orderCode, documentCode: docId, file: selectedFile, requestId, batch: uploadBatch, ...uploadTarget },
+          { onProgress: ({ loaded }) => updateFile(index, { loaded }) },
+        );
+        uploadedNames.push(selectedFile.name);
+        pendingUploadRequestIds.current.delete(fingerprint);
+        if (result.containerFolderName) lastContainerFolderName = result.containerFolderName;
+        updateFile(index, { status: "done", loaded: selectedFile.size });
+        // BE trả tiến độ chứng từ ngay sau khi lưu: file hiện trong danh sách luôn, không đợi cả lượt. Các file chạy song
+        // song có thể trả về lệch thứ tự nên chỉ nhận kết quả có ít nhất bằng số file đang hiện.
+        const progress = (result as { documentProgress?: DocumentProgressResponse }).documentProgress;
+        if (progress?.documents) {
+          setDocumentProgress((current) => (progressFileCount(progress, docId) >= progressFileCount(current, docId) ? progress : current));
+        }
+      } catch (uploadError) {
+        failures.push(`${selectedFile.name} (${uploadError instanceof Error ? uploadError.message : t("uploadDocumentFailed")})`);
+        failedFiles.push(selectedFile);
+        updateFile(index, { status: "failed" });
+      }
+    };
+
+    try {
+      await uploadOne(files[0], 0);
+      await runWithConcurrency(files.slice(1), UPLOAD_CONCURRENCY, (selectedFile, index) => uploadOne(selectedFile, index + 1));
+    } finally {
+      setBatchUploadFiles(null);
+    }
+
+    // Có file lỗi nên lượt không đủ số file: báo BE gửi thông báo cho các file đã lưu luôn.
+    if (uploadedNames.length > 0 && failures.length > 0) void finishDocumentUploadBatch(uploadBatch, docId);
+    if (uploadedNames.length > 0) {
+      recordActivity(user, {
+        action: "UPLOAD_DOCUMENT",
+        location: "ShipmentDetailModal/Documents",
+        detail: `Đã upload file chứng từ ${docId} cho đơn ${shipment.orderCode}; ${uploadedNames.join(", ")}${lastContainerFolderName ? `; thư mục ${lastContainerFolderName}` : ""}`,
+      });
+      // Lần upload sau mặc định vào thư mục ảnh vừa dùng.
+      if (docId === "INSPECTION" && lastContainerFolderName) setInspectionFolderChoice(lastContainerFolderName);
+      setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
+      await onRefresh?.();
+      try {
+        setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
+        setDocumentProgressError("");
+      } catch (progressError) {
+        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
+      }
+    }
+    if (failures.length === 0) {
+      notify(t("uploadDocumentsSuccess", { count: uploadedNames.length, document: docId }), "success");
+    } else {
+      const message = t("uploadDocumentsPartialFailure", { uploaded: uploadedNames.length, total: files.length, failures: failures.join("; ") });
+      setOcrUploadError(message);
+      setFailedUploadRetry({ docId, files: failedFiles, target: uploadTarget });
+      notify(message, "error");
+    }
+  };
+
+  /** Upload lại các file lỗi của lượt trước (kiểm tra trùng tên lại vì có file có thể đã lên Drive). */
+  const handleRetryFailedUploads = async () => {
+    const retry = failedUploadRetry;
+    if (!retry || retry.files.length === 0 || !canUploadDocuments || !canUploadDocumentType(user, retry.docId) || isArchived || isOcrAnalyzing || isOcrSaving) return;
+    setIsOcrSaving(true);
+    setOcrUploadError("");
+    try {
+      const nameCheck = await checkDocumentFileNames({
+        orderCode: shipment.orderCode,
+        documentCode: retry.docId,
+        fileNames: retry.files.map((selectedFile) => selectedFile.name),
+        ...retry.target,
+      });
+      if (nameCheck.hasDuplicates) {
+        const message = formatDuplicateFileNames(nameCheck);
+        setFailedUploadRetry(null);
+        setOcrUploadError(message);
+        notify(message, "error");
+        return;
+      }
+      await uploadDocumentFiles(retry.docId, retry.files, retry.target);
+    } catch (error) {
+      setOcrUploadError(error instanceof Error ? error.message : t("uploadDocumentFailed"));
+    } finally {
+      setIsOcrSaving(false);
+    }
+  };
+
   const handleUploadSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     const file = files[0];
@@ -1957,6 +2087,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     event.target.value = "";
     setAllowMultipleUpload(false);
     const documentType = getOcrDocumentType(docId);
+    setFailedUploadRetry(null);
     setOcrUploadError("");
     setOcrUploadRows([]);
     setPklTargetDetailIds([]);
@@ -1999,55 +2130,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         return;
       }
       if (!documentType) {
-        // Upload lần lượt từng file thẳng lên Google Drive; một file lỗi thì vẫn upload tiếp các file còn lại.
-        let lastUpload: Awaited<ReturnType<typeof uploadDocument>> | null = null;
-        const uploadedNames: string[] = [];
-        const failures: string[] = [];
-        // Cả lượt chọn file chỉ thành một thông báo Google Chat ("đã upload N file").
-        const uploadBatch = createUploadBatch(files.length);
-        for (const [index, selectedFile] of files.entries()) {
-          const fingerprint = `${shipment.orderCode}:${docId}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`;
-          const requestId = pendingUploadRequestIds.current.get(fingerprint) || crypto.randomUUID();
-          pendingUploadRequestIds.current.set(fingerprint, requestId);
-          setUploadProgress({ fileName: selectedFile.name, index: index + 1, total: files.length, loaded: 0, size: selectedFile.size });
-          try {
-            lastUpload = await uploadDocument(
-              { orderCode: shipment.orderCode, documentCode: docId, file: selectedFile, requestId, batch: uploadBatch, ...uploadTarget },
-              { onProgress: ({ loaded }) => setUploadProgress((current) => (current ? { ...current, loaded } : current)) },
-            );
-            uploadedNames.push(selectedFile.name);
-            pendingUploadRequestIds.current.delete(fingerprint);
-          } catch (uploadError) {
-            failures.push(`${selectedFile.name} (${uploadError instanceof Error ? uploadError.message : t("uploadDocumentFailed")})`);
-          }
-        }
-        setUploadProgress(null);
-        // Có file lỗi nên lượt không đủ số file: báo BE gửi thông báo cho các file đã lưu luôn.
-        if (uploadedNames.length > 0 && failures.length > 0) void finishDocumentUploadBatch(uploadBatch, docId);
-        if (uploadedNames.length > 0) {
-          recordActivity(user, {
-            action: "UPLOAD_DOCUMENT",
-            location: "ShipmentDetailModal/Documents",
-            detail: `Đã upload file chứng từ ${docId} cho đơn ${shipment.orderCode}; ${uploadedNames.join(", ")}${lastUpload?.containerFolderName ? `; thư mục ${lastUpload.containerFolderName}` : ""}`,
-          });
-          // Lần upload sau mặc định vào thư mục ảnh vừa dùng.
-          if (docId === "INSPECTION" && lastUpload?.containerFolderName) setInspectionFolderChoice(lastUpload.containerFolderName);
-          setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
-          await onRefresh?.();
-          try {
-            setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
-            setDocumentProgressError("");
-          } catch (progressError) {
-            setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
-          }
-        }
-        if (failures.length === 0) {
-          notify(t("uploadDocumentsSuccess", { count: uploadedNames.length, document: docId }), "success");
-        } else {
-          const message = t("uploadDocumentsPartialFailure", { uploaded: uploadedNames.length, total: files.length, failures: failures.join("; ") });
-          setOcrUploadError(message);
-          notify(message, "error");
-        }
+        await uploadDocumentFiles(docId, files, uploadTarget);
         return;
       }
       setIsOcrSaving(false);
@@ -3002,6 +3085,14 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
               </>
             )}
             {ocrUploadError && !ocrUploadFile && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
+            {ocrUploadError && !ocrUploadFile && failedUploadRetry && failedUploadRetry.files.length > 0 && (
+              <div className="mt-2 flex flex-wrap justify-end gap-2">
+                <button type="button" onClick={() => { setFailedUploadRetry(null); setOcrUploadError(""); }} disabled={isOcrSaving} className="min-h-9 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("close")}</button>
+                <button type="button" onClick={() => void handleRetryFailedUploads()} disabled={isOcrSaving || isOcrAnalyzing || isUploadingFile} className="min-h-9 rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">
+                  {t("retryFailedUploads", { count: failedUploadRetry.files.length })}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -3865,6 +3956,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
           total={uploadProgress.total}
         />
       )}
+      {batchUploadFiles && <UploadBatchProgressToast files={batchUploadFiles} />}
       {previewUrl && !isPreviewCollapsed && (
         <aside className={`fixed right-0 top-0 z-[100000] flex h-screen min-h-0 flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isPreviewMaximized ? "w-full" : "w-[92vw] md:w-1/2"}`}>
           <div className="flex min-h-14 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 py-2 sm:gap-3 sm:px-4 dark:border-gray-700">

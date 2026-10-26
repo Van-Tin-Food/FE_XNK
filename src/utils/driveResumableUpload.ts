@@ -2,8 +2,8 @@
 // startDocumentUpload). Không đi qua gateway Vercel nên không bị giới hạn 4,5 MB mỗi request.
 // File được gửi từng phần; mất mạng hoặc Google lỗi tạm thời thì hỏi Google đã nhận tới đâu rồi gửi tiếp.
 
-/** Mỗi phần 8 MB (Google yêu cầu bội số của 256 KB). */
-const CHUNK_BYTES = 8 * 1024 * 1024;
+/** Mỗi phần 16 MB (Google yêu cầu bội số của 256 KB): file lớn ít lần gửi hơn, rớt mạng thì gửi lại tối đa 16 MB. */
+const CHUNK_BYTES = 16 * 1024 * 1024;
 const MAX_RETRIES = 5;
 
 export interface UploadProgress {
