@@ -124,6 +124,8 @@ export interface PaymentRequest {
   paymentMethod: PaymentMethod | "";
   /** Chuyển khoản: thông tin người thụ hưởng (nhiều dòng: tên tài khoản, ngân hàng, số tài khoản, nội dung CK...). */
   transferInfo: string;
+  /** Mã ngân hàng (BIN) đã chọn từ danh sách (chuyển khoản trong nước); "" = chưa chọn / đề nghị cũ gõ tên tự do. */
+  bankBin: string;
   total: string;
   approverName: string;
   createdAt: string;
@@ -145,18 +147,33 @@ export interface PaymentRequest {
   costs: PaymentCost[];
 }
 
+/** Ngân hàng trong danh sách chọn (bảng payment_bank): bin = mã NAPAS 6 số dùng tạo mã VietQR. */
+export interface PaymentBank {
+  bin: string;
+  code: string;
+  shortName: string;
+  name: string;
+}
+
+/** Tên ngân hàng lưu vào thông tin chuyển khoản khi chọn từ danh sách: "Vietcombank - Ngân hàng TMCP Ngoại Thương Việt Nam". */
+export const bankLabel = (bank: PaymentBank) => (bank.name && bank.name !== bank.shortName ? `${bank.shortName} - ${bank.name}` : bank.shortName);
+
 export interface PaymentRequestOptions {
   categories: PaymentCategory[];
   contracts: Array<{ code: string; date: string; supplier: string }>;
   containers: Array<{ code: string; contract: string }>;
   /** Chi phí nhập sẵn ở tab Chi phí (container / hợp đồng) chưa thuộc đề nghị nào. */
   availableCosts: PaymentCost[];
+  /** Danh sách ngân hàng (chuyển khoản trong nước); rỗng = BE chưa có bảng ngân hàng. */
+  banks: PaymentBank[];
 }
 
 export interface PaymentBeneficiarySuggestion {
   so_tai_khoan: string;
   ten_nguoi_thu_huong?: string;
   ten_ngan_hang?: string;
+  /** Mã ngân hàng (BIN) nếu lần trước chọn từ danh sách. */
+  ma_ngan_hang?: string;
   dia_chi_nguoi_thu_huong?: string;
   ma_swift?: string;
   dia_chi_ngan_hang?: string;
@@ -181,6 +198,8 @@ export interface PaymentRequestInput {
   currency: PaymentCurrency;
   paymentMethod: PaymentMethod;
   transferInfo: string;
+  /** Mã ngân hàng (BIN) chọn từ danh sách — chuyển khoản trong nước, dùng tạo mã VietQR. */
+  bankBin?: string;
   dueDate: string;
   costs: PaymentCostInput[];
 }
@@ -294,6 +313,7 @@ function normalizeRequest(row: unknown): PaymentRequest | null {
     currency: row.loai_tien === "USD" ? "USD" : "VND",
     paymentMethod: (PAYMENT_METHODS as readonly string[]).includes(str(row.hinh_thuc_thanh_toan)) ? str(row.hinh_thuc_thanh_toan) as PaymentMethod : "",
     transferInfo: str(row.thong_tin_chuyen_khoan),
+    bankBin: isRecord(row.chuyen_khoan) ? str(row.chuyen_khoan.ma_ngan_hang) : "",
     total: str(row.tong_tien),
     approverName: str(row.approver_name) || str(row.approver_username),
     createdAt: str(row.ngay_tao),
@@ -322,6 +342,7 @@ const toBody = (input: PaymentRequestInput) => ({
   loai_tien: input.currency,
   hinh_thuc_thanh_toan: input.paymentMethod,
   thong_tin_chuyen_khoan: input.paymentMethod === "chuyen_khoan" ? input.transferInfo : null,
+  ma_ngan_hang: input.paymentMethod === "chuyen_khoan" && input.bankBin ? input.bankBin : null,
   han_thanh_toan: input.dueDate,
   costs: input.costs.map((cost) => ({
     ...(cost.id ? { id_payment_cost: cost.id } : {}),
@@ -376,6 +397,36 @@ export async function getPaymentRequestOptions(signal?: AbortSignal): Promise<Pa
     contracts: list(data.contracts).map((row) => ({ code: str(row.ma_hop_dong), date: str(row.ngay_hop_dong), supplier: str(row.ten_ncc) })).filter((row) => row.code),
     containers: list(data.containers).map((row) => ({ code: str(row.ma_container), contract: str(row.ma_hop_dong) })).filter((row) => row.code),
     availableCosts: list(data.availableCosts).map(normalizeCost).filter((cost): cost is PaymentCost => cost !== null),
+    banks: list(data.banks).map((row) => ({ bin: str(row.bin), code: str(row.ma_ngan_hang), shortName: str(row.ten_viet_tat), name: str(row.ten_ngan_hang) }))
+      .filter((bank) => /^\d{6}$/.test(bank.bin)),
+  };
+}
+
+/** Mã VietQR chuyển khoản của đề nghị (BE tạo ảnh PNG). available = false: không tạo được, reason cho biết vì sao. */
+export interface PaymentTransferQr {
+  available: boolean;
+  reason: string;
+  bankName: string;
+  account: string;
+  accountName: string;
+  amount: string;
+  content: string;
+  /** Ảnh PNG (data URL). */
+  image: string;
+}
+
+export async function getPaymentTransferQr(id: string, signal?: AbortSignal): Promise<PaymentTransferQr> {
+  const payload = await request<unknown>("GET", `/${encodeURIComponent(id)}/transfer-qr`, undefined, signal);
+  const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
+  return {
+    available: data.available === true && str(data.image).startsWith("data:image/png;base64,"),
+    reason: str(data.reason),
+    bankName: str(data.bankName),
+    account: str(data.account),
+    accountName: str(data.accountName),
+    amount: str(data.amount),
+    content: str(data.content),
+    image: str(data.image),
   };
 }
 
@@ -387,6 +438,7 @@ export async function searchPaymentBeneficiaries(q: string, kind: TransferKind, 
     so_tai_khoan: str(row.so_tai_khoan),
     ten_nguoi_thu_huong: str(row.ten_nguoi_thu_huong) || undefined,
     ten_ngan_hang: str(row.ten_ngan_hang) || undefined,
+    ma_ngan_hang: str(row.ma_ngan_hang) || undefined,
     dia_chi_nguoi_thu_huong: str(row.dia_chi_nguoi_thu_huong) || undefined,
     ma_swift: str(row.ma_swift) || undefined,
     dia_chi_ngan_hang: str(row.dia_chi_ngan_hang) || undefined,

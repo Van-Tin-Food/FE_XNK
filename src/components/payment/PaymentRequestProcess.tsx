@@ -21,6 +21,7 @@ import {
 } from "@/services/paymentRequestApi";
 import { formatMoney, splitVat } from "@/utils/paymentRequest";
 import PaymentDocumentsPanel from "./PaymentDocumentsPanel";
+import PaymentTransferQr from "./PaymentTransferQr";
 import PaymentRequestWizard from "./PaymentRequestWizard";
 import { PaymentFlowBadge, PaymentStatusBadge, RedFlowBadge, formatDateTime, formatDueDate, isOverdue } from "./PaymentRequestParts";
 
@@ -141,6 +142,17 @@ function MissingDocumentsNotice({ requestId, creatorName, disabled }: { requestI
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Thông tin chuyển khoản dạng chữ: chỉ hiện khi không có mã QR (khối QR đã ghi người nhận, tài khoản, nội dung). */
+function TransferInfoText({ text }: { text: string }) {
+  const { t } = useLanguage();
+  return (
+    <div className="text-sm">
+      <p className="text-gray-500">{t("prTransferInfo")}</p>
+      <p className="whitespace-pre-line break-words font-medium text-gray-800 dark:text-white/90">{text || "—"}</p>
     </div>
   );
 }
@@ -411,11 +423,13 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                 {request.costs[0] && (
                   <div><dt className="text-gray-500">{t("prCostTypeLabel")} / {t("prCostCodeLabel")}</dt><dd className="font-medium text-gray-800 dark:text-white/90">{t(`prType_${request.costs[0].type}`)} · {request.costs[0].code}</dd></div>
                 )}
-                {request.paymentMethod === "chuyen_khoan" && (
-                  <div className="col-span-2 sm:col-span-3"><dt className="text-gray-500">{t("prTransferInfo")}</dt>
-                    <dd className="whitespace-pre-line break-words font-medium text-gray-800 dark:text-white/90">{request.transferInfo || "—"}</dd></div>
-                )}
               </dl>
+              {/* Mã VietQR (chuyển khoản trong nước bằng VND), không có mã thì thông tin chuyển khoản dạng chữ. Đang chờ chi
+                  tiền thì cả hai nằm ở bước Chi tiền. */}
+              {request.paymentMethod === "chuyen_khoan" && request.status !== 1 && !editing && (
+                <PaymentTransferQr requestId={request.id} version={`${request.updatedAt}-${request.total}`}
+                  fallback={<TransferInfoText text={request.transferInfo} />} />
+              )}
               <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
                 {request.costs.map((cost) => (
                   <li key={cost.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2.5">
@@ -538,6 +552,11 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
           <div className="space-y-3">
             {request.status === 1 && (
               <p className="flex items-center gap-2 text-sm font-medium text-warning-700 dark:text-warning-300"><span className="h-2 w-2 animate-pulse rounded-full bg-warning-500" />{t("prWaitPayment")}</p>
+            )}
+            {/* Đang chờ chi tiền: mã QR ngay tại bước chi tiền để kế toán quét chuyển. */}
+            {request.status === 1 && request.paymentMethod === "chuyen_khoan" && (
+              <PaymentTransferQr requestId={request.id} version={`${request.updatedAt}-${request.total}`}
+                fallback={<TransferInfoText text={request.transferInfo} />} />
             )}
             {paidOrArchived && <p className="text-sm font-medium text-success-700 dark:text-success-300">✓ {t("prPaidDone")}</p>}
             <div className="rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">

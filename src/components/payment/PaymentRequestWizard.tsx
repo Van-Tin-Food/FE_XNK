@@ -24,6 +24,7 @@ import {
 } from "@/services/paymentRequestApi";
 import { addVat, formatAmount, formatMoney, parseAmountLoose, parseVatInput, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
 import { goodsPaymentKind } from "@/services/paymentCostApi";
+import BankPicker, { matchBank } from "./BankPicker";
 import { PaymentFlowBadge, formatDueDate } from "./PaymentRequestParts";
 
 // Bước 1 "Tạo đề nghị" dạng hỏi lần lượt: trả lời xong câu nào thì câu tiếp theo mới hiện ra, câu đã trả lời thu lại
@@ -198,6 +199,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">(editing?.paymentMethod || "");
   // Thông tin chuyển khoản (người thụ hưởng): một khối nhiều dòng, chọn chuyển khoản lần đầu thì điền sẵn khung mẫu.
   const [transferValues, setTransferValues] = useState<Record<string, string>>(() => parseTransferInfo(editing?.transferInfo || ""));
+  // Mã ngân hàng (BIN) chọn trong danh sách — chuyển khoản trong nước, để tạo mã VietQR.
+  const [bankBin, setBankBin] = useState(editing?.bankBin || "");
   // Gợi ý người thụ hưởng theo số tài khoản / IBAN đang gõ (tìm trong các đề nghị đã lưu, chờ ngừng gõ mới gọi BE).
   const [accountQuery, setAccountQuery] = useState("");
   const [beneficiarySuggestions, setBeneficiarySuggestions] = useState<PaymentBeneficiarySuggestion[]>([]);
@@ -270,9 +273,16 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const transferKind: TransferKind = internationalTransfer ? "international" : "domestic";
   const transferFields = TRANSFER_FIELDS[transferKind];
   const missingTransfer = transfer ? transferFields.filter((field) => field.required && !(transferValues[field.label] || "").trim()) : [];
+  // Ngân hàng (chuyển khoản trong nước): phải chọn trong danh sách để có mã BIN. Đề nghị cũ / gợi ý người thụ hưởng chưa có
+  // mã thì tự khớp khi tên trùng đúng một ngân hàng.
+  const banks = options?.banks || [];
+  const bankField = transferFields.find((field) => field.jsonKey === "ten_ngan_hang");
+  const bankText = bankField ? transferValues[bankField.label] || "" : "";
+  const effectiveBin = transferKind === "domestic" ? bankBin || matchBank(banks, bankText)?.bin || "" : "";
+  const bankMissing = transfer && transferKind === "domestic" && banks.length > 0 && Boolean(bankText.trim()) && !effectiveBin;
   const recipientValid = missingTransfer.length === 0;
   const money = (value: string | null | undefined) => (currency ? formatMoney(value, currency, language) : formatAmount(value, language));
-  const paymentDone = /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && Boolean(currency && paymentMethod && recipientValid);
+  const paymentDone = /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && Boolean(currency && paymentMethod && recipientValid) && !bankMissing;
   const complete = [costCount > 0 && otherValid && preparedVatValid, Boolean(content.trim()), paymentDone];
 
   // Gợi ý người thụ hưởng: chờ ngừng gõ rồi mới gọi BE, huỷ lần gọi cũ để kết quả cũ không đè kết quả mới.
@@ -377,6 +387,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     !currency && t("prErrCurrency"),
     !paymentMethod && t("prErrMethod"),
     missingTransfer.length > 0 && t("prErrTransfer", { fields: missingTransfer.map((field) => t(field.key)).join(", ") }),
+    bankMissing && t("prErrBank"),
   ].filter((issue): issue is string => Boolean(issue));
   const stepIssues = [costIssues, contentIssues, paymentIssues];
   const touchStep = (step: number) => [setOthersTouched, setContentTouched, setPaymentTouched][step](true);
@@ -410,6 +421,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
       if (value) values[field.label] = value;
     }
     setTransferValues((current) => ({ ...current, ...values }));
+    // Lần trước đã chọn ngân hàng trong danh sách: lấy luôn mã BIN; chưa có thì tự khớp theo tên (effectiveBin).
+    setBankBin(row.ma_ngan_hang || "");
     setAccountQuery("");
   };
 
@@ -432,6 +445,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         currency,
         paymentMethod,
         transferInfo: transferText,
+        bankBin: transfer ? effectiveBin || undefined : undefined,
         dueDate,
         costs: [
           ...selectedCosts.map((cost) => ({ id: cost.id, categoryId: cost.categoryId, amount: cost.amount, container: cost.container, contract: cost.contract, vat: preparedVat(cost) ?? undefined })),
@@ -773,7 +787,10 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                 {transferFields.map((field) => {
                   const value = transferValues[field.label] || "";
                   const id = `transfer-${field.key}`;
+                  // Ngân hàng (trong nước, có danh sách): ô chọn trong danh sách thay cho ô gõ tự do.
+                  const bankPicker = field.jsonKey === "ten_ngan_hang" && transferKind === "domestic" && banks.length > 0;
                   const missing = paymentTouched && field.required && !value.trim();
+                  const fieldError = missing ? t("prFieldRequired") : bankPicker && bankMissing && paymentTouched ? t("prErrBank") : "";
                   // Các ô đều autoComplete="off": trình duyệt không gợi ý lại giá trị cũ (nhất là Nội dung thanh toán, mỗi đề nghị mỗi khác).
                   const className = `w-full rounded-lg border bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:bg-gray-900 dark:text-white ${missing ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`;
                   return (
@@ -784,6 +801,9 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                           autoComplete="off"
                           onChange={(event) => updateTransferValue(field, event.target.value)}
                           className={`${className} py-2`} />
+                      ) : bankPicker ? (
+                        <BankPicker id={id} banks={banks} value={value} bin={effectiveBin} invalid={Boolean(fieldError)}
+                          onChange={(next) => { updateTransferValue(field, next.text); setBankBin(next.bin); }} />
                       ) : (
                         <input id={id} value={value} maxLength={300} placeholder={field.required ? "" : t("prTfOptional")}
                           autoComplete="off"
@@ -793,7 +813,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                           aria-invalid={missing}
                           className={`${className} h-11`} />
                       )}
-                      <FieldError message={missing ? t("prFieldRequired") : ""} />
+                      <FieldError message={fieldError} />
                       {field.jsonKey === "so_tai_khoan" && accountQuery.trim().length >= 2 && beneficiarySuggestions.length > 0 && (
                         <div className="relative z-10">
                           <div className="absolute left-0 right-0 top-1 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
