@@ -188,6 +188,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const awaitingUpdate = Boolean(request && request.sent && (request.status === 0 || request.status === 1) && !editing);
   const currentVersion = request?.updatedAt || "";
   const currentStatus = request?.status ?? 0;
+  const currentCanRecordPayment = request?.canRecordPayment ?? null;
   useEffect(() => {
     if (!awaitingUpdate) return undefined;
     let stopped = false;
@@ -197,8 +198,11 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
       running = true;
       try {
         const fresh = await getPaymentRequest(id);
-        if (stopped || (fresh.status === currentStatus && fresh.updatedAt === currentVersion && fresh.sent)) return;
+        if (stopped || (fresh.status === currentStatus && fresh.updatedAt === currentVersion
+          && fresh.canRecordPayment === currentCanRecordPayment && fresh.sent)) return;
+        const statusChanged = fresh.status !== currentStatus;
         setRequest(fresh);
+        if (!statusChanged) return;
         if (fresh.status === 1) notify(t("prLiveApproved", { id: fresh.id, name: fresh.approverName || "—" }), "success");
         else if (fresh.status === 3) notify(t("prLivePaid", { id: fresh.id }), "success");
         else if (fresh.status === -1) notify(t("prLiveRejected", { id: fresh.id, name: fresh.approverName || "—" }), "error");
@@ -216,7 +220,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [awaitingUpdate, currentStatus, currentVersion, id, notify, t]);
+  }, [awaitingUpdate, currentCanRecordPayment, currentStatus, currentVersion, id, notify, t]);
 
   // Link từ nút "Upload UNC" trên thẻ Google Chat (#chi-tien): cuộn tới bước chi tiền khi trang đã tải xong.
   const loaded = Boolean(request);
@@ -332,7 +336,13 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
     if (busy || !canApprove) return;
     setBusy("approve");
     try {
-      setRequest(await approvePaymentRequest(request.id));
+      const approved = await approvePaymentRequest(request.id);
+      setRequest(approved);
+      try {
+        setRequest(await getPaymentRequest(request.id));
+      } catch {
+        reload();
+      }
       notify(t("prApprovedBy", { name: user?.name || user?.username || "—", time: formatDateTime(new Date().toISOString(), language) }), "success");
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), "error");
@@ -412,6 +422,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
             <div className="space-y-3">
               <p className="text-xs text-gray-500">{t("prCreatedBy", { name: request.creatorName || "—", time: formatDateTime(request.createdAt, language) })}</p>
               <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+                <div className="col-span-2 sm:col-span-3"><dt className="text-gray-500">{t("prContent")}</dt><dd className="whitespace-pre-line break-words font-medium text-gray-800 dark:text-white/90">{request.content || "—"}</dd></div>
                 {/* Hạn thanh toán · loại tiền · hình thức: chung một ô */}
                 <div className="col-span-2 sm:col-span-1"><dt className="text-gray-500">{t("prPaymentLineLabel")}</dt>
                   <dd className="font-medium text-gray-800 dark:text-white/90">
@@ -463,8 +474,6 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                         <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} onFilesChange={setFileCount} onUploaded={reload} />
                       </div>
                       <p className="text-sm text-gray-600 dark:text-gray-300">{t("prReviewHint")}</p>
-                      {/* BE nhắn riêng cho người tạo ở từng bước (paymentRequesterNotifyService); cần mở chat với app một lần. */}
-                      <p className="break-words rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">💬 {t("prPersonalChatHint")}</p>
                       <button type="button" onClick={() => void send()} disabled={busy !== ""} className={`${BUTTON_PRIMARY} w-full sm:w-auto`}>
                         {busy === "send" ? t("prSending") : `➤ ${t("prConfirmSend")}`}
                       </button>

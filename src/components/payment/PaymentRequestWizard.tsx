@@ -334,14 +334,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   ]);
   const hasVat = selectedCosts.some((cost) => preparedVat(cost) !== null) || otherVats.some((rate) => rate !== null);
 
-  /** Xong một câu: mở câu đầu tiên còn thiếu, đủ hết thì sang bước lưu. */
-  const advance = () => {
-    const next = complete.findIndex((done) => !done);
-    const target = next === -1 ? SAVE_STEP : next;
-    setActive(target);
-    setReached((current) => Math.max(current, target));
-  };
-
   /** Đổi loại / mã phí: một đề nghị chỉ một loại + một mã, nên bỏ các khoản đã chọn của loại / mã cũ. */
   const chooseGroup = (type: string, code: string) => {
     if (type === costType && code === costCode) return;
@@ -389,17 +381,17 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     missingTransfer.length > 0 && t("prErrTransfer", { fields: missingTransfer.map((field) => t(field.key)).join(", ") }),
     bankMissing && t("prErrBank"),
   ].filter((issue): issue is string => Boolean(issue));
-  const stepIssues = [costIssues, contentIssues, paymentIssues];
-  const touchStep = (step: number) => [setOthersTouched, setContentTouched, setPaymentTouched][step](true);
+  const touchAllSteps = () => {
+    setOthersTouched(true);
+    setContentTouched(true);
+    setPaymentTouched(true);
+  };
 
-  /** Bấm Tiếp tục ở một bước: thiếu / sai thì báo (toast + danh sách trong bước), đủ thì sang câu tiếp theo. */
+  /** Allow moving through the steps; validate when the user attempts to create/save. */
   const continueFrom = (step: number) => {
-    touchStep(step);
-    if (stepIssues[step].length) {
-      notify(t("prErrToast"), "error");
-      return;
-    }
-    advance();
+    const target = step + 1;
+    setActive(target);
+    setReached((current) => Math.max(current, target));
   };
 
   // Các khoản đã chọn dạng dòng hiển thị (dùng cho tóm tắt bước chi phí và bản nháp ở bước lưu).
@@ -428,11 +420,11 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
 
   const save = async () => {
     if (saving) return;
+    touchAllSteps();
     // Còn bước thiếu / sai (ví dụ sửa lại chi phí sau khi đã tới bước lưu): mở bước đó, tô đỏ và báo.
     const firstIncomplete = complete.findIndex((done) => !done);
     if (firstIncomplete !== -1 || !currency || !paymentMethod) {
       const step = firstIncomplete === -1 ? 2 : firstIncomplete;
-      touchStep(step);
       setActive(step);
       notify(t("prErrToast"), "error");
       return;
@@ -757,7 +749,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
               <div className="grid grid-cols-2 gap-2">
                 {(["VND", "USD"] as const).map((value) => (
                   <button key={value} type="button" aria-pressed={currency === value} onClick={() => setCurrency(value)}
-                    className={`h-11 rounded-xl border-2 text-base font-bold transition-colors ${currency === value ? CHIP_ON : CHIP_OFF}`}>
+                    className={`h-11 rounded-xl border-2 text-sm font-bold transition-colors ${currency === value ? CHIP_ON : CHIP_OFF}`}>
                     {value}
                   </button>
                 ))}
@@ -770,7 +762,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                 {PAYMENT_METHODS.map((value) => (
                   <button key={value} type="button" aria-pressed={paymentMethod === value} onClick={() => choosePaymentMethod(value)}
                     className={`flex h-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border-2 px-2 text-sm font-semibold transition-colors ${paymentMethod === value ? CHIP_ON : CHIP_OFF}`}>
-                    <span aria-hidden="true">{value === "tien_mat" ? "💵" : "🏦"}</span>{t(PAYMENT_METHOD_LABEL_KEYS[value])}
+                    <span aria-hidden="true" className="text-xs leading-none">{value === "tien_mat" ? "💵" : "🏦"}</span>{t(PAYMENT_METHOD_LABEL_KEYS[value])}
                   </button>
                 ))}
               </div>
@@ -830,9 +822,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                   );
                 })}
               </div>
-              {missingTransfer.length > 0 && !paymentTouched && (
-                <p className="mt-2 text-xs text-warning-700 dark:text-warning-300">{t("prTfMissing", { fields: missingTransfer.map((field) => t(field.key)).join(", ") })}</p>
-              )}
             </div>
           )}
           {paymentTouched && <IssueList issues={paymentIssues} />}

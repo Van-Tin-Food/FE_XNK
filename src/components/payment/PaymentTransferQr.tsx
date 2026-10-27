@@ -69,7 +69,7 @@ export default function PaymentTransferQr({ requestId, version, fallback }: Prop
           ))}
         </dl>
         <a href={qr.image} download={`QR-${requestId}.png`}
-          className="mt-3 inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">
+          className="mt-3 flex h-10 w-fit items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">
           ⬇ {t("prQrDownload")}
         </a>
       </div>

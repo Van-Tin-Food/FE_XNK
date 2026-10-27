@@ -11,6 +11,7 @@ import {
   sendPaymentDocument,
   startPaymentDocumentUploads,
   type PaymentDocumentKind,
+  type PaymentDocumentFile,
   type PaymentDocuments,
 } from "@/services/paymentRequestApi";
 import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
@@ -64,7 +65,8 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
   const inputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<PaymentDocuments | null>(null);
   const [error, setError] = useState("");
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number; percent: number } | null>(null);
+  const [dragActive, setDragActive] = useState(false);
   // Tải lại danh sách; refresh = true (nút "Làm mới"): BE đọc lại thư mục Drive thay vì danh sách đã lưu.
   const [reload, setReload] = useState({ key: 0, refresh: false });
   const reloadList = useCallback((refresh = false) => setReload((state) => ({ key: state.key + 1, refresh })), []);
@@ -103,7 +105,8 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
     const empty = selected.find((file) => file.size <= 0);
     if (empty) return notify(t("prEmptyFile", { name: empty.name }), "error");
     const total = selected.length;
-    setProgress({ done: 0, total });
+    const uploadedFiles: PaymentDocumentFile[] = [];
+    setProgress({ done: 0, total, percent: 0 });
     try {
       // Một lần gọi BE cho cả lượt: báo trùng tên (không tự đổi tên / ghi đè) và mở phiên upload Drive cho mọi file.
       const { duplicates, sessions } = await startPaymentDocumentUploads(requestId, selected.map((file) => ({ file, mimeType: getDocumentMimeType(file) })), kind);
@@ -113,10 +116,22 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
       }
       let done = 0;
       const failures: string[] = [];
+      const uploadedBytes = selected.map(() => 0);
+      const reportProgress = (index: number, loaded: number) => {
+        uploadedBytes[index] = loaded;
+        const totalBytes = selected.reduce((sum, file) => sum + file.size, 0);
+        const loadedBytes = uploadedBytes.reduce((sum, value) => sum + value, 0);
+        setProgress({ done, total, percent: totalBytes ? Math.min(100, Math.floor((loadedBytes / totalBytes) * 100)) : 0 });
+      };
       const sendOne = async (index: number, announce: boolean) => {
-        await sendPaymentDocument(requestId, sessions[index], selected[index], { announce });
+        const uploaded = await sendPaymentDocument(requestId, sessions[index], selected[index], { announce, onProgress: ({ loaded }) => reportProgress(index, loaded) });
+        uploadedFiles.push(uploaded);
         done += 1;
-        setProgress({ done, total });
+        reportProgress(index, selected[index].size);
+        setDocuments((current) => current ? {
+          ...current,
+          files: [...current.files.filter((file) => file.fileId !== uploaded.fileId), uploaded],
+        } : current);
       };
       if (proofMode) {
         // Ủy nhiệm chi: lần lượt, file cuối mới báo "Đã chi tiền" lên Google Chat (một lần, đủ các file).
@@ -138,7 +153,7 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
       notify(uploadError instanceof Error ? uploadError.message : String(uploadError), "error");
     } finally {
       setProgress(null);
-      reloadList();
+      reloadList(uploadedFiles.length > 0);
       if (inputRef.current) inputRef.current.value = "";
     }
   }, [kind, notify, onUploaded, progress, proofMode, reloadList, requestId, t]);
@@ -156,6 +171,12 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
       setRemoving("");
       reloadList();
     }
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+    if (canUpload && event.dataTransfer.files.length) void upload(Array.from(event.dataTransfer.files));
   };
 
   return (
@@ -217,12 +238,30 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
       {canUpload && (
         <>
           <input ref={inputRef} type="file" multiple accept={DOCUMENT_FILE_ACCEPT} className="hidden" onChange={(event) => void upload(Array.from(event.target.files || []))} />
-          <button type="button" onClick={() => inputRef.current?.click()} disabled={Boolean(progress)}
-            className={`mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold disabled:opacity-60 sm:w-auto sm:px-6 ${proofMode
-              ? "bg-brand-500 text-white hover:bg-brand-600"
-              : "border-2 border-dashed border-brand-300 text-brand-600 hover:bg-brand-50 dark:border-brand-500/40 dark:text-brand-400 dark:hover:bg-brand-500/10"}`}>
-            {progress ? t("prUploading", { done: progress.done, total: progress.total }) : `⬆ ${proofMode ? t("prChooseProofFiles") : t("prChooseFiles")}`}
-          </button>
+          <div onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }}
+            onDragOver={(event) => { event.preventDefault(); setDragActive(true); }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
+            onDrop={handleDrop}
+            className={`mt-3 rounded-xl border-2 border-dashed p-3 transition-colors sm:inline-flex sm:min-w-72 sm:flex-col sm:items-center sm:justify-center ${dragActive ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10" : "border-brand-300 dark:border-brand-500/40"}`}>
+            <p className="mb-2 text-center text-xs text-gray-500">{t("prDropFilesHint")}</p>
+            <button type="button" onClick={() => inputRef.current?.click()} disabled={Boolean(progress)}
+              className={`flex h-11 w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold disabled:opacity-60 sm:w-auto sm:px-6 ${proofMode
+                ? "bg-brand-500 text-white hover:bg-brand-600"
+                : "text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-500/10"}`}>
+              {progress ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />{t("prUploading", { done: progress.done, total: progress.total })}</> : `⬆ ${proofMode ? t("prChooseProofFiles") : t("prChooseFiles")}`}
+            </button>
+          </div>
+          {progress && (
+            <div className="mt-2 w-full max-w-sm" role="status" aria-live="polite">
+              <div className="mb-1 flex items-center justify-between text-xs text-gray-500">
+                <span>{progress.percent < 100 ? t("prUploading", { done: progress.done, total: progress.total }) : t("prUploadFinishing")}</span>
+                <span className="tabular-nums">{progress.percent}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800" role="progressbar" aria-label={t("prUploadProgress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
+                <div className="h-full rounded-full bg-brand-500 transition-[width] duration-300 ease-out" style={{ width: `${progress.percent}%` }} />
+              </div>
+            </div>
+          )}
         </>
       )}
 
