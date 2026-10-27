@@ -2,6 +2,7 @@ import type { AuthUser, LoginMfaInfo, LoginResponse } from "@/types/auth";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import {
   completePermissions,
+  normalizeCustomPermissionMap,
   normalizePermissionMap,
   normalizeRole,
   PERMISSION_LEVELS,
@@ -287,7 +288,7 @@ function normalizeManagedUser(payload: unknown): ManagedUser | null {
     name: String(payload.name ?? payload.fullName ?? payload.full_name ?? nestedUser.name ?? username).trim() || username,
     role: normalizeRole(String(payload.role ?? payload.userRole ?? payload.user_role ?? nestedUser.role ?? "")),
     email: String(payload.email ?? nestedUser.email ?? "").trim() || undefined,
-    customPermissions: normalizePermissionMap(payload.customPermissions ?? nestedUser.customPermissions),
+    customPermissions: normalizeCustomPermissionMap(payload.customPermissions ?? nestedUser.customPermissions),
   };
 }
 

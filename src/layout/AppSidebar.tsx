@@ -39,13 +39,17 @@ const AppSidebar: React.FC = () => {
   const canViewLegacyEta = can("legacyEtaOrders");
   const canViewSupportTools = canViewEmailTools || canViewDocumentSync || canViewMarketResearch || canViewLegacyEta;
   const canManageUsers = can("users");
-  const canManageMasterData = can("masterData");
+  const canViewSuppliers = can("catalogSuppliers");
+  const canViewCarriers = can("catalogCarriers");
+  const canViewWarehouses = can("catalogWarehouses");
+  const canViewPaymentCategories = can("paymentCategories");
+  const canManageMasterData = canViewSuppliers || canViewCarriers || canViewWarehouses;
   const canViewPaymentRequests = can("paymentRequests");
   // Menu Đề nghị thanh toán: thêm người được uỷ quyền duyệt / xác nhận chứng từ (khớp quyền xem danh sách ở BE).
   const canOpenPaymentRequestList = canOpenPaymentRequests(can);
   // Tổng quan chi phí (toàn công ty): quyền costReports (ban giám đốc) hoặc xem đề nghị của mọi người (kế toán, admin).
   const canViewMonthlyCosts = can("costReports") || can("paymentRequestsAll");
-  const canViewCostManagement = canManageMasterData || canViewPaymentRequests || canViewMonthlyCosts;
+  const canViewCostManagement = canViewPaymentCategories || canViewPaymentRequests || canViewMonthlyCosts;
   const { t } = useLanguage();
 
   return (
@@ -152,9 +156,9 @@ const AppSidebar: React.FC = () => {
                 {showText && <span className="ml-auto text-xs">{catalogOpen ? "−" : "+"}</span>}
               </button>
               {catalogOpen && showText && <ul className="mt-1 space-y-1 pl-11">
-                <li><Link href="/master-data?catalog=suppliers" className={`menu-dropdown-item ${pathname === "/master-data" && !["carriers", "warehouses", "paymentCategories"].includes(searchParams.get("catalog") || "") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("suppliers")}</Link></li>
-                <li><Link href="/master-data?catalog=carriers" className={`menu-dropdown-item ${searchParams.get("catalog") === "carriers" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("carriers")}</Link></li>
-                <li><Link href="/master-data?catalog=warehouses" className={`menu-dropdown-item ${searchParams.get("catalog") === "warehouses" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("warehouses")}</Link></li>
+                {canViewSuppliers && <li><Link href="/master-data?catalog=suppliers" className={`menu-dropdown-item ${pathname === "/master-data" && !["carriers", "warehouses", "paymentCategories"].includes(searchParams.get("catalog") || "") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("suppliers")}</Link></li>}
+                {canViewCarriers && <li><Link href="/master-data?catalog=carriers" className={`menu-dropdown-item ${searchParams.get("catalog") === "carriers" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("carriers")}</Link></li>}
+                {canViewWarehouses && <li><Link href="/master-data?catalog=warehouses" className={`menu-dropdown-item ${searchParams.get("catalog") === "warehouses" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("warehouses")}</Link></li>}
               </ul>}
             </li>
           )}
@@ -173,7 +177,7 @@ const AppSidebar: React.FC = () => {
               </button>
               {costOpen && showText && <ul className="mt-1 space-y-1 pl-11">
                 {canViewMonthlyCosts && <li><Link href="/cost-management" className={`menu-dropdown-item ${pathname.startsWith("/cost-management") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("costOverview")}</Link></li>}
-                {canManageMasterData && <li><Link href="/master-data?catalog=paymentCategories" className={`menu-dropdown-item ${searchParams.get("catalog") === "paymentCategories" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("paymentCategories")}</Link></li>}
+                {canViewPaymentCategories && <li><Link href="/master-data?catalog=paymentCategories" className={`menu-dropdown-item ${searchParams.get("catalog") === "paymentCategories" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("paymentCategories")}</Link></li>}
                 {canViewPaymentRequests && <li><Link href="/payment-costs" className={`menu-dropdown-item ${pathname.startsWith("/payment-costs") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("myCosts")}</Link></li>}
               </ul>}
             </li>

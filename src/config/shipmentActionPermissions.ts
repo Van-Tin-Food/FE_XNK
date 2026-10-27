@@ -23,7 +23,12 @@ export const PERMISSION_FUNCTIONS = {
   purchaseAmounts: ["none", "view"], // Đơn giá, tổng tiền hàng
   supplierContact: ["none", "view"], // Email, SĐT, địa chỉ nhà cung cấp
   aiChat: ["none", "view"], // Chatbox AI
-  masterData: ["none", "view", "edit"], // Danh mục NCC, hãng tàu, kho
+  // Giữ tên cũ để đọc quyền tùy chỉnh đã lưu; không xuất hiện trong trình quản lý quyền.
+  masterData: ["none", "view", "edit"],
+  catalogSuppliers: ["none", "view", "edit"],
+  catalogCarriers: ["none", "view", "edit"],
+  catalogWarehouses: ["none", "view", "edit"],
+  paymentCategories: ["none", "view", "edit"],
   documentSync: ["none", "view", "edit"], // Đồng bộ chứng từ Drive
   email: ["none", "view", "edit"], // Email nhà cung cấp: xem; edit = gửi
   activityLogs: ["none", "view"], // Nhật ký thao tác
@@ -44,17 +49,18 @@ export const PERMISSION_FUNCTIONS = {
 export type PermissionFunction = keyof typeof PERMISSION_FUNCTIONS;
 export type PermissionMap = Record<PermissionFunction, PermissionLevel>;
 
-export const PERMISSION_FUNCTION_KEYS = Object.keys(PERMISSION_FUNCTIONS) as PermissionFunction[];
+export const PERMISSION_FUNCTION_KEYS = Object.keys(PERMISSION_FUNCTIONS).filter((fn) => fn !== "masterData") as PermissionFunction[];
 
 // Nhóm hiển thị trên màn quản lý tài khoản.
 export const PERMISSION_GROUPS: ReadonlyArray<{ key: string; functions: readonly PermissionFunction[] }> = [
-  { key: "permissionGroupShipments", functions: ["shipments", "shipmentCancel", "tracking", "exportShipments", "aiChat"] },
+  { key: "permissionGroupShipments", functions: ["shipments", "shipmentCancel", "tracking", "exportShipments", "aiChat", "containerCosts"] },
   { key: "permissionGroupDocuments", functions: ["documents", "documentArchive", "documentDelete", "containerTransport"] },
   // Khớp đúng 4 mục của menu "Công cụ hỗ trợ" trên sidebar.
   { key: "supportTools", functions: ["email", "documentSync", "marketResearch", "legacyEtaOrders"] },
-  { key: "permissionGroupPayments", functions: ["paymentRequests", "paymentRequestsAll", "paymentApprove", "paymentDocuments", "containerCosts", "costReports"] },
+  { key: "permissionGroupPayments", functions: ["paymentRequests", "paymentRequestsAll", "paymentApprove", "paymentDocuments", "costReports"] },
   { key: "permissionGroupSensitive", functions: ["purchaseAmounts", "supplierContact"] },
-  { key: "permissionGroupSystem", functions: ["masterData", "users", "activityLogs", "userGuide"] },
+  { key: "permissionGroupCatalogs", functions: ["catalogSuppliers", "catalogCarriers", "catalogWarehouses", "paymentCategories"] },
+  { key: "permissionGroupSystem", functions: ["users", "activityLogs", "userGuide"] },
 ];
 
 const LEVEL_RANK: Record<PermissionLevel, number> = { none: 0, view: 1, edit: 2 };
@@ -86,6 +92,18 @@ export function normalizePermissionMap(value: unknown): Partial<PermissionMap> {
   for (const [fn, raw] of Object.entries(value as Record<string, unknown>)) {
     const level = String(raw ?? "").trim().toLowerCase();
     if (isPermissionFunction(fn) && isLevelAllowed(fn, level)) result[fn] = level;
+  }
+  return result;
+}
+
+/** Chuyển override masterData cũ thành các quyền danh mục riêng khi nạp tài khoản quản lý. */
+export function normalizeCustomPermissionMap(value: unknown): Partial<PermissionMap> {
+  const result = normalizePermissionMap(value);
+  if (result.masterData) {
+    for (const fn of ["catalogSuppliers", "catalogCarriers", "catalogWarehouses", "paymentCategories"] as const) {
+      if (result[fn] === undefined) result[fn] = result.masterData;
+    }
+    delete result.masterData;
   }
   return result;
 }
