@@ -449,6 +449,8 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                         <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} onFilesChange={setFileCount} onUploaded={reload} />
                       </div>
                       <p className="text-sm text-gray-600 dark:text-gray-300">{t("prReviewHint")}</p>
+                      {/* BE nhắn riêng cho người tạo ở từng bước (paymentRequesterNotifyService); cần mở chat với app một lần. */}
+                      <p className="break-words rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">💬 {t("prPersonalChatHint")}</p>
                       <button type="button" onClick={() => void send()} disabled={busy !== ""} className={`${BUTTON_PRIMARY} w-full sm:w-auto`}>
                         {busy === "send" ? t("prSending") : `➤ ${t("prConfirmSend")}`}
                       </button>
