@@ -279,10 +279,9 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const bankField = transferFields.find((field) => field.jsonKey === "ten_ngan_hang");
   const bankText = bankField ? transferValues[bankField.label] || "" : "";
   const effectiveBin = transferKind === "domestic" ? bankBin || matchBank(banks, bankText)?.bin || "" : "";
-  const bankMissing = transfer && transferKind === "domestic" && banks.length > 0 && Boolean(bankText.trim()) && !effectiveBin;
   const recipientValid = missingTransfer.length === 0;
   const money = (value: string | null | undefined) => (currency ? formatMoney(value, currency, language) : formatAmount(value, language));
-  const paymentDone = /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && Boolean(currency && paymentMethod && recipientValid) && !bankMissing;
+  const paymentDone = /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && Boolean(currency && paymentMethod && recipientValid);
   const complete = [costCount > 0 && otherValid && preparedVatValid, Boolean(content.trim()), paymentDone];
 
   // Gợi ý người thụ hưởng: chờ ngừng gõ rồi mới gọi BE, huỷ lần gọi cũ để kết quả cũ không đè kết quả mới.
@@ -381,7 +380,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     !currency && t("prErrCurrency"),
     !paymentMethod && t("prErrMethod"),
     missingTransfer.length > 0 && t("prErrTransfer", { fields: missingTransfer.map((field) => t(field.key)).join(", ") }),
-    bankMissing && t("prErrBank"),
   ].filter((issue): issue is string => Boolean(issue));
   const touchAllSteps = () => {
     setOthersTouched(true);
@@ -777,7 +775,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
               <FieldError message={paymentTouched && !paymentMethod ? t("prErrMethod") : ""} />
             </div>
           </div>
-          {/* Chuyển khoản: thông tin người thụ hưởng theo từng trường (trong nước / quốc tế), dấu * là bắt buộc */}
+          {/* Chuyển khoản: thông tin người thụ hưởng tùy chọn, nhập các trường đã biết */}
           {transfer && (
             <div className="mt-4 rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
               <p className="text-sm font-semibold text-gray-800 dark:text-white/90">
@@ -790,7 +788,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                   // Ngân hàng (trong nước, có danh sách): ô chọn trong danh sách thay cho ô gõ tự do.
                   const bankPicker = field.jsonKey === "ten_ngan_hang" && transferKind === "domestic" && banks.length > 0;
                   const missing = paymentTouched && field.required && !value.trim();
-                  const fieldError = missing ? t("prFieldRequired") : bankPicker && bankMissing && paymentTouched ? t("prErrBank") : "";
+                  const fieldError = missing ? t("prFieldRequired") : "";
                   // Các ô đều autoComplete="off": trình duyệt không gợi ý lại giá trị cũ (nhất là Nội dung thanh toán, mỗi đề nghị mỗi khác).
                   const className = `w-full rounded-lg border bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:bg-gray-900 dark:text-white ${missing ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`;
                   return (

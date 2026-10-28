@@ -74,16 +74,16 @@ export interface TransferField {
 export type TransferJsonKey = keyof PaymentBeneficiarySuggestion | "noi_dung_thanh_toan";
 export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
   domestic: [
-    { label: "Số tài khoản", key: "prTf_accountNumber", jsonKey: "so_tai_khoan", required: true },
-    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: true },
-    { label: "Tên ngân hàng", key: "prTf_bankName", jsonKey: "ten_ngan_hang", required: true },
+    { label: "Số tài khoản", key: "prTf_accountNumber", jsonKey: "so_tai_khoan", required: false },
+    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: false },
+    { label: "Tên ngân hàng", key: "prTf_bankName", jsonKey: "ten_ngan_hang", required: false },
     { label: "Nội dung thanh toán", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
   ],
   international: [
-    { label: "Số IBAN người thụ hưởng", key: "prTf_iban", jsonKey: "so_tai_khoan", required: true },
-    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: true },
-    { label: "Tên ngân hàng thụ hưởng", key: "prTf_beneficiaryBank", jsonKey: "ten_ngan_hang", required: true },
-    { label: "Mã SWIFT", key: "prTf_swift", jsonKey: "ma_swift", required: true },
+    { label: "Số IBAN người thụ hưởng", key: "prTf_iban", jsonKey: "so_tai_khoan", required: false },
+    { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: false },
+    { label: "Tên ngân hàng thụ hưởng", key: "prTf_beneficiaryBank", jsonKey: "ten_ngan_hang", required: false },
+    { label: "Mã SWIFT", key: "prTf_swift", jsonKey: "ma_swift", required: false },
     { label: "Địa chỉ người thụ hưởng", key: "prTf_beneficiaryAddress", jsonKey: "dia_chi_nguoi_thu_huong", required: false },
     { label: "Địa chỉ ngân hàng thụ hưởng", key: "prTf_beneficiaryBankAddress", jsonKey: "dia_chi_ngan_hang", required: false },
     { label: "Ngân hàng trung gian", key: "prTf_intermediaryBank", jsonKey: "ngan_hang_trung_gian", required: false, multiline: true },
