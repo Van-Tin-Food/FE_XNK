@@ -168,6 +168,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "download" | "approve" | "reject">("");
   const [fileCount, setFileCount] = useState(0);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -393,7 +394,11 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   };
 
   return (
-    <div className="space-y-5">
+    <>
+      {previewOpen && <div className="fixed inset-0 z-[100000] hidden bg-gray-400/50 backdrop-blur-[32px] md:block" aria-hidden="true" />}
+      <div className={previewOpen
+        ? "space-y-5 md:fixed md:bottom-4 md:left-4 md:top-4 md:z-[100000] md:w-[calc(50vw-1.5rem)] md:overflow-y-auto md:overscroll-contain"
+        : "space-y-5"}>
       <header className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6">
         <Link href="/payment-requests" className="text-sm text-gray-500 hover:text-brand-600">← {t("prBackToList")}</Link>
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -473,7 +478,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                       {/* Đính kèm hóa đơn nháp / chứng từ trước khi gửi: thẻ Google Chat hiện link từng file. */}
                       <div className="rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
                         <p className="mb-2 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prAttachBeforeSend")}</p>
-                        <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} onFilesChange={setFileCount} onUploaded={reload} />
+                        <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
                       </div>
                       <p className="text-sm text-gray-600 dark:text-gray-300">{t("prReviewHint")}</p>
                       <button type="button" onClick={() => void send()} disabled={busy !== ""} className={`${BUTTON_PRIMARY} w-full sm:w-auto`}>
@@ -531,7 +536,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                   {canUploadDocs && (
                     <>
                       <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prDocsDuringApproval")}</p>
-                      <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} />
+                      <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
                     </>
                   )}
                   {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
@@ -572,7 +577,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
             {paidOrArchived && <p className="text-sm font-medium text-success-700 dark:text-success-300">✓ {t("prPaidDone")}</p>}
             <div className="rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
               <p className="mb-2 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prProofTitle")}</p>
-              <PaymentDocumentsPanel requestId={request.id} kind={PAYMENT_PROOF} canUpload={canUploadProof} onUploaded={reload} />
+              <PaymentDocumentsPanel requestId={request.id} kind={PAYMENT_PROOF} canUpload={canUploadProof} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
               {canUploadProof && request.status === 1 && <p className="mt-2 text-xs text-gray-500">{t("prPaymentChatHint", { id: request.id })}</p>}
             </div>
             {/* Chờ chi tiền: vẫn bổ sung được chứng từ hồ sơ / báo người đề nghị bổ sung. */}
@@ -581,7 +586,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                 {canUploadDocs && (
                   <>
                     <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prDocsTitle")}</p>
-                    <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} />
+                    <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
                   </>
                 )}
                 {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
@@ -592,7 +597,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
 
         {/* 4. Lưu trữ hồ sơ (sau khi đã chi tiền) */}
         <NodeCard index={3} title={titles[3]} state={states[3]} last>
-          <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} />
+          <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
           {canUploadDocs && !canRemoveDocs && <p className="mt-2 text-xs text-gray-500">{t("prPaidAddOnlyHint")}</p>}
           {request.status === 3 && (
             <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
@@ -612,6 +617,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
           {request.status === 2 && <p className="mt-3 text-sm font-medium text-success-700 dark:text-success-300">✓ {t("prCompletedHint")}</p>}
         </NodeCard>
       </ol>
-    </div>
+      </div>
+    </>
   );
 }

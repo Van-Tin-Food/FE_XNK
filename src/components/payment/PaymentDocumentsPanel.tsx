@@ -56,9 +56,10 @@ interface Props {
   onFilesChange?: (count: number) => void;
   /** Sau khi upload (lần đầu có link thư mục / ủy nhiệm chi đổi trạng thái): báo trang tải lại đề nghị. */
   onUploaded?: () => void;
+  onPreviewVisibilityChange?: (visible: boolean) => void;
 }
 
-export default function PaymentDocumentsPanel({ requestId, canUpload, kind = null, canRemoveProof = false, canRemove = true, onFilesChange, onUploaded }: Props) {
+export default function PaymentDocumentsPanel({ requestId, canUpload, kind = null, canRemoveProof = false, canRemove = true, onFilesChange, onUploaded, onPreviewVisibilityChange }: Props) {
   const { t, language } = useLanguage();
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
@@ -267,7 +268,11 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
         </>
       )}
 
-      <PaymentFilePreview files={files} index={previewIndex} onIndexChange={setPreviewIndex} />
+      <PaymentFilePreview files={files.map((file) => ({
+        fileName: file.fileName,
+        fileUrl: file.fileUrl,
+        meta: [file.uploadedBy, file.uploadedAt && formatDateTime(file.uploadedAt, language)].filter(Boolean).join(" · "),
+      }))} index={previewIndex} onIndexChange={setPreviewIndex} onVisibilityChange={onPreviewVisibilityChange} />
     </div>
   );
 }
