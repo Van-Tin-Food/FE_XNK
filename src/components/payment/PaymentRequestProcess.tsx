@@ -19,7 +19,7 @@ import {
   sendPaymentRequest,
   type PaymentRequest,
 } from "@/services/paymentRequestApi";
-import { formatMoney, splitVat } from "@/utils/paymentRequest";
+import { costCodeName, formatMoney, splitVat } from "@/utils/paymentRequest";
 import PaymentDocumentsPanel from "./PaymentDocumentsPanel";
 import PaymentTransferQr from "./PaymentTransferQr";
 import PaymentRequestWizard from "./PaymentRequestWizard";
@@ -453,11 +453,11 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                   <li key={cost.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2.5">
                     <div className="min-w-0 flex-1">
                       <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-white/90">
-                        <span className="break-words">{cost.categoryName}{cost.note && <span className="font-normal text-gray-600 dark:text-gray-300"> — {cost.note}</span>}</span>
+                        <span className="break-words">{costCodeName(cost.code, cost.categoryName)}{cost.note && <span className="font-normal text-gray-600 dark:text-gray-300"> — {cost.note}</span>}</span>
                         <PaymentFlowBadge flow={cost.flow} />
                       </p>
                       <p className="truncate text-xs text-gray-500">
-                        {cost.code} · {cost.container ? `${t("prContainer")} ${cost.container} · ${t("prContract")} ${cost.contract}` : cost.contract ? `${t("prContract")} ${cost.contract}` : t("prNoTarget")}
+                        {cost.container ? `${t("prContainer")} ${cost.container} · ${t("prContract")} ${cost.contract}` : cost.contract ? `${t("prContract")} ${cost.contract}` : t("prNoTarget")}
                       </p>
                       {cost.vat && (() => {
                         const { base, tax } = splitVat(cost.amount, String(Number(cost.vat)), request.currency);

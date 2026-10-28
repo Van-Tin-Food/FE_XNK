@@ -20,6 +20,11 @@ const MAX_INTEGER_DIGITS = 16;
  * VND: bỏ dấu ngăn cách nghìn ("1.250.000", "1,250,000" → "1250000"), không nhận phần lẻ.
  * USD: dấu phẩy là ngăn cách nghìn, dấu chấm là phần thập phân ("18,500.50" → "18500.50").
  */
+/** "VH · Phí internet": mã phí đứng trước tên khoản phí (cùng thứ tự với thẻ Google Chat). Thiếu phần nào thì bỏ phần đó. */
+export function costCodeName(code: string | null | undefined, name: string | null | undefined): string {
+  return [String(code || "").trim().toUpperCase(), String(name || "").trim()].filter(Boolean).join(" · ");
+}
+
 export function parseAmountInput(value: string, currency: PaymentCurrency): string | null {
   const raw = String(value ?? "").replace(/\s+/g, "");
   if (!raw) return null;

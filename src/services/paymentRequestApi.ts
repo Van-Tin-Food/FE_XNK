@@ -501,9 +501,8 @@ function normalizeDocumentFile(row: unknown): PaymentDocumentFile | null {
   };
 }
 
-/** Danh sách chứng từ (BE đọc bảng chứng từ); refresh = true: BE đọc lại thư mục Drive (file sửa thẳng trên Drive). */
-export async function listPaymentDocuments(id: string, signal?: AbortSignal, options: { refresh?: boolean } = {}): Promise<PaymentDocuments> {
-  const query = options.refresh ? "?refresh=1" : "";
+async function fetchPaymentDocuments(id: string, refresh: boolean, signal?: AbortSignal): Promise<PaymentDocuments> {
+  const query = refresh ? "?refresh=1" : "";
   const payload = await request<unknown>("GET", `/${encodeURIComponent(id)}/documents${query}`, undefined, signal);
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   return {
@@ -511,6 +510,42 @@ export async function listPaymentDocuments(id: string, signal?: AbortSignal, opt
     folderUrl: str(data.folderUrl),
     files: (Array.isArray(data.files) ? data.files : []).map(normalizeDocumentFile).filter((file): file is PaymentDocumentFile => file !== null),
   };
+}
+
+// Trang đề nghị hiện vài khung chứng từ cùng lúc (đính kèm, chờ duyệt, chi tiền, lưu trữ), mỗi khung tự tải danh sách: dùng
+// chung một lần gọi BE cho các lần tải trong DOCUMENTS_SHARE_MS (mỗi lần gọi đi qua gateway lên host mất vài trăm ms; đề nghị
+// cũ chưa đồng bộ còn phải đọc Drive). Upload / bỏ chứng từ / "Làm mới" xoá lần gọi dùng chung để tải lại dữ liệu mới.
+const DOCUMENTS_SHARE_MS = 3000;
+const sharedDocuments = new Map<string, { at: number; promise: Promise<PaymentDocuments> }>();
+
+function forgetPaymentDocuments(id: string) {
+  sharedDocuments.delete(id);
+}
+
+/** Chờ promise dùng chung nhưng huỷ riêng theo signal của từng khung (khung đóng không huỷ lần gọi của khung khác). */
+function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+/** Danh sách chứng từ (BE đọc bảng chứng từ); refresh = true: BE đọc lại thư mục Drive (file sửa thẳng trên Drive). */
+export async function listPaymentDocuments(id: string, signal?: AbortSignal, options: { refresh?: boolean } = {}): Promise<PaymentDocuments> {
+  if (options.refresh) {
+    forgetPaymentDocuments(id);
+    return fetchPaymentDocuments(id, true, signal);
+  }
+  const shared = sharedDocuments.get(id);
+  if (shared && Date.now() - shared.at < DOCUMENTS_SHARE_MS) return withAbort(shared.promise, signal);
+  const promise = fetchPaymentDocuments(id, false);
+  sharedDocuments.set(id, { at: Date.now(), promise });
+  // Lỗi thì không giữ lại, lần tải sau gọi BE lại.
+  promise.catch(() => { if (sharedDocuments.get(id)?.promise === promise) forgetPaymentDocuments(id); });
+  return withAbort(promise, signal);
 }
 
 /** Kiểm tra trùng tên trước khi upload (như chứng từ XNK). */
@@ -526,7 +561,9 @@ export async function checkPaymentDocumentNames(id: string, fileNames: string[],
 
 /** Bỏ chứng từ up nhầm khi đề nghị chưa hoàn thành (file vào thùng rác Drive). */
 export async function removePaymentDocument(id: string, fileId: string): Promise<void> {
+  forgetPaymentDocuments(id);
   await request<unknown>("DELETE", `/${encodeURIComponent(id)}/documents/${encodeURIComponent(fileId)}`);
+  forgetPaymentDocuments(id);
 }
 
 /**
@@ -596,11 +633,13 @@ export async function sendPaymentDocument(
   options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal; announce?: boolean } = {},
 ): Promise<PaymentDocumentFile> {
   const uploaded = await uploadFileToDriveSession(session.uploadUrl, file, options);
+  forgetPaymentDocuments(id);
   const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/documents/complete-upload`, {
     uploadToken: session.uploadToken,
     fileId: uploaded.id,
     ...(options.announce === false ? { announce: false } : {}),
   });
+  forgetPaymentDocuments(id);
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   const result = normalizeDocumentFile(data.file);
   if (!result) throw new Error("Phản hồi upload chứng từ không hợp lệ");

@@ -9,7 +9,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { deleteMyCost, listMyCosts, updateMyCost, type MyCost, type MyCostScope } from "@/services/paymentCostApi";
-import { formatAmount, parseAmountLoose } from "@/utils/paymentRequest";
+import { costCodeName, formatAmount, parseAmountLoose } from "@/utils/paymentRequest";
 
 // Chi phí của tôi: mọi khoản chi phí do người đang đăng nhập nhập (tab Chi phí của đơn hàng + chi phí vận hành của đề
 // nghị). Khoản chưa thuộc đề nghị nào thì sửa số tiền / xóa được; đã vào đề nghị thì chỉ xem kèm link đề nghị.
@@ -103,7 +103,7 @@ export default function MyCostsPage() {
 
   const remove = async (cost: MyCost) => {
     if (busy) return;
-    const name = `${cost.categoryName}${targetLabel(cost) ? ` (${targetLabel(cost)})` : ""}`;
+    const name = `${costCodeName(cost.code, cost.categoryName)}${targetLabel(cost) ? ` (${targetLabel(cost)})` : ""}`;
     if (!await confirm({ title: t("mcDelete"), message: t("mcDeleteMessage", { name, amount: formatAmount(cost.amount, language) }), confirmText: t("mcDelete"), tone: "danger" })) return;
     setBusy(cost.id);
     try {
@@ -212,7 +212,7 @@ export default function MyCostsPage() {
                   {requestCell(cost)}
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="break-words text-sm font-medium text-gray-800 dark:text-white/90">{cost.categoryName}</p>
+                      <p className="break-words text-sm font-medium text-gray-800 dark:text-white/90">{costCodeName(cost.code, cost.categoryName)}</p>
                       {noteCell(cost)}
                       <p className="truncate text-xs text-gray-500">{kindLabel(cost)}{targetLabel(cost) ? ` · ${targetLabel(cost)}` : ""}</p>
                     </div>
@@ -245,9 +245,8 @@ export default function MyCostsPage() {
                     <tr key={cost.id} className="align-middle">
                       <td className="px-4 py-3">{requestCell(cost)}</td>
                       <td className="px-4 py-3">
-                        <p className="truncate text-sm font-medium text-gray-800 dark:text-white/90" title={cost.categoryName}>{cost.categoryName}</p>
+                        <p className="truncate text-sm font-medium text-gray-800 dark:text-white/90" title={costCodeName(cost.code, cost.categoryName)}>{costCodeName(cost.code, cost.categoryName)}</p>
                         {noteCell(cost)}
-                        <p className="text-xs text-gray-400">{cost.code}</p>
                       </td>
                       <td className="px-4 py-3">
                         <p className="text-sm text-gray-700 dark:text-gray-300">{kindLabel(cost)}</p>

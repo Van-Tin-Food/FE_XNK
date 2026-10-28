@@ -15,7 +15,7 @@ import {
   type PaymentRequestSortKey,
   type PaymentRequestStatus,
 } from "@/services/paymentRequestApi";
-import { canOpenPaymentRequests, formatMoney } from "@/utils/paymentRequest";
+import { canOpenPaymentRequests, costCodeName, formatMoney } from "@/utils/paymentRequest";
 
 // Danh sách đề nghị thanh toán: lọc (trạng thái, mã phí, từ khoá) + sắp xếp + phân trang đều phía server. Bấm một đề nghị -> trang quy trình /payment-requests/<mã>;
 // link cũ ?id=DNTT-001 tự chuyển sang trang đó.
@@ -128,7 +128,7 @@ function PaymentRequestsContent() {
     containers: [...new Set(request.costs.map((cost) => cost.container).filter(Boolean))],
   });
   const costTargetText = (request: PaymentRequest) => [...costTargets(request).contracts, ...costTargets(request).containers].join(", ");
-  const costNames = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => cost.categoryName).filter(Boolean))];
+  const costNames = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => costCodeName(cost.code, cost.categoryName)).filter(Boolean))];
   const toggleSort = (key: PaymentRequestSortKey) => {
     setSort((current) => (current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }));
     setPage(1);

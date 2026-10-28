@@ -110,6 +110,8 @@ const ENTITY_CONFIG: Record<EntityKey, EntityConfig> = {
         options: ["mua_hang", "ban_hang", "van_hanh", "phat_sinh"].map((value) => ({ value, labelKey: `prType_${value}` })),
       },
       { key: "ma_phi", labelKey: "prCostCodeLabel", required: true, uppercase: true, hintKey: "pcatCodeHint" },
+      // Số tài khoản kế toán hạch toán khoản phí (cột tai_khoang), không bắt buộc.
+      { key: "tai_khoang", labelKey: "pcatAccount", hintKey: "pcatAccountHint" },
       {
         key: "vung_phi", labelKey: "pcatFlow", defaultValue: "xanh",
         options: [{ value: "xanh", labelKey: "pcatFlow_xanh" }, { value: "vang", labelKey: "pcatFlow_vang" }, { value: "do", labelKey: "pcatFlow_do" }],

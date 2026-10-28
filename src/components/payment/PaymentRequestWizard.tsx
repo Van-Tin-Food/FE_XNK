@@ -22,7 +22,7 @@ import {
   type TransferField,
   type TransferKind,
 } from "@/services/paymentRequestApi";
-import { addVat, formatAmount, formatMoney, parseAmountLoose, parseVatInput, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
+import { addVat, costCodeName, formatAmount, formatMoney, parseAmountLoose, parseVatInput, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
 import { goodsPaymentKind } from "@/services/paymentCostApi";
 import BankPicker, { matchBank } from "./BankPicker";
 import { PaymentFlowBadge, formatDueDate } from "./PaymentRequestParts";
@@ -352,7 +352,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
 
   const updateRow = (key: string, patch: Partial<OtherRow>) => setOthers((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)));
   const toggle = (ids: string[], on: boolean) => setSelected((current) => (on ? [...new Set([...current, ...ids])] : current.filter((id) => !ids.includes(id))));
-  const costLabel = (cost: PaymentCost) => categoriesById.get(cost.categoryId)?.name || cost.categoryName || cost.code;
+  const costLabel = (cost: PaymentCost) => costCodeName(cost.code, categoriesById.get(cost.categoryId)?.name || cost.categoryName);
   const typeLabel = (type: string) => (type ? t(`prType_${type}`) : "—");
   const codeLabel = (code: string) => (code === "HD" ? `HD · ${t("prCode_HD")}` : code === "CONT" ? `CONT · ${t("prCode_CONT")}` : code);
   const targetOf = (cost: PaymentCost) => [cost.container && `${t("prContainer")} ${cost.container}`, cost.contract && `${t("prContract")} ${cost.contract}`].filter(Boolean).join(" · ");
@@ -397,7 +397,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   // Các khoản đã chọn dạng dòng hiển thị (dùng cho tóm tắt bước chi phí và bản nháp ở bước lưu).
   const chosenLines = [
     ...selectedCosts.map((cost) => ({ key: cost.id, name: costLabel(cost), note: cost.note, target: targetOf(cost), amount: cost.amount, vatLine: vatLineOf(cost.amount, preparedVat(cost)) })),
-    ...manualRows.map((row, index) => ({ key: row.key, name: categoriesById.get(row.categoryId)?.name || "—", note: row.note.trim(), target: "", amount: otherAmounts[index] || "0", vatLine: vatLineOf(otherAmounts[index], otherVats[index]) })),
+    ...manualRows.map((row, index) => ({ key: row.key, name: costCodeName(categoriesById.get(row.categoryId)?.code, categoriesById.get(row.categoryId)?.name) || "—", note: row.note.trim(), target: "", amount: otherAmounts[index] || "0", vatLine: vatLineOf(otherAmounts[index], otherVats[index]) })),
   ];
   const transferText = transfer ? buildTransferInfo(transferKind, transferValues) : "";
   const choosePaymentMethod = (value: PaymentMethod) => setPaymentMethod(value);
@@ -637,7 +637,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                 aria-invalid={Boolean(categoryError)}
                                 className={`${INPUT} ${categoryError ? "border-error-400" : ""}`}>
                                 <option value="">{t("prSelectCategory")}</option>
-                                {manualCategories.map((item: PaymentCategory) => <option key={item.id} value={item.id}>{item.name}{item.flow === "do" ? " ⚠" : ""}</option>)}
+                                {manualCategories.map((item: PaymentCategory) => <option key={item.id} value={item.id}>{costCodeName(item.code, item.name)}{item.flow === "do" ? " ⚠" : ""}</option>)}
                               </select>
                               <FieldError message={categoryError} />
                             </label>
