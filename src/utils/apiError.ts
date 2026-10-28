@@ -170,6 +170,7 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
     case "PAYMENT_DRIVE_MANAGER_DENIED":
     case "PAYMENT_DRIVE_MANAGER_INVALID":
     case "PAYMENT_DRIVE_MANAGER_AUTH_REQUIRED":
+    case "PAYMENT_DRIVE_FOLDER_INVALID":
       return backendMessage || "Thư mục hồ sơ đề nghị trên Google Drive chưa được cấu hình đúng. Vui lòng liên hệ quản trị viên.";
     case "PAYMENT_DOCUMENT_NOT_FOUND":
       return "Chứng từ không còn trong hồ sơ đề nghị. Vui lòng tải lại.";

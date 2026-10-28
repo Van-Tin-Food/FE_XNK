@@ -50,13 +50,15 @@ interface Props {
   kind?: PaymentDocumentKind;
   /** Danh sách chung: được bỏ cả ủy nhiệm chi (người có quyền chi tiền). */
   canRemoveProof?: boolean;
+  /** Được bỏ file (mặc định có khi upload được). Đã chi tiền: người tạo chỉ bổ sung, không bỏ được (BE cũng chặn). */
+  canRemove?: boolean;
   /** Số file đang hiện (để bước lưu trữ biết đã có chứng từ chưa). */
   onFilesChange?: (count: number) => void;
   /** Sau khi upload (lần đầu có link thư mục / ủy nhiệm chi đổi trạng thái): báo trang tải lại đề nghị. */
   onUploaded?: () => void;
 }
 
-export default function PaymentDocumentsPanel({ requestId, canUpload, kind = null, canRemoveProof = false, onFilesChange, onUploaded }: Props) {
+export default function PaymentDocumentsPanel({ requestId, canUpload, kind = null, canRemoveProof = false, canRemove = true, onFilesChange, onUploaded }: Props) {
   const { t, language } = useLanguage();
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
@@ -210,7 +212,7 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
         <ul className="mt-3 divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
           {files.map((file, index) => {
             const isProof = file.kind === PAYMENT_PROOF;
-            const removable = canUpload && (!isProof || proofMode || canRemoveProof);
+            const removable = canUpload && canRemove && (!isProof || proofMode || canRemoveProof);
             return (
               <li key={file.fileId} className="flex items-start gap-2 px-3 py-2.5 sm:items-center">
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">

@@ -254,6 +254,8 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   // Chi tiền (upload ủy nhiệm chi): người duyệt / được ủy quyền / người lưu trữ chứng từ — BE trả can_record_payment.
   const canRecordPayment = request.canRecordPayment === true;
   const canUploadProof = canRecordPayment && (request.status === 1 || request.status === 3);
+  // Đã chi tiền (có ủy nhiệm chi): hồ sơ chỉ bổ sung, chỉ người có quyền chi tiền / lưu trữ bỏ được file (BE cũng chặn).
+  const canRemoveDocs = request.status !== 3 || canRecordPayment;
   // Lưu trữ (đầy đủ chứng từ) chỉ sau khi đã chi tiền.
   const canArchive = can("paymentDocuments", "edit") && request.status === 3;
   // Báo thiếu chứng từ vào Chat cá nhân người đề nghị: khi đã gửi và chưa lưu trữ / hủy.
@@ -529,7 +531,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                   {canUploadDocs && (
                     <>
                       <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prDocsDuringApproval")}</p>
-                      <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} onFilesChange={setFileCount} onUploaded={reload} />
+                      <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} />
                     </>
                   )}
                   {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
@@ -579,7 +581,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                 {canUploadDocs && (
                   <>
                     <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prDocsTitle")}</p>
-                    <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} onFilesChange={setFileCount} onUploaded={reload} />
+                    <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} />
                   </>
                 )}
                 {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
@@ -590,7 +592,8 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
 
         {/* 4. Lưu trữ hồ sơ (sau khi đã chi tiền) */}
         <NodeCard index={3} title={titles[3]} state={states[3]} last>
-          <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} onFilesChange={setFileCount} onUploaded={reload} />
+          <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} />
+          {canUploadDocs && !canRemoveDocs && <p className="mt-2 text-xs text-gray-500">{t("prPaidAddOnlyHint")}</p>}
           {request.status === 3 && (
             <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
               {fileCount > 0 && <p className="mb-3 rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("prDocsDraftHint", { count: fileCount })}</p>}
