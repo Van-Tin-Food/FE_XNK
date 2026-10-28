@@ -162,12 +162,14 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return backendMessage || "Người đề nghị chưa mở chat với app Đề nghị thanh toán trên Google Chat, nên app chưa nhắn riêng được.";
     case "GOOGLE_CHAT_SEND_FAILED":
       return backendMessage || "Không gửi được thông báo vào Google Chat. Vui lòng thử lại.";
-    // Hồ sơ đề nghị trên Drive (Service Account tạo thư mục + cấp quyền): BE ghi rõ email / biến cấu hình cần sửa.
+    // Hồ sơ đề nghị trên Drive (tài khoản quản lý tạo thư mục + cấp quyền): BE ghi rõ email / biến cấu hình cần sửa.
     case "PAYMENT_DRIVE_SHARE_FAILED":
       return backendMessage || "Chưa cấp được quyền thư mục hồ sơ trên Google Drive. Vui lòng liên hệ quản trị viên.";
     case "PAYMENT_DRIVE_NOT_CONFIGURED":
-    case "PAYMENT_DRIVE_SERVICE_ACCOUNT_DENIED":
-    case "DRIVE_SERVICE_ACCOUNT_INVALID":
+    case "PAYMENT_DRIVE_ROOT_DENIED":
+    case "PAYMENT_DRIVE_MANAGER_DENIED":
+    case "PAYMENT_DRIVE_MANAGER_INVALID":
+    case "PAYMENT_DRIVE_MANAGER_AUTH_REQUIRED":
       return backendMessage || "Thư mục hồ sơ đề nghị trên Google Drive chưa được cấu hình đúng. Vui lòng liên hệ quản trị viên.";
     case "PAYMENT_DOCUMENT_NOT_FOUND":
       return "Chứng từ không còn trong hồ sơ đề nghị. Vui lòng tải lại.";
