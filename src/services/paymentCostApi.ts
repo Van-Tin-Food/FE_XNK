@@ -11,6 +11,7 @@ export interface CostCategory {
   id: string;
   type: string;
   code: string;
+  account: string;
   flow: PaymentFlow;
   name: string;
   /** Danh mục có thuế: tạo đề nghị phải nhập % VAT. */
@@ -102,6 +103,7 @@ function normalize(payload: unknown): OrderCosts {
       id: str(row.id_payment_category),
       type: str(row.loai_phi),
       code: str(row.ma_phi),
+      account: str(row.tai_khoang),
       flow: row.vung_phi === "do" || row.vung_phi === "vang" ? row.vung_phi : "xanh",
       name: str(row.noi_dung),
       taxed: row.co_thue === true,

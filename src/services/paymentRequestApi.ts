@@ -28,6 +28,7 @@ export interface PaymentCategory {
   id: string;
   type: string;
   code: string;
+  account: string;
   flow: PaymentFlow;
   name: string;
   /** Danh mục có thuế: tạo đề nghị phải nhập % VAT (số tiền luôn là số đã gồm VAT). */
@@ -39,6 +40,7 @@ export interface PaymentCost {
   categoryId: string;
   type: string;
   code: string;
+  account: string;
   flow: PaymentFlow;
   categoryName: string;
   amount: string;
@@ -288,6 +290,7 @@ function normalizeCost(row: unknown): PaymentCost | null {
     categoryId: str(row.id_payment_category),
     type: str(row.loai_phi),
     code: str(row.ma_phi),
+    account: str(row.tai_khoang),
     flow: flowOf(row.vung_phi),
     categoryName: str(row.ten_phi),
     amount: str(row.so_tien),
@@ -390,6 +393,7 @@ export async function getPaymentRequestOptions(signal?: AbortSignal): Promise<Pa
       id: str(row.id_payment_category),
       type: str(row.loai_phi),
       code: str(row.ma_phi),
+      account: str(row.tai_khoang),
       flow: flowOf(row.vung_phi),
       name: str(row.noi_dung),
       taxed: row.co_thue === true,

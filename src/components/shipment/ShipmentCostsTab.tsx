@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { getOrderCosts, goodsPaymentKind, saveOrderCosts, type CostCategory, type OrderCost, type OrderCosts } from "@/services/paymentCostApi";
-import { amountToCents, costCodeName, formatAmount, parseAmountLoose, subtractAmounts, sumAmounts } from "@/utils/paymentRequest";
+import { amountToCents, formatAmount, parseAmountLoose, subtractAmounts, sumAmounts } from "@/utils/paymentRequest";
 
 // Tab "Chi phí" của đơn hàng: nhập trước chi phí để khi tạo đề nghị thanh toán chỉ tick chọn, không nhập lại số tiền.
 // Hai phần nằm cạnh nhau (desktop): phí theo hợp đồng (mã HD: cọc hàng, thanh toán tiền còn lại, thuế nhập khẩu...) bên
@@ -269,7 +269,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
                   <li key={key} className={`rounded-lg border p-2.5 ${dirtyKeys.includes(key) ? "border-warning-300 bg-warning-50/40 dark:border-warning-500/40 dark:bg-warning-500/5" : "border-gray-100 bg-gray-50/60 dark:border-gray-800 dark:bg-gray-800/40"}`}>
                     {/* Một hàng: khoản phí | số tiền | nội dung | xoá; thẻ hẹp thì nội dung xuống dòng dưới */}
                     <div className={ENTRY_GRID}>
-                      <span className="line-clamp-2 min-w-0 break-words text-sm font-medium text-gray-800 dark:text-gray-100" title={costCodeName(category.code, category.name)}>{costCodeName(category.code, category.name)}</span>
+                      <span className="line-clamp-2 min-w-0 break-words text-sm font-medium text-gray-800 dark:text-gray-100" title={category.account ? `${category.account} · ${category.name}` : category.name}>{category.account ? `${category.account} · ${category.name}` : category.name}</span>
                       <span className="min-w-0">
                         <input inputMode="decimal" aria-label={`${t("pcAmountLabel")} ${category.name}`} value={valueOf(key)} disabled={!editable}
                           onChange={(event) => setAmount(key, event.target.value)} aria-invalid={invalidKeys.has(key)}

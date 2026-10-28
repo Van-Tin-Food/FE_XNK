@@ -337,7 +337,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   /** Đổi loại / mã phí: một đề nghị chỉ một loại + một mã, nên bỏ các khoản đã chọn của loại / mã cũ. */
   const chooseGroup = (type: string, code: string) => {
     if (type === costType && code === costCode) return;
-    if (selected.length || others.length) notify(t("prGroupChanged"), "info");
     setCostType(type);
     setCostCode(code);
     setSelected([]);
@@ -352,9 +351,12 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
 
   const updateRow = (key: string, patch: Partial<OtherRow>) => setOthers((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)));
   const toggle = (ids: string[], on: boolean) => setSelected((current) => (on ? [...new Set([...current, ...ids])] : current.filter((id) => !ids.includes(id))));
-  const costLabel = (cost: PaymentCost) => costCodeName(cost.code, categoriesById.get(cost.categoryId)?.name || cost.categoryName);
+  const costLabel = (cost: PaymentCost) => {
+    const name = categoriesById.get(cost.categoryId)?.name || cost.categoryName;
+    return cost.code.toUpperCase() === "VH" ? [cost.account, name].filter(Boolean).join(" · ") : costCodeName(cost.code, name);
+  };
   const typeLabel = (type: string) => (type ? t(`prType_${type}`) : "—");
-  const codeLabel = (code: string) => (code === "HD" ? `HD · ${t("prCode_HD")}` : code === "CONT" ? `CONT · ${t("prCode_CONT")}` : code);
+  const codeLabel = (code: string) => (code === "HD" ? `HD · ${t("prCode_HD")}` : code === "CONT" ? `CONT · ${t("prCode_CONT")}` : code === "VH" ? t("prCode_VH") : code);
   const targetOf = (cost: PaymentCost) => [cost.container && `${t("prContainer")} ${cost.container}`, cost.contract && `${t("prContract")} ${cost.contract}`].filter(Boolean).join(" · ");
 
   // Lỗi từng bước (cùng điều kiện với complete): hiện thành danh sách khi người dùng bấm Tiếp tục / Lưu, để biết phải sửa gì.
@@ -397,7 +399,13 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   // Các khoản đã chọn dạng dòng hiển thị (dùng cho tóm tắt bước chi phí và bản nháp ở bước lưu).
   const chosenLines = [
     ...selectedCosts.map((cost) => ({ key: cost.id, name: costLabel(cost), note: cost.note, target: targetOf(cost), amount: cost.amount, vatLine: vatLineOf(cost.amount, preparedVat(cost)) })),
-    ...manualRows.map((row, index) => ({ key: row.key, name: costCodeName(categoriesById.get(row.categoryId)?.code, categoriesById.get(row.categoryId)?.name) || "—", note: row.note.trim(), target: "", amount: otherAmounts[index] || "0", vatLine: vatLineOf(otherAmounts[index], otherVats[index]) })),
+    ...manualRows.map((row, index) => {
+      const category = categoriesById.get(row.categoryId);
+      const name = category?.code.toUpperCase() === "VH"
+        ? [category.account, category.name].filter(Boolean).join(" · ")
+        : costCodeName(category?.code, category?.name);
+      return { key: row.key, name: name || "—", note: row.note.trim(), target: "", amount: otherAmounts[index] || "0", vatLine: vatLineOf(otherAmounts[index], otherVats[index]) };
+    }),
   ];
   const transferText = transfer ? buildTransferInfo(transferKind, transferValues) : "";
   const choosePaymentMethod = (value: PaymentMethod) => setPaymentMethod(value);
@@ -637,7 +645,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                 aria-invalid={Boolean(categoryError)}
                                 className={`${INPUT} ${categoryError ? "border-error-400" : ""}`}>
                                 <option value="">{t("prSelectCategory")}</option>
-                                {manualCategories.map((item: PaymentCategory) => <option key={item.id} value={item.id}>{costCodeName(item.code, item.name)}{item.flow === "do" ? " ⚠" : ""}</option>)}
+                                {manualCategories.map((item: PaymentCategory) => <option key={item.id} value={item.id}>{item.code.toUpperCase() === "VH" ? [item.account, item.name].filter(Boolean).join(" · ") : costCodeName(item.code, item.name)}{item.flow === "do" ? " ⚠" : ""}</option>)}
                               </select>
                               <FieldError message={categoryError} />
                             </label>

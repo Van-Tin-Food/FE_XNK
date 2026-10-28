@@ -439,7 +439,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                 </div>
                 <div><dt className="text-gray-500">{t("prTotal")}</dt><dd className="font-bold tabular-nums text-gray-900 dark:text-white">{money(request.total)}</dd></div>
                 {request.costs[0] && (
-                  <div><dt className="text-gray-500">{t("prCostTypeLabel")} / {t("prCostCodeLabel")}</dt><dd className="font-medium text-gray-800 dark:text-white/90">{t(`prType_${request.costs[0].type}`)} · {request.costs[0].code}</dd></div>
+                  <div><dt className="text-gray-500">{t("prCostTypeLabel")} / {request.costs[0].code.toUpperCase() === "VH" ? t("pcatAccount") : t("prCostCodeLabel")}</dt><dd className="font-medium text-gray-800 dark:text-white/90">{t(`prType_${request.costs[0].type}`)} · {request.costs[0].code.toUpperCase() === "VH" ? request.costs[0].account || "—" : request.costs[0].code}</dd></div>
                 )}
               </dl>
               {/* Mã VietQR (chuyển khoản trong nước bằng VND), không có mã thì thông tin chuyển khoản dạng chữ. Đang chờ chi
@@ -453,7 +453,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                   <li key={cost.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2.5">
                     <div className="min-w-0 flex-1">
                       <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-white/90">
-                        <span className="break-words">{costCodeName(cost.code, cost.categoryName)}{cost.note && <span className="font-normal text-gray-600 dark:text-gray-300"> — {cost.note}</span>}</span>
+                        <span className="break-words">{cost.code.toUpperCase() === "VH" ? [cost.account, cost.categoryName].filter(Boolean).join(" · ") : costCodeName(cost.code, cost.categoryName)}{cost.note && <span className="font-normal text-gray-600 dark:text-gray-300"> — {cost.note}</span>}</span>
                         <PaymentFlowBadge flow={cost.flow} />
                       </p>
                       <p className="truncate text-xs text-gray-500">
