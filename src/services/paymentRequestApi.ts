@@ -476,8 +476,8 @@ export async function confirmPaymentRequestDocuments(id: string): Promise<Paymen
 }
 
 /**
- * Báo thiếu chứng từ: BE gửi vào hộp chat Google Chat cá nhân của người tạo đề nghị (webhook users.space_google; người đề
- * nghị không ở trong nhóm Chat duyệt). Người tạo chưa có webhook: lỗi 409 PAYMENT_REQUESTER_NO_CHAT.
+ * Báo thiếu chứng từ: BE gửi vào hộp chat Google Chat cá nhân của người tạo đề nghị (app tìm hộp chat theo ID Google của
+ * họ; người đề nghị không ở trong nhóm Chat duyệt). Chưa nhắn riêng được: lỗi 409 PAYMENT_REQUESTER_NO_CHAT.
  */
 export async function notifyMissingPaymentDocuments(id: string, note: string): Promise<{ requesterName: string }> {
   const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/missing-documents`, { note });
