@@ -105,6 +105,12 @@ export async function updateDatabaseRow<T extends object>(path: string, id: stri
   return updated;
 }
 
+export async function deleteDatabaseRow(path: string, id: string): Promise<unknown> {
+  const deleted = await databaseRequest(`${path}/${encodeURIComponent(id)}`, { method: "DELETE" });
+  invalidateCatalog(path);
+  return deleted;
+}
+
 // Danh mục ít thay đổi (nhà cung cấp, hãng tàu, kho) được dùng lại trong vài phút thay vì tải lại
 // mỗi lần mở modal / lưu OCR. Khoá theo token để đổi tài khoản không dùng nhầm dữ liệu đã ẩn/hiện
 // theo quyền của người trước. Tạo/sửa qua createDatabaseRow/updateDatabaseRow thì xoá cache.

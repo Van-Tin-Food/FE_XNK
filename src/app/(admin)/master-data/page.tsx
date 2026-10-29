@@ -7,7 +7,7 @@ import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { recordActivity } from "@/services/activityLogApi";
-import { createDatabaseRow, getDatabaseRow, listDatabaseRows, updateDatabaseRow } from "@/services/postgresShipmentApi";
+import { createDatabaseRow, deleteDatabaseRow, getDatabaseRow, listDatabaseRows, updateDatabaseRow } from "@/services/postgresShipmentApi";
 import type { SupplierContact } from "@/types/postgresShipment";
 import { findSupplierContactError, formatSupplierContact, supplierContacts } from "@/utils/supplierContacts";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -146,6 +146,9 @@ export default function MasterDataPage() {
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
   const [countryFilter, setCountryFilter] = useState("");
+  const [costFlowFilter, setCostFlowFilter] = useState("");
+  const [costAccountFilter, setCostAccountFilter] = useState("");
+  const [costTypeFilter, setCostTypeFilter] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [form, setForm] = useState<Record<string, string>>(() => emptyForm(ENTITY_CONFIG.suppliers));
@@ -198,6 +201,9 @@ export default function MasterDataPage() {
     setOriginalContacts([]);
     setQuery("");
     setCountryFilter("");
+    setCostFlowFilter("");
+    setCostAccountFilter("");
+    setCostTypeFilter("");
     setPage(1);
     void loadRows();
     // Chỉ tải lại khi đổi loại danh mục hoặc quyền hiện tại.
@@ -208,12 +214,22 @@ export default function MasterDataPage() {
     const keyword = query.trim().toLocaleLowerCase("vi");
     return rows.filter((row) => {
       if (active === "suppliers" && countryFilter && String(row.quoc_gia ?? "").trim() !== countryFilter) return false;
+      if (active === "paymentCategories") {
+        if (costFlowFilter && String(row.vung_phi ?? "").trim() !== costFlowFilter) return false;
+        if (costAccountFilter && String(row.tai_khoang ?? "").trim() !== costAccountFilter) return false;
+        if (costTypeFilter && String(row.loai_phi ?? "").trim() !== costTypeFilter) return false;
+      }
       return !keyword || listFields.some((field) => displayValue(field, row).toLocaleLowerCase("vi").includes(keyword));
     });
     // displayValue chỉ phụ thuộc listFields + ngôn ngữ (t).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, countryFilter, listFields, query, rows, t]);
+  }, [active, countryFilter, costAccountFilter, costFlowFilter, costTypeFilter, listFields, query, rows, t]);
   const countries = useMemo(() => Array.from(new Set(rows.map((row) => String(row.quoc_gia ?? "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "vi")), [rows]);
+  const costFilterOptions = useMemo(() => ({
+    flows: Array.from(new Set(rows.map((row) => String(row.vung_phi ?? "").trim()).filter(Boolean))).sort(),
+    accounts: Array.from(new Set(rows.map((row) => String(row.tai_khoang ?? "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "vi")),
+    types: Array.from(new Set(rows.map((row) => String(row.loai_phi ?? "").trim()).filter(Boolean))).sort(),
+  }), [rows]);
   const countrySuggestions = useMemo(() => {
     const prefix = String(form.quoc_gia ?? "").trim().toLocaleLowerCase("vi");
     if (prefix.length < 2) return [];
@@ -310,12 +326,47 @@ export default function MasterDataPage() {
     }
   };
 
+  const remove = async () => {
+    if (!editingId || !canManage) return;
+    const approved = await confirm({
+      title: t("confirmCatalogDelete", { catalog: t(config.singularKey) }),
+      message: t("confirmCatalogDeleteMessage", { id: editingId }),
+      confirmText: t("mcDelete"),
+      tone: "danger",
+    });
+    if (!approved) return;
+    setSaving(true);
+    try {
+      await deleteDatabaseRow(config.endpoint, editingId);
+      notify(t("catalogDeleted", { catalog: t(config.singularKey) }), "success");
+      beginCreate();
+      await loadRows();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : t("catalogDeleteError", { catalog: t(config.singularKey) }), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!canView) {
     return <div className="flex min-h-[55vh] items-center justify-center text-sm font-medium text-error-600">{t("adminAllOnly")}</div>;
   }
 
   return (
-    <section className="space-y-5">
+    <section className={`space-y-5 ${active === "paymentCategories" ? "payment-categories-catalog" : ""}`}>
+      <style jsx global>{`
+        .payment-categories-catalog table { min-width: 1100px; }
+        .payment-categories-catalog th:nth-child(1), .payment-categories-catalog td:nth-child(1) { width: 260px; }
+        .payment-categories-catalog th:nth-child(2), .payment-categories-catalog td:nth-child(2) { width: 150px; }
+        .payment-categories-catalog th:nth-child(3), .payment-categories-catalog td:nth-child(3) { width: 110px; }
+        .payment-categories-catalog th:nth-child(4), .payment-categories-catalog td:nth-child(4) { width: 140px; }
+        .payment-categories-catalog th:nth-child(5), .payment-categories-catalog td:nth-child(5) { width: 120px; }
+        .payment-categories-catalog th:nth-child(6), .payment-categories-catalog td:nth-child(6) { width: 100px; }
+        .payment-categories-catalog th:nth-child(7), .payment-categories-catalog td:nth-child(7) { width: 120px; }
+        .payment-categories-catalog th:nth-child(8), .payment-categories-catalog td:nth-child(8) { width: 110px; }
+        .payment-categories-catalog th:nth-child(7) { white-space: normal; }
+        .payment-categories-catalog td:nth-child(7) { text-align: center; }
+      `}</style>
       <div>
         <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">{hasDedicatedCatalogRoute ? t(config.titleKey) : t("masterDataManagement")}</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("masterDataDescription")}</p>
@@ -333,6 +384,11 @@ export default function MasterDataPage() {
             <div><h2 className="font-semibold text-gray-800 dark:text-white">{t("catalogList", { catalog: t(config.titleKey) })}</h2><p className="text-xs text-gray-400">{t("dataCount", { count: filteredRows.length })}</p></div>
             <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row">{active === "suppliers" && <select value={countryFilter} onChange={(event) => { setCountryFilter(event.target.value); setPage(1); }} aria-label={t("country")} className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 sm:w-44 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">{t("allCountries")}</option>{countries.map((country) => <option key={country} value={country}>{country}</option>)}</select>}<SearchSuggestions value={query} onChange={(value) => { setQuery(value); setPage(1); }} suggestions={rows.flatMap((row) => listFields.map((field) => displayValue(field, row)))} placeholder={t("searchPlaceholderShort")} ariaLabel={t("searchPlaceholderShort")} className="h-10 min-w-0 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /><button type="button" onClick={() => void loadRows()} className="shrink-0 whitespace-nowrap rounded-xl border border-gray-200 px-3 text-sm font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300">{t("refreshData")}</button></div>
           </div>
+          {active === "paymentCategories" && <div className="grid gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:grid-cols-3">
+            <select value={costFlowFilter} onChange={(event) => { setCostFlowFilter(event.target.value); setPage(1); }} aria-label={t("pcatFlow")} className="h-10 min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">{t("pcatAllFlows")}</option>{costFilterOptions.flows.map((flow) => <option key={flow} value={flow}>{t(`pcatFlow_${flow}`)}</option>)}</select>
+            <select value={costAccountFilter} onChange={(event) => { setCostAccountFilter(event.target.value); setPage(1); }} aria-label={t("pcatAccount")} className="h-10 min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">{t("pcatAllAccounts")}</option>{costFilterOptions.accounts.map((account) => <option key={account} value={account}>{account}</option>)}</select>
+            <select value={costTypeFilter} onChange={(event) => { setCostTypeFilter(event.target.value); setPage(1); }} aria-label={t("prCostTypeLabel")} className="h-10 min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">{t("pcatAllCostTypes")}</option>{costFilterOptions.types.map((type) => <option key={type} value={type}>{t(`prType_${type}`)}</option>)}</select>
+          </div>}
           {loading ? <div className="flex min-h-60 items-center justify-center"><span className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div> : (
             <>
             <div className="divide-y divide-gray-100 md:hidden dark:divide-gray-800">
@@ -363,6 +419,7 @@ export default function MasterDataPage() {
           <div className="space-y-4">{formFields.filter((field) => !field.autoGenerated || Boolean(editingId)).map((field) => field.contacts ? <SupplierContactsEditor key={field.key} label={t(field.labelKey)} contacts={contacts} onChange={setContacts} /> : <label key={field.key} className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t(field.labelKey)}{field.required && <span className="text-error-500"> *</span>}{field.autoGenerated && !editingId && <span className="ml-1 text-xs font-normal text-gray-400">(tự động)</span>}{field.options ? <select value={form[field.key] || ""} onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{field.options.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}</select> : field.multiline ? <textarea value={form[field.key] || ""} disabled={Boolean(editingId && field.key === config.idField)} onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))} rows={3} className="mt-1.5 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-brand-400 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /> : <input type={field.key === "email" ? "email" : "text"} value={form[field.key] || ""} disabled={Boolean(editingId && field.key === config.idField)} onChange={(event) => setForm((current) => ({ ...current, [field.key]: field.uppercase ? event.target.value.toUpperCase() : event.target.value }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />}{field.hintKey && <span className="mt-1 block text-xs font-normal text-gray-400">{t(field.hintKey)}</span>}</label>)}</div>
           {active === "suppliers" && <datalist id="supplier-country-options">{countrySuggestions.map((country) => <option key={country} value={country} />)}</datalist>}
           <button type="submit" disabled={saving} className="mt-5 w-full rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60">{saving ? t("saving") : editingId ? t("save") : t("addNew")}</button>
+          {editingId && <button type="button" onClick={() => void remove()} disabled={saving} className="mt-2 w-full rounded-xl border border-error-200 px-4 py-2.5 text-sm font-semibold text-error-600 hover:bg-error-50 disabled:opacity-60 dark:border-error-500/30 dark:text-error-300 dark:hover:bg-error-500/10">{t("mcDelete")}</button>}
         </form>
       </div>
     </section>

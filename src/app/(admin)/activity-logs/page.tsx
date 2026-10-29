@@ -40,6 +40,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   AI_CHAT: "logAiChat",
   CREATE_MASTER_DATA: "logCreateMasterData",
   UPDATE_MASTER_DATA: "logUpdateMasterData",
+  DELETE_MASTER_DATA: "logDeleteMasterData",
   REGISTER_USER: "logRegisterUser",
   UPDATE_USER_PERMISSION: "logUpdatePermission",
   UPDATE_USER_PASSWORD: "logResetPassword",

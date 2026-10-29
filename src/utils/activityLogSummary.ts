@@ -47,7 +47,7 @@ export function activityLogSummary(
     return action.toUpperCase() === "UPDATE_USER_PERMISSION" && changes ? compactChanges(subject, changes) : subject;
   }
 
-  if (["CREATE_MASTER_DATA", "UPDATE_MASTER_DATA"].includes(action.toUpperCase())) {
+  if (["CREATE_MASTER_DATA", "UPDATE_MASTER_DATA", "DELETE_MASTER_DATA"].includes(action.toUpperCase())) {
     const subject = detail.split(";", 1)[0]?.trim() || "";
     const changes = detail.split(";").slice(1).join(";").trim();
     return changes ? compactChanges(subject, changes) : subject;
