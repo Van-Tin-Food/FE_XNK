@@ -143,6 +143,8 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Không kiểm tra được tài khoản đăng nhập. Vui lòng thử lại sau.";
     case "SESSION_REFRESH_DENIED":
       return "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+    case "SUPPLIER_CONTACT_INVALID":
+      return backendMessage || "Danh sách người liên hệ chưa hợp lệ: mỗi người cần có email đúng định dạng hoặc số điện thoại.";
     case "INVALID_PAYMENT_REQUEST":
     case "INVALID_PAYMENT_CATEGORY":
       return backendMessage || "Dữ liệu đề nghị thanh toán chưa hợp lệ.";

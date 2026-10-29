@@ -1,10 +1,17 @@
+/** Một người liên hệ của nhà cung cấp (phần tử của cột JSONB nha_cung_cap.lien_he). */
+export interface SupplierContact {
+  ten_nguoi_lien_he?: string | null;
+  email?: string | null;
+  so_dien_thoai?: string | null;
+}
+
 export interface SupplierRecord {
   id_ncc: string;
   ten_ncc: string;
-  email?: string | null;
   quoc_gia?: string | null;
+  /** Ẩn (không có trong response) khi tài khoản không có quyền supplierContact. */
   dia_chi?: string | null;
-  so_dien_thoai?: string | null;
+  lien_he?: SupplierContact[] | null;
 }
 
 export interface CarrierRecord {
