@@ -244,14 +244,16 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   if (!request) return <div className="flex justify-center py-20"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>;
 
   const isOwner = Boolean(user?.id) && Number(user?.id) === request.userId && can("paymentRequests", "edit");
-  // Người tạo, hoặc kế toán (paymentRequestsAll edit) sửa / gửi / hủy được đề nghị của mọi người.
-  const canManage = isOwner || (can("paymentRequests", "edit") && can("paymentRequestsAll", "edit"));
+  // Sửa / gửi / hủy: người tạo, kế toán (paymentRequestsAll edit), người được ủy quyền tạo đề nghị thay (đề nghị chưa duyệt).
+  // BE tính sẵn can_manage; bản BE cũ chưa trả thì tính như trước.
+  const canManage = request.canManage ?? (isOwner || (can("paymentRequests", "edit") && can("paymentRequestsAll", "edit")));
   const sent = request.sent;
   const cancelled = request.status === -2;
   // Chưa duyệt (nháp / đang chờ) hoặc bị từ chối: sửa hoặc hủy được.
   const canEdit = canManage && (request.status === 0 || request.status === -1);
-  // Chứng từ upload dần (tạm) cho tới khi bấm "Đầy đủ chứng từ"; đề nghị đã hủy / hoàn thành thì khóa.
-  const canUploadDocs = (isOwner || can("paymentDocuments", "edit")) && request.status !== 2 && !cancelled;
+  // Chứng từ upload dần (tạm) cho tới khi bấm "Đầy đủ chứng từ"; đề nghị đã hủy / hoàn thành thì khóa. BE trả
+  // can_upload_documents (gồm người tạo đề nghị thay khi chưa duyệt).
+  const canUploadDocs = (request.canUploadDocuments ?? (isOwner || can("paymentDocuments", "edit"))) && request.status !== 2 && !cancelled;
   // Chi tiền (upload ủy nhiệm chi): người duyệt / được ủy quyền / người lưu trữ chứng từ — BE trả can_record_payment.
   const canRecordPayment = request.canRecordPayment === true;
   const canUploadProof = canRecordPayment && (request.status === 1 || request.status === 3);

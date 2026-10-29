@@ -40,6 +40,8 @@ export const PERMISSION_FUNCTIONS = {
   // Đề nghị thanh toán: view = xem đề nghị của mình; edit = tạo, sửa đề nghị của mình.
   paymentRequests: ["none", "view", "edit"],
   paymentRequestsAll: ["none", "view", "edit"], // Đề nghị của mọi người: view = xem; edit = sửa, gửi, hủy
+  // Tạo đề nghị thay (ủy quyền): chọn người đứng tên; quản lý đề nghị của mọi người khi chưa duyệt.
+  paymentRequestsOnBehalf: ["none", "edit"],
   paymentApprove: ["none", "edit"], // Duyệt / từ chối trên Google Chat
   paymentDocuments: ["none", "edit"], // Upload chứng từ + lưu trữ hồ sơ đề nghị
   containerCosts: ["none", "view", "edit"], // Tab Chi phí của đơn: chi phí container
@@ -57,7 +59,7 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ key: string; functions: readonly
   { key: "permissionGroupDocuments", functions: ["documents", "documentArchive", "documentDelete", "containerTransport"] },
   // Khớp đúng 4 mục của menu "Công cụ hỗ trợ" trên sidebar.
   { key: "supportTools", functions: ["email", "documentSync", "marketResearch", "legacyEtaOrders"] },
-  { key: "permissionGroupPayments", functions: ["paymentRequests", "paymentRequestsAll", "paymentApprove", "paymentDocuments", "costReports"] },
+  { key: "permissionGroupPayments", functions: ["paymentRequests", "paymentRequestsAll", "paymentRequestsOnBehalf", "paymentApprove", "paymentDocuments", "costReports"] },
   { key: "permissionGroupSensitive", functions: ["purchaseAmounts", "supplierContact"] },
   { key: "permissionGroupCatalogs", functions: ["catalogSuppliers", "catalogCarriers", "catalogWarehouses", "paymentCategories"] },
   { key: "permissionGroupSystem", functions: ["users", "activityLogs", "userGuide"] },

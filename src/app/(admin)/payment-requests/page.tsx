@@ -15,7 +15,7 @@ import {
   type PaymentRequestSortKey,
   type PaymentRequestStatus,
 } from "@/services/paymentRequestApi";
-import { canOpenPaymentRequests, costCodeName, formatMoney } from "@/utils/paymentRequest";
+import { canCreatePaymentRequests, canOpenPaymentRequests, costCodeName, formatMoney } from "@/utils/paymentRequest";
 
 // Danh sách đề nghị thanh toán: lọc (trạng thái, mã phí, từ khoá) + sắp xếp + phân trang đều phía server. Bấm một đề nghị -> trang quy trình /payment-requests/<mã>;
 // link cũ ?id=DNTT-001 tự chuyển sang trang đó.
@@ -37,7 +37,7 @@ function PaymentRequestsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const canView = canOpenPaymentRequests(can);
-  const canCreate = can("paymentRequests", "edit");
+  const canCreate = canCreatePaymentRequests(can);
 
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
   const [total, setTotal] = useState(0);

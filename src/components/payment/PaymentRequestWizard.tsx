@@ -183,6 +183,11 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [optionsError, setOptionsError] = useState("");
   const [optionsKey, setOptionsKey] = useState(0);
   const [content, setContent] = useState(editing?.content || "");
+  // Tạo đề nghị thay (người được ủy quyền, chỉ khi tạo mới): id tài khoản đứng tên; "" = chính mình.
+  const [requesterId, setRequesterId] = useState("");
+  // BE chỉ trả danh sách người đứng tên cho người được ủy quyền tạo thay; không chọn = chính mình.
+  const requesters = !editing ? options?.requesters || [] : [];
+  const requester = requesters.find((item) => item.id === requesterId) || null;
   // Khoản nhập sẵn (gắn hợp đồng / cont) đang thuộc đề nghị khi sửa: giữ để hiện cùng danh sách chọn.
   const [ownPrepared] = useState<PaymentCost[]>(() => (editing ? editing.costs.filter(isPrepared) : []));
   const [selected, setSelected] = useState<string[]>(() => ownPrepared.map((cost) => cost.id));
@@ -355,7 +360,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     return cost.code.toUpperCase() === "VH" ? [cost.account, name].filter(Boolean).join(" · ") : costCodeName(cost.code, name);
   };
   const typeLabel = (type: string) => (type ? t(`prType_${type}`) : "—");
-  const codeLabel = (code: string) => (code === "HD" ? `HD · ${t("prCode_HD")}` : code === "CONT" ? `CONT · ${t("prCode_CONT")}` : code === "VH" ? t("prCode_VH") : code);
+  const codeLabel = (code: string) => (code === "HD" ? `HD · ${t("prCode_HD")}` : code === "CONT" ? `CONT · ${t("prCode_CONT")}` : code === "VH" ? t("prCode_VH") : code === "BH" ? t("prCode_BH") : code);
   const targetOf = (cost: PaymentCost) => [cost.container && `${t("prContainer")} ${cost.container}`, cost.contract && `${t("prContract")} ${cost.contract}`].filter(Boolean).join(" · ");
 
   // Lỗi từng bước (cùng điều kiện với complete): hiện thành danh sách khi người dùng bấm Tiếp tục / Lưu, để biết phải sửa gì.
@@ -449,6 +454,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
           ...selectedCosts.map((cost) => ({ id: cost.id, categoryId: cost.categoryId, amount: cost.amount, container: cost.container, contract: cost.contract, vat: preparedVat(cost) ?? undefined })),
           ...manualRows.map((row, index) => ({ id: row.id, categoryId: row.categoryId, amount: otherAmounts[index] as string, note: row.note.trim(), vat: otherVats[index] ?? undefined })),
         ],
+        ...(!editing && requester ? { requesterId: requester.id } : {}),
       };
       const saved = editing ? await updatePaymentRequest(editing.id, input) : await createPaymentRequest(input);
       notify(t(editing ? "prChangesSaved" : "prDraftSaved", { id: saved.id }), "success");
@@ -483,6 +489,19 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-error-50 px-4 py-3 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-300">
           <span className="min-w-0 break-words">{optionsError}</span>
           <button type="button" onClick={() => setOptionsKey((key) => key + 1)} className="font-semibold underline">{t("prRetry")}</button>
+        </div>
+      )}
+
+      {/* Tạo đề nghị thay: chọn người đứng tên (họ nhận tin nhắn, thư mục chứng từ, quyền như tự tạo). */}
+      {requesters.length > 0 && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] sm:p-5">
+          <label htmlFor="pr-requester" className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prRequesterLabel")}</label>
+          <select id="pr-requester" value={requesterId} onChange={(event) => setRequesterId(event.target.value)}
+            className="mt-1.5 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 sm:max-w-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+            <option value="">{t("prRequesterSelf")}</option>
+            {requesters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <p className="mt-1.5 text-xs text-gray-500">{t("prRequesterHint")}</p>
         </div>
       )}
 
@@ -845,6 +864,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("prDraftPreview")}</p>
             <p className="mt-1 whitespace-pre-line break-words text-sm font-medium text-gray-900 dark:text-white">{content}</p>
             <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+              {requester && <div className="sm:col-span-2"><dt className="text-xs text-gray-500">{t("prRequesterLabel")}</dt><dd className="break-words font-medium text-gray-800 dark:text-white/90">{requester.name}</dd></div>}
               <div><dt className="text-xs text-gray-500">{t("prCostTypeLabel")} / {t("prCostCodeLabel")}</dt><dd className="font-medium text-gray-800 dark:text-white/90">{typeLabel(costType)} · {codeLabel(costCode)}</dd></div>
               <div><dt className="text-xs text-gray-500">{t("prPaymentLineLabel")}</dt><dd className="font-medium text-gray-800 dark:text-white/90">{paymentLine || "—"}</dd></div>
               {transfer && <div className="sm:col-span-2"><dt className="text-xs text-gray-500">{t("prTransferInfo")}</dt><dd className="whitespace-pre-line break-words font-medium text-gray-800 dark:text-white/90">{transferText}</dd></div>}

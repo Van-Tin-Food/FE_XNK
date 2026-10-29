@@ -145,6 +145,10 @@ export interface PaymentRequest {
   canDecide: boolean | null;
   /** Người đang xem được chi tiền (upload ủy nhiệm chi); null = BE không trả (danh sách). */
   canRecordPayment: boolean | null;
+  /** Được sửa / gửi / hủy (người tạo, kế toán, người tạo đề nghị thay khi chưa duyệt); null = BE không trả (danh sách). */
+  canManage: boolean | null;
+  /** Được upload / bỏ chứng từ hồ sơ; null = BE không trả (danh sách). */
+  canUploadDocuments: boolean | null;
   costCount: number;
   costs: PaymentCost[];
 }
@@ -168,6 +172,14 @@ export interface PaymentRequestOptions {
   availableCosts: PaymentCost[];
   /** Danh sách ngân hàng (chuyển khoản trong nước); rỗng = BE chưa có bảng ngân hàng. */
   banks: PaymentBank[];
+  /** Tài khoản chọn làm người đứng tên (chỉ người được ủy quyền tạo đề nghị thay); rỗng = không được tạo thay. */
+  requesters: PaymentRequester[];
+}
+
+/** Người đứng tên đề nghị khi tạo thay. */
+export interface PaymentRequester {
+  id: string;
+  name: string;
 }
 
 export interface PaymentBeneficiarySuggestion {
@@ -204,6 +216,8 @@ export interface PaymentRequestInput {
   bankBin?: string;
   dueDate: string;
   costs: PaymentCostInput[];
+  /** Tạo đề nghị thay: id tài khoản đứng tên (chỉ khi tạo mới, người được ủy quyền); bỏ trống = chính mình. */
+  requesterId?: string;
 }
 
 export interface PaymentDocumentFile {
@@ -329,6 +343,8 @@ function normalizeRequest(row: unknown): PaymentRequest | null {
     hasRed: row.has_red === true,
     canDecide: row.can_decide === undefined || row.can_decide === null ? null : row.can_decide === true,
     canRecordPayment: row.can_record_payment === undefined || row.can_record_payment === null ? null : row.can_record_payment === true,
+    canManage: row.can_manage === undefined || row.can_manage === null ? null : row.can_manage === true,
+    canUploadDocuments: row.can_upload_documents === undefined || row.can_upload_documents === null ? null : row.can_upload_documents === true,
     costCount: Number(row.cost_count ?? costs.length) || 0,
     costs,
   };
@@ -347,6 +363,7 @@ const toBody = (input: PaymentRequestInput) => ({
   thong_tin_chuyen_khoan: input.paymentMethod === "chuyen_khoan" ? input.transferInfo : null,
   ma_ngan_hang: input.paymentMethod === "chuyen_khoan" && input.bankBin ? input.bankBin : null,
   han_thanh_toan: input.dueDate,
+  ...(input.requesterId ? { id_user: Number(input.requesterId) } : {}),
   costs: input.costs.map((cost) => ({
     ...(cost.id ? { id_payment_cost: cost.id } : {}),
     id_payment_category: cost.categoryId,
@@ -403,6 +420,7 @@ export async function getPaymentRequestOptions(signal?: AbortSignal): Promise<Pa
     availableCosts: list(data.availableCosts).map(normalizeCost).filter((cost): cost is PaymentCost => cost !== null),
     banks: list(data.banks).map((row) => ({ bin: str(row.bin), code: str(row.ma_ngan_hang), shortName: str(row.ten_viet_tat), name: str(row.ten_ngan_hang) }))
       .filter((bank) => /^\d{6}$/.test(bank.bin)),
+    requesters: list(data.requesters).map((row) => ({ id: str(row.id), name: str(row.name) || str(row.username) })).filter((row) => row.id),
   };
 }
 

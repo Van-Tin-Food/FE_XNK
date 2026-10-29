@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import PaymentRequestWizard from "@/components/payment/PaymentRequestWizard";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
+import { canCreatePaymentRequests } from "@/utils/paymentRequest";
 
 // Bước 1 của quy trình: tạo đề nghị theo từng câu hỏi; lưu xong chuyển sang trang quy trình để xem lại và gửi.
 export default function NewPaymentRequestPage() {
@@ -12,7 +13,7 @@ export default function NewPaymentRequestPage() {
   const { can } = useAuth();
   const router = useRouter();
 
-  if (!can("paymentRequests", "edit")) {
+  if (!canCreatePaymentRequests(can)) {
     return (
       <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
         {t("prNoPermission")}

@@ -10,7 +10,12 @@ export type PaymentCurrency = "VND" | "USD";
  * (khớp requireAnyPermission của route GET /api/payment-requests ở BE).
  */
 export function canOpenPaymentRequests(can: (fn: PermissionFunction, level?: PermissionLevel) => boolean): boolean {
-  return can("paymentRequests") || can("paymentApprove", "edit") || can("paymentDocuments", "edit");
+  return can("paymentRequests") || can("paymentApprove", "edit") || can("paymentDocuments", "edit") || can("paymentRequestsOnBehalf", "edit");
+}
+
+/** Được tạo đề nghị: tự tạo (paymentRequests edit) hoặc được ủy quyền tạo thay (khớp route POST /api/payment-requests ở BE). */
+export function canCreatePaymentRequests(can: (fn: PermissionFunction, level?: PermissionLevel) => boolean): boolean {
+  return can("paymentRequests", "edit") || can("paymentRequestsOnBehalf", "edit");
 }
 
 const MAX_INTEGER_DIGITS = 16;
