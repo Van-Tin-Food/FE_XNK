@@ -502,6 +502,13 @@ export async function cancelPaymentRequest(id: string): Promise<PaymentRequest> 
   return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/cancel`));
 }
 
+/** Xóa đề nghị chưa duyệt / bị từ chối / đã hủy: chi phí được gỡ ra (không còn gắn với đề nghị). Trả số chi phí đã gỡ. */
+export async function deletePaymentRequest(id: string): Promise<{ releasedCosts: number }> {
+  const payload = await request<unknown>("DELETE", `/${encodeURIComponent(id)}`);
+  const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
+  return { releasedCosts: Number(data.releasedCosts) || 0 };
+}
+
 /** Bước 4: xác nhận đầy đủ chứng từ → đề nghị hoàn thành (khóa). */
 export async function confirmPaymentRequestDocuments(id: string): Promise<PaymentRequest> {
   return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/confirm-documents`));
