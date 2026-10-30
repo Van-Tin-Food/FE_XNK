@@ -114,6 +114,13 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return backendMessage || "Câu hỏi chưa hợp lệ.";
     case "EMAIL_CONFIG_MISSING":
       return "Chức năng gửi email chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
+    case "EMAIL_JOB_RUNNING":
+      return "Lượt gửi email trước của bạn chưa xong. Vui lòng chờ gửi xong rồi gửi tiếp.";
+    case "EMAIL_JOB_NOT_FOUND":
+      return "Không còn thông tin lượt gửi email này (quá 1 giờ hoặc máy chủ vừa khởi động lại). Xem kết quả trong Nhật ký email.";
+    case "EMAIL_RECIPIENT_LIMIT":
+    case "EMAIL_INVALID_REQUEST":
+      return backendMessage || "Danh sách người nhận hoặc nội dung email chưa hợp lệ.";
     case "FILE_TOO_LARGE":
       return backendMessage || "File vượt quá dung lượng cho phép.";
     case "INVALID_FILE_SIZE":

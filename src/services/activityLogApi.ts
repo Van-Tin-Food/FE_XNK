@@ -210,8 +210,12 @@ export async function getEmailActivityLogs(): Promise<ActivityLog[]> {
   }).filter((log): log is ActivityLog => log !== null);
 }
 
-export async function getEmailDeliveryLogs(): Promise<EmailActivityLog[]> {
-  const apiPath = "/api/email/logs?limit=500&offset=0";
+// Nhật ký email lọc phía client: tải theo lô 500 dòng (giới hạn của BE) tới khi hết, tối đa 10 lô = 5.000 dòng mới nhất.
+const EMAIL_LOG_BATCH_SIZE = 500;
+const EMAIL_LOG_MAX_BATCHES = 10;
+
+async function requestEmailLogBatch(offset: number): Promise<unknown[]> {
+  const apiPath = `/api/email/logs?limit=${EMAIL_LOG_BATCH_SIZE}&offset=${offset}`;
   const token = getStoredUser()?.token?.trim();
   let response: Response;
   try {
@@ -228,8 +232,25 @@ export async function getEmailDeliveryLogs(): Promise<EmailActivityLog[]> {
   const { data: result, nonJsonPreview } = await parseApiResponse(response);
   if (!response.ok) throw createHttpApiError("Email logs", "GET", apiPath, response, result, nonJsonPreview);
   if (result === null) throw createInvalidResponseError("Email logs", "GET", apiPath, nonJsonPreview);
+  return findLogRows(result);
+}
 
-  return findLogRows(result).map((row, index): EmailActivityLog | null => {
+export async function getEmailDeliveryLogs(): Promise<EmailActivityLog[]> {
+  const rows: unknown[] = [];
+  const seenIds = new Set<string>();
+  for (let batch = 0; batch < EMAIL_LOG_MAX_BATCHES; batch += 1) {
+    const batchRows = await requestEmailLogBatch(batch * EMAIL_LOG_BATCH_SIZE);
+    for (const row of batchRows) {
+      // Có log mới chen vào giữa hai lô thì dòng cuối lô trước bị lặp lại ở lô sau.
+      const id = isRecord(row) && row.id !== undefined && row.id !== null ? String(row.id) : "";
+      if (id && seenIds.has(id)) continue;
+      if (id) seenIds.add(id);
+      rows.push(row);
+    }
+    if (batchRows.length < EMAIL_LOG_BATCH_SIZE) break;
+  }
+
+  return rows.map((row, index): EmailActivityLog | null => {
     if (!isRecord(row)) return null;
     const rawStatus = String(row.status ?? "not sent").trim().toLowerCase();
     const userId = Number(row.user_id);

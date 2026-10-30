@@ -95,13 +95,38 @@ function actor(log: ActivityLog): string {
   return log.userName || log.username || (log.userId ? `User #${log.userId}` : "—");
 }
 
-function localDate(value: string): string {
-  const date = parseLogDate(value);
-  if (Number.isNaN(date.getTime())) return "";
+function dateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function localDate(value: string): string {
+  const date = parseLogDate(value);
+  return Number.isNaN(date.getTime()) ? "" : dateKey(date);
+}
+
+type EmailDatePreset = "today" | "last7" | "last30";
+const EMAIL_DATE_PRESETS: { value: EmailDatePreset; days: number; labelKey: string }[] = [
+  { value: "today", days: 1, labelKey: "emailDateToday" },
+  { value: "last7", days: 7, labelKey: "emailDateLast7" },
+  { value: "last30", days: 30, labelKey: "emailDateLast30" },
+];
+
+/** Bỏ dấu, viết thường: tìm "nguyen" ra "Nguyễn". */
+function normalizeText(value: unknown): string {
+  return String(value ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLocaleLowerCase("vi").trim();
+}
+
+/** Người gửi email: theo user id (tên có thể trùng), log cũ không có id thì theo tên đăng nhập. */
+function emailSenderKey(log: EmailActivityLog): string {
+  return log.userId ? `id:${log.userId}` : `name:${log.username || log.userName || ""}`;
+}
+
+function emailSenderLabel(log: EmailActivityLog): string {
+  const name = log.userName || log.username || (log.userId ? `User #${log.userId}` : "—");
+  return log.userName && log.username ? `${name} (${log.username})` : name;
 }
 
 function PinIcon() {
@@ -245,8 +270,13 @@ export default function ActivityLogsPage() {
   const [emailLoaded, setEmailLoaded] = useState(false);
   const [emailStatus, setEmailStatus] = useState<"all" | "sent" | "not sent">("all");
   const [supplierFilter, setSupplierFilter] = useState("all");
+  const [senderFilter, setSenderFilter] = useState("all");
+  const [errorFilter, setErrorFilter] = useState("all");
+  const [emailSort, setEmailSort] = useState<"newest" | "oldest">("newest");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // Nút khoảng thời gian nhanh đang chọn; sửa tay ô ngày thì bỏ chọn.
+  const [datePreset, setDatePreset] = useState<EmailDatePreset | "">("");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -376,20 +406,60 @@ export default function ActivityLogsPage() {
     else setReloadKey((value) => value + 1);
   };
 
-  const filteredEmailLogs = useMemo(() => {
-    const keyword = query.trim().toLocaleLowerCase("vi");
+  // Lọc theo mọi bộ lọc trừ trạng thái: dùng để đếm số dòng trên từng nút trạng thái.
+  const emailLogsBeforeStatus = useMemo(() => {
+    const keyword = normalizeText(query);
     return emailLogs.filter((log) => {
-      const matchesStatus = emailStatus === "all" || log.status === emailStatus;
-      const matchesSupplier = supplierFilter === "all" || log.supplierName === supplierFilter;
+      if (supplierFilter !== "all" && log.supplierName !== supplierFilter) return false;
+      if (senderFilter !== "all" && emailSenderKey(log) !== senderFilter) return false;
+      if (errorFilter !== "all" && (log.status === "sent" || (log.error || "") !== errorFilter)) return false;
       const sentDate = localDate(log.sentAt);
-      const matchesFrom = !dateFrom || sentDate >= dateFrom;
-      const matchesTo = !dateTo || sentDate <= dateTo;
-      const haystack = [log.supplierName, log.supplierEmail, log.subject, log.error, log.userName, log.username].join(" ").toLocaleLowerCase("vi");
-      return matchesStatus && matchesSupplier && matchesFrom && matchesTo && (!keyword || haystack.includes(keyword));
+      if (dateFrom && sentDate < dateFrom) return false;
+      if (dateTo && sentDate > dateTo) return false;
+      if (!keyword) return true;
+      return normalizeText([log.supplierName, log.supplierEmail, log.subject, log.error, log.userName, log.username].join(" ")).includes(keyword);
     });
-  }, [emailLogs, query, emailStatus, supplierFilter, dateFrom, dateTo]);
+  }, [emailLogs, query, supplierFilter, senderFilter, errorFilter, dateFrom, dateTo]);
+
+  const emailStatusCounts = useMemo(() => {
+    const sent = emailLogsBeforeStatus.filter((log) => log.status === "sent").length;
+    return { all: emailLogsBeforeStatus.length, sent, "not sent": emailLogsBeforeStatus.length - sent };
+  }, [emailLogsBeforeStatus]);
+
+  const filteredEmailLogs = useMemo(() => {
+    const rows = emailStatus === "all" ? [...emailLogsBeforeStatus] : emailLogsBeforeStatus.filter((log) => log.status === emailStatus);
+    const time = (log: EmailActivityLog) => parseLogDate(log.sentAt).getTime() || 0;
+    return rows.sort((a, b) => (emailSort === "newest" ? time(b) - time(a) : time(a) - time(b)));
+  }, [emailLogsBeforeStatus, emailSort, emailStatus]);
 
   const suppliers = useMemo(() => Array.from(new Set(emailLogs.map((log) => log.supplierName).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [emailLogs]);
+  const emailSenders = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const log of emailLogs) if (!byKey.has(emailSenderKey(log))) byKey.set(emailSenderKey(log), emailSenderLabel(log));
+    return [...byKey.entries()].sort((a, b) => a[1].localeCompare(b[1], "vi"));
+  }, [emailLogs]);
+  // Lý do lỗi của các email gửi không thành công, lỗi gặp nhiều xếp trước.
+  const emailErrors = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const log of emailLogs) if (log.status !== "sent" && log.error) counts.set(log.error, (counts.get(log.error) || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "vi"));
+  }, [emailLogs]);
+
+  const applyDatePreset = (preset: EmailDatePreset) => {
+    if (datePreset === preset) {
+      setDatePreset("");
+      setDateFrom("");
+      setDateTo("");
+    } else {
+      const days = EMAIL_DATE_PRESETS.find((item) => item.value === preset)?.days || 1;
+      const from = new Date();
+      from.setDate(from.getDate() - (days - 1));
+      setDatePreset(preset);
+      setDateFrom(dateKey(from));
+      setDateTo(dateKey(new Date()));
+    }
+    setPage(1);
+  };
   const emailPage = paginateItems(filteredEmailLogs, page, pageSize);
 
   const visibleCount = activeTab === "activity" ? logs.length : filteredEmailLogs.length;
@@ -406,6 +476,10 @@ export default function ActivityLogsPage() {
     setQuery("");
     setEmailStatus("all");
     setSupplierFilter("all");
+    setSenderFilter("all");
+    setErrorFilter("all");
+    setEmailSort("newest");
+    setDatePreset("");
     setDateFrom("");
     setDateTo("");
     setPage(1);
@@ -453,15 +527,36 @@ export default function ActivityLogsPage() {
             />
           </div>
           {activeTab === "email" && <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap gap-2">{(["all", "sent", "not sent"] as const).map((status) => <button key={status} type="button" onClick={() => { setEmailStatus(status); setPage(1); }} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${emailStatus === status ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 text-gray-500 dark:border-gray-700"}`}>{status === "all" ? t("allStatuses") : status === "sent" ? t("emailSentStatus") : t("emailNotSentStatus")}</button>)}</div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+            <div className="flex flex-wrap gap-2">{(["all", "sent", "not sent"] as const).map((status) => <button key={status} type="button" aria-pressed={emailStatus === status} onClick={() => { setEmailStatus(status); setPage(1); }} className={`h-9 rounded-lg border px-3 text-xs font-semibold ${emailStatus === status ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 text-gray-500 dark:border-gray-700"}`}>{status === "all" ? t("allStatuses") : status === "sent" ? t("emailSentStatus") : t("emailNotSentStatus")} ({emailStatusCounts[status]})</button>)}</div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               <select value={supplierFilter} onChange={(event) => { setSupplierFilter(event.target.value); setPage(1); }} aria-label={t("emailSupplierFilter")} className={SELECT_CLASS}>
                 <option value="all">{t("allSuppliers")}</option>
                 {suppliers.map((supplier) => <option key={supplier} value={supplier}>{supplier}</option>)}
               </select>
-              <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} aria-label={t("emailDateFrom")} title={t("emailDateFrom")} className={SELECT_CLASS} />
-              <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); }} aria-label={t("emailDateTo")} title={t("emailDateTo")} className={SELECT_CLASS} />
-              <button type="button" onClick={clearEmailFilters} className="h-10 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("clearFilters")}</button>
+              <select value={senderFilter} onChange={(event) => { setSenderFilter(event.target.value); setPage(1); }} aria-label={t("emailSenderFilter")} className={SELECT_CLASS}>
+                <option value="all">{t("allUsers")}</option>
+                {emailSenders.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+              </select>
+              <select value={errorFilter} onChange={(event) => { setErrorFilter(event.target.value); setPage(1); }} aria-label={t("emailErrorFilter")} className={SELECT_CLASS}>
+                <option value="all">{t("emailAllErrors")}</option>
+                {emailErrors.map(([message, count]) => <option key={message} value={message}>{message} ({count})</option>)}
+              </select>
+              <select value={emailSort} onChange={(event) => { setEmailSort(event.target.value as "newest" | "oldest"); setPage(1); }} aria-label={t("emailSortLabel")} className={SELECT_CLASS}>
+                <option value="newest">{t("emailSortNewest")}</option>
+                <option value="oldest">{t("emailSortOldest")}</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
+              <div className="flex flex-wrap gap-2" role="group" aria-label={t("emailDatePresets")}>
+                {EMAIL_DATE_PRESETS.map((preset) => (
+                  <button key={preset.value} type="button" aria-pressed={datePreset === preset.value} onClick={() => applyDatePreset(preset.value)} className={`h-10 rounded-lg border px-3 text-xs font-semibold ${datePreset === preset.value ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]"}`}>{t(preset.labelKey)}</button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2 md:flex">
+                <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setDatePreset(""); setPage(1); }} aria-label={t("emailDateFrom")} title={t("emailDateFrom")} className={`${SELECT_CLASS} w-full md:w-44`} />
+                <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setDatePreset(""); setPage(1); }} aria-label={t("emailDateTo")} title={t("emailDateTo")} className={`${SELECT_CLASS} w-full md:w-44`} />
+              </div>
+              <button type="button" onClick={clearEmailFilters} className="h-10 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50 md:ml-auto dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("clearFilters")}</button>
             </div>
           </div>}
           {activeTab === "activity" && <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(4,minmax(0,1fr))_auto_auto_auto]">

@@ -77,6 +77,14 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
   `returnItemsFromRelations`. Danh mục NCC/hãng tàu/kho dùng `listCatalogRows` (cache 5 phút theo token,
   tự xoá khi tạo/sửa); màn danh mục vẫn dùng `listDatabaseRows` để luôn mới.
 
+## Trang Gửi email
+
+- `app/(admin)/email/page.tsx`: gửi bằng `startEmailJob` (BE gửi nền, 3 giây / email), hỏi tiến độ `getEmailJob` mỗi 1,5 giây,
+  hiện từng người nhận ở `components/email/EmailSendProgress.tsx`; id lượt gửi lưu sessionStorage để tải lại trang vẫn theo dõi.
+  Không quay lại kiểu một request chờ gửi hết (gateway / Cloudflare cắt khi quá lâu).
+- Bộ lọc và chọn người nhận là hàm thuần ở `utils/emailRecipients.ts` (test `tests/emailRecipients.test.mjs`). "Chọn tất cả"
+  chỉ áp dụng cho email đang hiện ở trang hiện tại; tối đa `MAX_EMAIL_RECIPIENTS` (đồng bộ BE).
+
 ## Chatbox AI
 
 - `src/components/ai/AiChatBox.tsx` (nút nổi trong layout admin, quyền `useAiChat`) gọi `src/services/aiChatApi.ts`.

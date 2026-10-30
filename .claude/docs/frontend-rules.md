@@ -112,7 +112,7 @@ For every list that can grow:
 - Show success and partial-failure notifications using the existing notification context.
 - For destructive operations, use the existing confirmation context/modal.
 - After errors, preserve user input when safe and explain what failed.
-- For email sending, show recipient count, per-recipient result status, and refresh the history after the server response. The history contains only SMTP-confirmed successful deliveries; failed recipients must be visible in the send result/notification and must not be presented as successful history rows.
+- For email sending, show recipient count, per-recipient result status, and refresh the history after the server response. The history has one row per recipient with status `sent` or `not sent` (+ error); failed recipients must be visible in the send result/notification and must never be presented as successful.
 
 ## 8. UI and Layout Conventions
 
