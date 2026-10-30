@@ -14,6 +14,7 @@ import {
   searchPaymentBeneficiaries,
   updatePaymentRequest,
   type PaymentCategory,
+  type PaymentFeeSuggestion,
   type PaymentCost,
   type PaymentMethod,
   type PaymentRequest,
@@ -43,6 +44,9 @@ interface OtherRow {
   /** Có id = khoản nhập tay đã thuộc đề nghị này (đang sửa). */
   id?: string;
   categoryId: string;
+  /** Mã HD / CONT nhập khoản mới (không tick khoản nhập sẵn): hợp đồng (+ container với CONT); BE ghi về payment_cost. */
+  contract: string;
+  container: string;
   /** Số tiền đã gồm VAT. */
   amount: string;
   note: string;
@@ -76,13 +80,15 @@ const SUMMARY_LIMIT = 6;
 
 let seed = 0;
 const newKey = () => `other-${Date.now()}-${seed += 1}`;
-const emptyRow = (): OtherRow => ({ key: newKey(), categoryId: "", amount: "", note: "", vat: "", base: "", basis: "amount" });
+const emptyRow = (): OtherRow => ({ key: newKey(), categoryId: "", contract: "", container: "", amount: "", note: "", vat: "", base: "", basis: "amount" });
 /** Chi phí nhập sẵn ở tab Chi phí của đơn (theo container hoặc theo hợp đồng). */
 const isPrepared = (cost: PaymentCost) => Boolean(cost.container || cost.contract);
 /** Mã phí của chi phí đơn hàng (HD = theo hợp đồng, CONT = theo container): nhập ở tab Chi phí, khi tạo đề nghị chỉ tick. */
 const ORDER_COST_CODES = ["HD", "CONT"];
 const isOrderCode = (code: string) => ORDER_COST_CODES.includes(code.toUpperCase());
 const MAX_COSTS = 100;
+/** Số gợi ý khoản phí hiện trước (còn lại bấm "Xem thêm"). */
+const SUGGESTION_LIMIT = 8;
 const BENEFICIARY_DEBOUNCE_MS = 250;
 
 /** Ngày (YYYY-MM-DD) theo giờ Việt Nam, cộng thêm số ngày. */
@@ -183,6 +189,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [optionsError, setOptionsError] = useState("");
   const [optionsKey, setOptionsKey] = useState(0);
   const [content, setContent] = useState(editing?.content || "");
+  const [showAllSuggestions, setShowAllSuggestions] = useState(false);
   // Tạo đề nghị thay (người được ủy quyền, chỉ khi tạo mới): id tài khoản đứng tên; "" = chính mình.
   const [requesterId, setRequesterId] = useState("");
   // BE chỉ trả danh sách người đứng tên cho người được ủy quyền tạo thay; không chọn = chính mình.
@@ -192,7 +199,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [ownPrepared] = useState<PaymentCost[]>(() => (editing ? editing.costs.filter(isPrepared) : []));
   const [selected, setSelected] = useState<string[]>(() => ownPrepared.map((cost) => cost.id));
   const [others, setOthers] = useState<OtherRow[]>(() => (editing ? editing.costs.filter((cost) => !isPrepared(cost)).map((cost) => ({
-    key: newKey(), id: cost.id, categoryId: cost.categoryId, amount: formatAmount(cost.amount, "vi"), note: cost.note, vat: cost.vat, base: "", basis: "amount" as const,
+    key: newKey(), id: cost.id, categoryId: cost.categoryId, contract: "", container: "", amount: formatAmount(cost.amount, "vi"), note: cost.note, vat: cost.vat, base: "", basis: "amount" as const,
   })) : []));
   // % VAT đang nhập cho từng khoản nhập sẵn có thuế (theo id); chưa nhập thì lấy % đã lưu của khoản đó.
   const [vats, setVats] = useState<Record<string, string>>({});
@@ -259,7 +266,26 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const manualCategories = useMemo(() => categories.filter((category) => category.type === costType && category.code.toUpperCase() === costCode), [categories, costCode, costType]);
 
   const selectedCosts = orderMode ? selected.map((id) => preparedById.get(id)).filter((cost): cost is PaymentCost => Boolean(cost)) : [];
-  const manualRows = orderMode ? [] : others;
+  // Dòng nhập tay: mã HD / CONT = khoản mới gắn hợp đồng (+ container), BE tự ghi về bảng chi phí (payment_cost) — chiều ngược
+  // của tick khoản nhập sẵn; mã khác = chi phí vận hành.
+  const manualRows = others;
+  const contractCodes = useMemo(() => new Set((options?.contracts || []).map((item) => item.code)), [options]);
+  const containersOf = (contract: string) => (options?.containers || []).filter((item) => item.contract === contract).map((item) => item.code);
+  const needsContainer = costCode === "CONT";
+  const rowContractValid = (row: OtherRow) => !orderMode || contractCodes.has(row.contract.trim());
+  const rowContainerValid = (row: OtherRow) => !orderMode || !needsContainer || containersOf(row.contract.trim()).includes(row.container);
+  // Gợi ý khoản phí theo giai đoạn đơn hàng (BE) của mã phí đang chọn — chỉ nhắc, không bắt buộc. Bỏ khoản đã tick / đã thêm dòng.
+  const usedSlots = new Set([
+    ...selectedCosts.map((cost) => `${cost.contract}|${cost.container}|${cost.categoryId}`),
+    ...manualRows.map((row) => `${row.contract.trim()}|${needsContainer ? row.container : ""}|${row.categoryId}`),
+  ]);
+  const suggestions = orderMode ? (options?.suggestions || []).filter((item) => {
+    const category = categoriesById.get(item.categoryId);
+    return category?.type === costType && category.code.toUpperCase() === costCode && !usedSlots.has(`${item.contract}|${item.container}|${item.categoryId}`);
+  }) : [];
+  const shownSuggestions = showAllSuggestions ? suggestions : suggestions.slice(0, SUGGESTION_LIMIT);
+  /** Bấm "+ Thêm" ở gợi ý: thêm một dòng "Nhập khoản mới" điền sẵn hợp đồng / container / khoản phí, chỉ cần gõ số tiền. */
+  const addSuggestion = (item: PaymentFeeSuggestion) => setOthers((current) => [...current, { ...emptyRow(), contract: item.contract, container: item.container, categoryId: item.categoryId }]);
   const isTaxed = (categoryId: string, fallback = false) => categoriesById.get(categoryId)?.taxed ?? fallback;
   // VAT khoản nhập sẵn: % đang gõ, chưa gõ thì % đã lưu; khoản không thuế bỏ qua.
   const preparedTaxed = (cost: PaymentCost) => isTaxed(cost.categoryId, cost.taxed);
@@ -267,14 +293,16 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const preparedVat = (cost: PaymentCost) => (preparedTaxed(cost) ? parseVatInput(vatTextOf(cost)) : null);
   const otherAmounts = manualRows.map((row) => parseAmountLoose(row.amount));
   const otherVats = manualRows.map((row) => (isTaxed(row.categoryId) ? parseVatInput(row.vat) : null));
-  const otherValid = manualRows.every((row, index) => row.categoryId && otherAmounts[index] !== null && (!isTaxed(row.categoryId) || otherVats[index] !== null));
+  const otherValid = manualRows.every((row, index) => row.categoryId && otherAmounts[index] !== null && (!isTaxed(row.categoryId) || otherVats[index] !== null)
+    && rowContractValid(row) && rowContainerValid(row));
   const preparedVatValid = selectedCosts.every((cost) => !preparedTaxed(cost) || preparedVat(cost) !== null);
   const total = sumAmounts([...selectedCosts.map((cost) => cost.amount), ...otherAmounts]);
   const costCount = selectedCosts.length + manualRows.length;
   const transfer = paymentMethod === "chuyen_khoan";
   // Có ít nhất một dòng đã điền (dòng chỉ có nhãn "Ngân hàng:" không tính, BE cũng bỏ các dòng đó).
   // Thanh toán tiền hàng cho nhà cung cấp nước ngoài (cọc / còn lại) = chuyển khoản quốc tế: IBAN, SWIFT...
-  const internationalTransfer = selectedCosts.some((cost) => goodsPaymentKind({ code: cost.code, name: categoriesById.get(cost.categoryId)?.name || cost.categoryName }) !== null);
+  const internationalTransfer = selectedCosts.some((cost) => goodsPaymentKind({ code: cost.code, name: categoriesById.get(cost.categoryId)?.name || cost.categoryName }) !== null)
+    || manualRows.some((row) => goodsPaymentKind(categoriesById.get(row.categoryId)) !== null);
   const transferKind: TransferKind = internationalTransfer ? "international" : "domestic";
   const transferFields = TRANSFER_FIELDS[transferKind];
   const missingTransfer = transfer ? transferFields.filter((field) => field.required && !(transferValues[field.label] || "").trim()) : [];
@@ -370,6 +398,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   else if (costCount === 0) costIssues.push(t(orderMode ? "prErrNoPrepared" : "prErrNoManual"));
   manualRows.forEach((row, index) => {
     const n = index + 1;
+    if (!rowContractValid(row)) costIssues.push(t("prErrRowContract", { n }));
+    else if (!rowContainerValid(row)) costIssues.push(t("prErrRowContainer", { n }));
     if (!row.categoryId) costIssues.push(t("prErrRowCategory", { n }));
     if (!row.amount.trim()) costIssues.push(t("prErrRowAmountEmpty", { n }));
     else if (otherAmounts[index] === null) costIssues.push(t("prErrRowAmountInvalid", { n }));
@@ -407,7 +437,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
       const name = category?.code.toUpperCase() === "VH"
         ? [category.account, category.name].filter(Boolean).join(" · ")
         : costCodeName(category?.code, category?.name);
-      return { key: row.key, name: name || "—", note: row.note.trim(), target: "", amount: otherAmounts[index] || "0", vatLine: vatLineOf(otherAmounts[index], otherVats[index]) };
+      const target = orderMode ? [row.container && `${t("prContainer")} ${row.container}`, row.contract.trim() && `${t("prContract")} ${row.contract.trim()}`].filter(Boolean).join(" · ") : "";
+      return { key: row.key, name: name || "—", note: row.note.trim(), target, amount: otherAmounts[index] || "0", vatLine: vatLineOf(otherAmounts[index], otherVats[index]) };
     }),
   ];
   const transferText = transfer ? buildTransferInfo(transferKind, transferValues) : "";
@@ -452,7 +483,10 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         dueDate,
         costs: [
           ...selectedCosts.map((cost) => ({ id: cost.id, categoryId: cost.categoryId, amount: cost.amount, container: cost.container, contract: cost.contract, vat: preparedVat(cost) ?? undefined })),
-          ...manualRows.map((row, index) => ({ id: row.id, categoryId: row.categoryId, amount: otherAmounts[index] as string, note: row.note.trim(), vat: otherVats[index] ?? undefined })),
+          ...manualRows.map((row, index) => ({
+            id: row.id, categoryId: row.categoryId, amount: otherAmounts[index] as string, note: row.note.trim(), vat: otherVats[index] ?? undefined,
+            ...(orderMode ? { contract: row.contract.trim(), container: needsContainer ? row.container : undefined } : {}),
+          })),
         ],
         ...(!editing && requester ? { requesterId: requester.id } : {}),
       };
@@ -531,6 +565,41 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                   ))}
                 </div>
               </>
+            )}
+
+            {/* Gợi ý khoản phí theo giai đoạn đơn hàng (chỉ nhắc, không bắt buộc): bấm "+ Thêm" điền sẵn vào "Nhập khoản mới" */}
+            {costCode && orderMode && suggestions.length > 0 && (
+              <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50/50 p-3 dark:border-warning-500/30 dark:bg-warning-500/5">
+                <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prSuggestTitle", { count: suggestions.length })}</p>
+                <p className="mt-0.5 text-xs text-gray-500">{t("prSuggestHint")}</p>
+                <ul className="mt-2 space-y-1.5">
+                  {shownSuggestions.map((item) => {
+                    const category = categoriesById.get(item.categoryId);
+                    const supplier = suppliers.get(item.contract);
+                    return (
+                      <li key={`${item.contract}|${item.container}|${item.categoryId}`}
+                        className="flex flex-col gap-2 rounded-lg bg-white px-3 py-2 sm:flex-row sm:items-center dark:bg-gray-900">
+                        <span className="min-w-0 flex-1">
+                          <span className="block break-words text-sm font-medium text-gray-800 dark:text-white/90">{costCodeName(category?.code, category?.name)}</span>
+                          <span className="block break-words text-xs text-gray-500">
+                            <span className="font-mono">{item.contract}</span>{item.container && <> · {t("prContainer")} <span className="font-mono">{item.container}</span></>}
+                            {supplier && ` · ${supplier}`} · {item.reason}
+                          </span>
+                        </span>
+                        <button type="button" onClick={() => addSuggestion(item)} disabled={costCount >= MAX_COSTS}
+                          className="h-10 shrink-0 rounded-lg border border-brand-300 px-3 text-sm font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-50 dark:border-brand-500/40 dark:text-brand-300 dark:hover:bg-brand-500/10">
+                          + {t("prSuggestAdd")}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {suggestions.length > SUGGESTION_LIMIT && (
+                  <button type="button" onClick={() => setShowAllSuggestions((value) => !value)} className="mt-2 text-sm font-medium text-brand-600 hover:underline dark:text-brand-400">
+                    {showAllSuggestions ? t("prSuggestLess") : t("prSuggestMore", { count: suggestions.length - SUGGESTION_LIMIT })}
+                  </button>
+                )}
+              </div>
             )}
 
             {/* Mã chi phí đơn hàng: tick khoản nhập sẵn */}
@@ -634,15 +703,27 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
               </div>
             )}
 
-            {/* Mã khác (chi phí vận hành...): nhập khoản phí + số tiền + nội dung */}
-            {costCode && !orderMode && (
-              <div className="mt-4">
-                <p className="text-xs text-gray-500">{t("prOtherHint")}</p>
+            {/* Nhập khoản phí + số tiền + nội dung. Mã HD / CONT: khoản mới gắn hợp đồng (+ container), lưu xong tự ghi về
+                bảng chi phí (hiện ở tab Chi phí của đơn) — chiều ngược của tick khoản nhập sẵn. Mã khác: chi phí vận hành. */}
+            {costCode && (
+              <div className={orderMode ? "mt-4 border-t border-gray-100 pt-4 dark:border-gray-800" : "mt-4"}>
+                {orderMode && <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prOrderNewTitle")}</p>}
+                <p className="text-xs text-gray-500">{t(orderMode ? "prOrderNewHint" : "prOtherHint")}</p>
+                {orderMode && (
+                  <datalist id="pr-contracts">
+                    {(options?.contracts || []).map((item) => <option key={item.code} value={item.code}>{item.supplier}</option>)}
+                  </datalist>
+                )}
                 {others.length > 0 && (
                   <ul className="mt-2 space-y-2">
                     {others.map((row, index) => {
                       const category = categoriesById.get(row.categoryId);
                       const taxed = Boolean(category?.taxed);
+                      // Hợp đồng gõ chưa đúng mã có trong danh sách / container chưa chọn: báo khi đã gõ hoặc đã bấm Tiếp tục.
+                      const contractError = orderMode && !rowContractValid(row) && (row.contract.trim() || costsTouched)
+                        ? t(row.contract.trim() ? "prContractUnknown" : "prFieldRequired") : "";
+                      const containerError = orderMode && needsContainer && rowContractValid(row) && !rowContainerValid(row) && costsTouched ? t("prFieldRequired") : "";
+                      const rowContainers = orderMode && needsContainer ? containersOf(row.contract.trim()) : [];
                       // Số tiền / % VAT gõ sai báo ngay; để trống chỉ báo sau khi bấm Tiếp tục.
                       const amountError = row.amount.trim()
                         ? (otherAmounts[index] === null ? t("prAmountInvalidShort") : "")
@@ -654,6 +735,32 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                       const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-400";
                       return (
                         <li key={row.key} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                          {/* Mã HD / CONT: hợp đồng (gõ để tìm) + container (chỉ CONT, chọn trong cont của hợp đồng) */}
+                          {orderMode && (
+                            <div className={`mb-2 grid grid-cols-1 gap-2 ${needsContainer ? "sm:grid-cols-2" : ""}`}>
+                              <label className="min-w-0">
+                                <span className={label}>{t("prContract")}</span>
+                                <input list="pr-contracts" value={row.contract} placeholder={t("prContractPlaceholder")} autoComplete="off"
+                                  onChange={(event) => updateRow(row.key, { contract: event.target.value, container: "" })}
+                                  aria-invalid={Boolean(contractError)}
+                                  className={`${INPUT} font-mono ${contractError ? "border-error-400" : ""}`} />
+                                {rowContractValid(row) && suppliers.get(row.contract.trim()) && <span className="mt-1 block truncate text-xs text-gray-500">{suppliers.get(row.contract.trim())}</span>}
+                                <FieldError message={contractError} />
+                              </label>
+                              {needsContainer && (
+                                <label className="min-w-0">
+                                  <span className={label}>{t("prContainer")}</span>
+                                  <select value={row.container} onChange={(event) => updateRow(row.key, { container: event.target.value })}
+                                    disabled={!rowContractValid(row)} aria-invalid={Boolean(containerError)}
+                                    className={`${INPUT} font-mono ${containerError ? "border-error-400" : ""}`}>
+                                    <option value="">{rowContractValid(row) ? (rowContainers.length ? t("prPickContainer") : t("prNoContainers")) : t("prPickContractFirst")}</option>
+                                    {rowContainers.map((code) => <option key={code} value={code}>{code}</option>)}
+                                  </select>
+                                  <FieldError message={containerError} />
+                                </label>
+                              )}
+                            </div>
+                          )}
                           {/* Một hàng: Khoản phí | Số tiền | Nội dung (màn hẹp xếp dọc) */}
                           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.3fr)_9.5rem_minmax(0,1fr)_auto] sm:items-end">
                             <label className="min-w-0">
@@ -713,7 +820,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                   </ul>
                 )}
                 <button type="button" className={`${SECONDARY} mt-2 w-full sm:w-auto`} disabled={costCount >= MAX_COSTS || manualCategories.length === 0}
-                  onClick={() => setOthers((current) => [...current, emptyRow()])}>+ {t("prAddOtherCost")}</button>
+                  onClick={() => setOthers((current) => [...current, emptyRow()])}>+ {t(orderMode ? "prAddOrderCost" : "prAddOtherCost")}</button>
               </div>
             )}
           </>

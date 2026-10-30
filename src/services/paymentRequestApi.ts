@@ -174,6 +174,18 @@ export interface PaymentRequestOptions {
   banks: PaymentBank[];
   /** Tài khoản chọn làm người đứng tên (chỉ người được ủy quyền tạo đề nghị thay); rỗng = không được tạo thay. */
   requesters: PaymentRequester[];
+  /** Gợi ý khoản phí theo giai đoạn đơn hàng (BE: config/paymentFeeSuggestions.js) — chỉ nhắc, không bắt buộc. */
+  suggestions: PaymentFeeSuggestion[];
+}
+
+/** Khoản phí nên thanh toán của một hợp đồng / container (chưa có dòng chi phí nào). */
+export interface PaymentFeeSuggestion {
+  contract: string;
+  /** Rỗng = khoản theo hợp đồng (mã HD). */
+  container: string;
+  categoryId: string;
+  /** Vì sao gợi ý, ví dụ "Đang khai báo hải quan". */
+  reason: string;
 }
 
 /** Người đứng tên đề nghị khi tạo thay. */
@@ -421,6 +433,8 @@ export async function getPaymentRequestOptions(signal?: AbortSignal): Promise<Pa
     banks: list(data.banks).map((row) => ({ bin: str(row.bin), code: str(row.ma_ngan_hang), shortName: str(row.ten_viet_tat), name: str(row.ten_ngan_hang) }))
       .filter((bank) => /^\d{6}$/.test(bank.bin)),
     requesters: list(data.requesters).map((row) => ({ id: str(row.id), name: str(row.name) || str(row.username) })).filter((row) => row.id),
+    suggestions: list(data.suggestions).map((row) => ({ contract: str(row.contract), container: str(row.container), categoryId: str(row.categoryId), reason: str(row.reason) }))
+      .filter((row) => row.contract && row.categoryId),
   };
 }
 
