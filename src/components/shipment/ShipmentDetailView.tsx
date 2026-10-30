@@ -32,6 +32,8 @@ import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@
 import UploadProgressToast from "@/components/common/UploadProgressToast";
 import UploadBatchProgressToast, { type UploadBatchFile } from "@/components/common/UploadBatchProgressToast";
 import { runWithConcurrency } from "@/utils/concurrency";
+import { shouldWatermark, watermarkImageFile } from "@/utils/imageWatermark";
+import logoChim from "@/icons/logo_chim.png";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import ShipmentCostsTab from "./ShipmentCostsTab";
 import OcrLoadingCard, { InlineSpinner } from "./OcrLoadingCard";
@@ -1989,14 +1991,21 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
       pendingUploadRequestIds.current.set(fingerprint, requestId);
       updateFile(index, { status: "uploading" });
       try {
+        // Ảnh hiện trường (INSPECTION) đưa ra thị trường: đóng dấu chìm logo trước khi upload, chỉ lưu bản có dấu.
+        // Không đóng dấu được thì file này lỗi (không upload ảnh không có dấu).
+        let fileToUpload = selectedFile;
+        if (shouldWatermark(docId, selectedFile)) {
+          fileToUpload = await watermarkImageFile(selectedFile, logoChim.src);
+          updateFile(index, { size: fileToUpload.size });
+        }
         const result = await uploadDocument(
-          { orderCode: shipment.orderCode, documentCode: docId, file: selectedFile, requestId, batch: uploadBatch, ...uploadTarget },
+          { orderCode: shipment.orderCode, documentCode: docId, file: fileToUpload, requestId, batch: uploadBatch, ...uploadTarget },
           { onProgress: ({ loaded }) => updateFile(index, { loaded }) },
         );
         uploadedNames.push(selectedFile.name);
         pendingUploadRequestIds.current.delete(fingerprint);
         if (result.containerFolderName) lastContainerFolderName = result.containerFolderName;
-        updateFile(index, { status: "done", loaded: selectedFile.size });
+        updateFile(index, { status: "done", loaded: fileToUpload.size });
         // BE trả tiến độ chứng từ ngay sau khi lưu: file hiện trong danh sách luôn, không đợi cả lượt. Các file chạy song
         // song có thể trả về lệch thứ tự nên chỉ nhận kết quả có ít nhất bằng số file đang hiện.
         const progress = (result as { documentProgress?: DocumentProgressResponse }).documentProgress;
