@@ -89,7 +89,7 @@ export default function EmailPage() {
   const [message, setMessage] = useState("");
   const [filters, setFilters] = useState<EmailSupplierFilters>(DEFAULT_EMAIL_FILTERS);
   const [supplierPage, setSupplierPage] = useState(1);
-  const [supplierPageSize, setSupplierPageSize] = useState(20);
+  const [supplierPageSize, setSupplierPageSize] = useState(15);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastSent, setLastSent] = useState<{ byEmail: Map<string, string>; loadedAt: number }>(() => ({ byEmail: new Map(), loadedAt: 0 }));

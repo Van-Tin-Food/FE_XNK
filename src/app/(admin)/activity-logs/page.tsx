@@ -18,7 +18,7 @@ import { useRouter } from "next/navigation";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const DEFAULT_PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 15;
 // Lịch sử thao tác tải dần: mỗi lần 50 dòng, cuộn gần cuối danh sách (còn ~600px) thì tải tiếp.
 const ACTIVITY_BATCH_SIZE = 50;
 const LOAD_MORE_MARGIN = "600px";
