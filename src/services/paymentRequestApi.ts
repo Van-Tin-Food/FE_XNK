@@ -22,7 +22,9 @@ export const PAYMENT_STATUS_LABEL_KEYS: Record<PaymentRequestStatus, string> = {
 };
 /** Loại chứng từ: ủy nhiệm chi / ảnh chuyển tiền (bước chi tiền). Chứng từ hồ sơ không có loại. */
 export const PAYMENT_PROOF = "payment_proof" as const;
-export type PaymentDocumentKind = typeof PAYMENT_PROOF | null;
+/** Giấy đề nghị đã ký (PDF bản in tự tạo và lưu ngay sau khi upload ủy nhiệm chi — utils/paymentRequestSignedPdf.ts). */
+export const SIGNED_FORM = "signed_form" as const;
+export type PaymentDocumentKind = typeof PAYMENT_PROOF | typeof SIGNED_FORM | null;
 
 export interface PaymentCategory {
   id: string;
@@ -540,7 +542,7 @@ function normalizeDocumentFile(row: unknown): PaymentDocumentFile | null {
     fileUrl: str(row.fileUrl),
     uploadedAt: str(row.uploadedAt),
     uploadedBy: str(row.uploadedBy),
-    kind: row.kind === PAYMENT_PROOF ? PAYMENT_PROOF : null,
+    kind: row.kind === PAYMENT_PROOF || row.kind === SIGNED_FORM ? row.kind : null,
   };
 }
 

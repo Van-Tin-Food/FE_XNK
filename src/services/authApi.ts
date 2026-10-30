@@ -450,6 +450,35 @@ export async function updateMyProfile(changes: { name: string; username: string;
   return storeUserProfile({ ...stored, ...fresh, token: stored.token });
 }
 
+/**
+ * Chữ ký của tài khoản đang đăng nhập — in vào ô ký Giấy đề nghị thanh toán: image = ảnh data URL (users.chu_ky, '' = chưa
+ * có), fullName = họ và tên ký (users.full_name, '' = dùng tên hiển thị).
+ */
+export type MySignature = { image: string; fullName: string };
+
+function toSignature(result: unknown): MySignature {
+  const data = isRecord(result) && isRecord(result.data) ? result.data : {};
+  return {
+    image: typeof data.image === "string" ? data.image : "",
+    fullName: typeof data.fullName === "string" ? data.fullName : "",
+  };
+}
+
+export async function getMySignature(): Promise<MySignature> {
+  return toSignature(await authRequest("me/signature", { method: "GET" }));
+}
+
+/** Lưu họ và tên đầy đủ và / hoặc ảnh chữ ký mới (trường nào không gửi thì giữ nguyên). */
+export async function saveMySignature(input: { fullName?: string; image?: string }): Promise<MySignature> {
+  const body = { ...(input.fullName !== undefined ? { full_name: input.fullName } : {}), ...(input.image ? { image: input.image } : {}) };
+  return toSignature(await authRequest("me/signature", { method: "PUT", body: JSON.stringify(body) }));
+}
+
+/** Xóa ảnh chữ ký (giữ họ tên). */
+export async function deleteMySignature(): Promise<MySignature> {
+  return toSignature(await authRequest("me/signature", { method: "DELETE" }));
+}
+
 /** Quyền Google đã lưu hết hạn/lỗi: BE trả sẵn URL cấp quyền lại để FE chuyển hướng. */
 export class GoogleConsentRequiredError extends Error {
   readonly googleAuthUrl: string;

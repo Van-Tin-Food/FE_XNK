@@ -22,6 +22,7 @@ import {
   type PaymentRequest,
 } from "@/services/paymentRequestApi";
 import { costCodeName, formatMoney, splitVat } from "@/utils/paymentRequest";
+import { saveSignedPaymentRequestPdf } from "@/utils/paymentRequestSignedPdf";
 import PaymentDocumentsPanel from "./PaymentDocumentsPanel";
 import PaymentTransferQr from "./PaymentTransferQr";
 import PaymentRequestWizard from "./PaymentRequestWizard";
@@ -170,6 +171,8 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "delete" | "download" | "approve" | "reject">("");
+  // Đang tạo + lưu giấy đề nghị đã ký (PDF) sau khi upload ủy nhiệm chi.
+  const [savingSignedForm, setSavingSignedForm] = useState(false);
   const [fileCount, setFileCount] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -339,6 +342,24 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
       notify(cancelError instanceof Error ? cancelError.message : String(cancelError), "error");
     } finally {
       setBusy("");
+    }
+  };
+
+  // Upload ủy nhiệm chi xong mà đề nghị vừa từ "đã duyệt" sang "đã chi tiền" (đủ chữ ký kế toán trưởng): người upload lưu
+  // luôn giấy đề nghị đã ký (PDF bản in) vào hồ sơ. Upload thêm ủy nhiệm chi khi đã chi tiền thì không tạo lại.
+  const proofUploaded = async () => {
+    const becamePaid = request.status === 1;
+    reload();
+    if (!becamePaid) return;
+    setSavingSignedForm(true);
+    try {
+      const file = await saveSignedPaymentRequestPdf(request.id);
+      notify(t("prSignedFormSaved", { name: file.fileName }), "success");
+      reload();
+    } catch (saveError) {
+      notify(t("prSignedFormFailed", { reason: saveError instanceof Error ? saveError.message : String(saveError) }), "warning");
+    } finally {
+      setSavingSignedForm(false);
     }
   };
 
@@ -604,7 +625,12 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
             {paidOrArchived && <p className="text-sm font-medium text-success-700 dark:text-success-300">✓ {t("prPaidDone")}</p>}
             <div className="rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
               <p className="mb-2 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prProofTitle")}</p>
-              <PaymentDocumentsPanel requestId={request.id} kind={PAYMENT_PROOF} canUpload={canUploadProof} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
+              <PaymentDocumentsPanel requestId={request.id} kind={PAYMENT_PROOF} canUpload={canUploadProof && !savingSignedForm} onUploaded={() => void proofUploaded()} onPreviewVisibilityChange={setPreviewOpen} />
+              {savingSignedForm && (
+                <p className="mt-2 flex items-center gap-2 text-sm text-brand-700 dark:text-brand-300">
+                  <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />{t("prSignedFormSaving")}
+                </p>
+              )}
               {canUploadProof && request.status === 1 && <p className="mt-2 text-xs text-gray-500">{t("prPaymentChatHint", { id: request.id })}</p>}
             </div>
             {/* Chờ chi tiền: vẫn bổ sung được chứng từ hồ sơ / báo người đề nghị bổ sung. */}
