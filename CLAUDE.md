@@ -39,8 +39,9 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
   danh sách `/` (`ShipmentDashboard`), chi tiết `/shipments/<mã đơn>?tab=...` (`app/(admin)/shipments/[orderCode]`),
   tạo đơn `/shipments/new`. Đường dẫn lấy từ `utils/shipmentRoutes.ts`. `getCachedShipments()` giữ lần tải danh sách
   gần nhất để chuyển qua lại hiện ngay; bộ lọc / trang / sắp xếp của danh sách lưu sessionStorage.
-  Đang sửa / chờ xác nhận OCR / đang upload: `hooks/useLeaveGuard` hỏi trước khi rời trang (nút Back trình duyệt, link
-  trong app, đóng tab); tự chuyển trang sau khi đã hỏi / đã lưu thì gọi `allowLeave()` trước. Mở khung xem file (từ md) thì như modal cũ:
+  Đang sửa / chờ xác nhận OCR / đang upload OCR "Lưu và cập nhật": `hooks/useLeaveGuard` hỏi trước khi rời trang (nút Back
+  trình duyệt, link trong app, đóng tab); tự chuyển trang sau khi đã hỏi / đã lưu thì gọi `allowLeave()` trước. Upload
+  chạy nền (xem mục chứng từ) không chặn chuyển trang. Mở khung xem file (từ md) thì như modal cũ:
   nền mờ phủ trang, nội dung đơn nổi ở nửa trái, file (trình xem Google Drive) ở nửa phải.
 - `src/components/shipment/ShipmentDetailView.tsx` (~3.800 dòng) — chi tiết đơn: chứng từ, OCR (“Lưu và cập nhật”
   hoặc “Chỉ lưu file”), tab Chi tiết nhập tay số kiện / NET / tiền / B/L / container, trả cont. Sửa cục bộ, không tái
@@ -56,12 +57,23 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
   trang `user-guide`.
 - Mã `TRA_CONT` ↔ cột DB `tra_cong`. `TRA_CONT` và `INSPECTION` bắt buộc chọn số container (hoặc thư mục
   ảnh đã có với INSPECTION) trước khi upload; file nằm trong thư mục container trên Drive.
-- Mọi luồng upload phải gọi `checkDocumentFileNames` **trước** khi upload, chạy OCR hay ghi DB, để báo
-  trùng tên sớm. Không tự đổi tên hay đánh số file ở FE — quy tắc đặt tên nằm ở BE.
+- Mọi luồng upload phải kiểm tra trùng tên **trước** khi upload, chạy OCR hay ghi DB, để báo trùng tên sớm: gọi
+  `checkDocumentFileNames`, hoặc mở phiên trước (`prepareDocumentUpload` / `openDocumentUploadSessions`: BE chặn trùng lúc
+  mở phiên, như màn tạo đơn). Không tự đổi tên hay đánh số file ở FE — quy tắc đặt tên nằm ở BE.
+- File còn chờ người dùng xác nhận (OCR trong chi tiết đơn, PI khi bấm tạo đơn) dùng `prepareDocumentUpload`: mở phiên và
+  gửi trước gần hết file song song với OCR / ghi DB (`preUploadToDriveSession` chừa phần cuối nên Drive chưa tạo file),
+  xác nhận thì `uploadDocument(..., { prepared })` chỉ gửi phần cuối + lưu DB; huỷ thì `cancel()`, không có file thừa.
 - Upload chứng từ dùng `uploadDocument(input, { onProgress })` trong `shipmentApi.ts`: BE mở phiên upload, trình duyệt gửi
   file thẳng lên Google Drive (`utils/driveResumableUpload.ts`, từng phần 8 MB), BE xác nhận rồi lưu DB. Không gửi file
   base64 qua gateway: gateway chạy trên Vercel, giới hạn 4,5 MB mỗi request. Tối đa 1 GB/file
   (`MAX_DOCUMENT_UPLOAD_BYTES`); file OCR vẫn qua gateway nên tối đa `MAX_OCR_FILE_BYTES` (4 MB).
+- Upload không OCR và OCR "Chỉ lưu file" chạy nền: `useDocumentUploadQueue().enqueueDocumentUpload(...)`
+  (`context/DocumentUploadQueueContext.tsx`, provider ở layout admin). Chuyển trang trong app vẫn upload tiếp; đóng tab / tải
+  lại thì trình duyệt hỏi trước. Hàng đợi chuẩn bị file (đóng dấu ảnh) → mở phiên cho cả nhóm bằng
+  `openDocumentUploadSessions` (một request `startDocumentUploads`) → gửi file + xác nhận, tối đa 4 file cùng lúc cho mọi
+  lượt. Thẻ tiến độ (`UploadBatchProgressToast`, nằm trên nút chatbox AI) có Thử lại / Đóng cho lượt có file lỗi. Trang chi
+  tiết đơn nhận kết quả qua sự kiện `DOCUMENT_UPLOAD_EVENT` (kể cả khi mở lại đơn sau khi đã rời trang). Nhật ký upload
+  ghi trong `onUploaded` của lượt (chạy cả khi đã rời trang). OCR "Lưu và cập nhật" vẫn chờ upload xong mới ghi số liệu.
 - Mỗi lượt upload truyền `batch: createUploadBatch(số file)` để BE gửi **một** thông báo Google Chat cho cả lượt; có file
   lỗi thì gọi `finishDocumentUploadBatch` để gửi phần đã lưu. Upload chứng từ mới phải truyền batch, nếu không BE gom theo
   thời gian chờ.
@@ -73,6 +85,10 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
 
 - Danh sách đơn hàng tải bằng **một** request `GET shipment-snapshot` (`fetchPostgresShipmentListSnapshot`), tự quay về
   tải từng bảng nếu BE trả 404. Ghép quan hệ bằng chỉ mục (`buildRelationIndex`), không `.filter` cả bảng cho từng đơn.
+- Trang chi tiết đơn (mở trang, `onRefresh` sau khi lưu) và sửa nhanh ETA ở bảng tải **một đơn** bằng `fetchShipment(mã)`
+  (`shipment-snapshot?orderCode=`), thay đúng đơn đó trong cache danh sách; không gọi `fetchShipments()` (cả danh sách)
+  sau khi lưu một đơn. Lưu nhiều bảng: kiểm tra / tra danh mục trước, rồi ghi các bảng độc lập song song
+  (`updatePostgresShipmentFields`, `handleSaveDetails`); chỉ nối tiếp khi cần id vừa tạo hoặc cần giữ thứ tự dòng mới.
 - Không gọi API theo từng đơn trong vòng lặp. Dữ liệu vận chuyển/trả cont lấy từ `shipment.database` qua
   `returnItemsFromRelations`. Danh mục NCC/hãng tàu/kho dùng `listCatalogRows` (cache 5 phút theo token,
   tự xoá khi tạo/sửa); màn danh mục vẫn dùng `listDatabaseRows` để luôn mới.

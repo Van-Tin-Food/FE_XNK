@@ -96,6 +96,8 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return backendMessage || "Tên file đã tồn tại trong thư mục chứng từ. Vui lòng đổi tên file rồi thử lại.";
     case "MISSING_TRANSPORT_CODE":
       return backendMessage || "Vui lòng chọn số container trước khi upload.";
+    case "INVALID_ORDER_CODE":
+      return "Mã đơn hàng không hợp lệ.";
     case "INVALID_CONTAINER_FOLDER":
     case "CONTAINER_FOLDER_RENAME_REQUIRED":
       return backendMessage || "Thư mục container không đúng định dạng. Vui lòng kiểm tra lại.";

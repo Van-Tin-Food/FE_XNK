@@ -3,7 +3,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Shipment, ShipmentFilter, ShipmentStatus, ShipmentFilterStatus } from "@/types/shipment";
-import { fetchShipments, computeMetrics, exportEtaRows, getCachedShipments } from "@/services/shipmentApi";
+import { fetchShipment, fetchShipments, computeMetrics, exportEtaRows, getCachedShipments } from "@/services/shipmentApi";
+import { DOCUMENT_UPLOAD_EVENT, type DocumentUploadEventDetail } from "@/context/DocumentUploadQueueContext";
 import { returnItemsFromRelations } from "@/services/postgresShipmentApi";
 import { buildEtaRows, getEtaHeaders } from "@/services/shipmentExcelExport";
 import { getGoodsPaymentSummary } from "@/services/paymentCostApi";
@@ -222,6 +223,30 @@ export default function ShipmentDashboard() {
     return () => window.clearTimeout(timer);
   }, [canViewShipments, loadData]);
 
+  // Sửa nhanh một đơn trên bảng (ETA): chỉ tải lại đơn đó (BE đọc dòng của một đơn) thay vì cả danh sách. Lỗi thì tải lại
+  // cả danh sách như trước.
+  const reloadShipment = useCallback(async (orderCode: string) => {
+    const wanted = orderCode.trim().toUpperCase();
+    try {
+      const updated = await fetchShipment(orderCode);
+      setShipments((current) => (updated
+        ? current.map((item) => (item.orderCode.trim().toUpperCase() === wanted ? updated : item))
+        : current.filter((item) => item.orderCode.trim().toUpperCase() !== wanted)));
+    } catch {
+      await loadData();
+    }
+  }, [loadData]);
+
+  // Upload chạy nền xong (người dùng đã rời trang chi tiết sang danh sách): tải lại đúng đơn đó để cột chứng từ cập nhật.
+  useEffect(() => {
+    const handle = (event: Event) => {
+      const detail = (event as CustomEvent<DocumentUploadEventDetail>).detail;
+      if (detail?.kind === "settled" && detail.orderCode) void reloadShipment(detail.orderCode);
+    };
+    window.addEventListener(DOCUMENT_UPLOAD_EVENT, handle);
+    return () => window.removeEventListener(DOCUMENT_UPLOAD_EVENT, handle);
+  }, [reloadShipment]);
+
   // Refresh handler
   const handleRefresh = useCallback(async () => {
     await loadData();
@@ -434,7 +459,7 @@ export default function ShipmentDashboard() {
           </div>
         </div>
       ) : (
-        <ShipmentTable key={tableResetKey} shipments={filteredShipments} onRowClick={handleRowClick} onShipmentUpdated={loadData} />
+        <ShipmentTable key={tableResetKey} shipments={filteredShipments} onRowClick={handleRowClick} onShipmentUpdated={reloadShipment} />
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runWithConcurrency } from "../src/utils/concurrency.ts";
+import { createConcurrencyLimit, runWithConcurrency } from "../src/utils/concurrency.ts";
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -42,4 +42,25 @@ test("danh sách rỗng: không làm gì", async () => {
   let calls = 0;
   await runWithConcurrency([], 3, async () => { calls += 1; });
   assert.equal(calls, 0);
+});
+
+test("giới hạn dùng chung: nhiều nhóm gọi lệch thời điểm vẫn không vượt giới hạn, lỗi trả đúng lời gọi", async () => {
+  const run = createConcurrencyLimit(2);
+  let running = 0;
+  let peak = 0;
+  const task = (value, ms, fail = false) => () => (async () => {
+    running += 1;
+    peak = Math.max(peak, running);
+    await wait(ms);
+    running -= 1;
+    if (fail) throw new Error(`lỗi ${value}`);
+    return value;
+  })();
+  const first = Promise.allSettled([run(task(1, 10)), run(task(2, 5, true)), run(task(3, 5))]);
+  await wait(7);
+  // Nhóm sau gọi đúng lúc việc 2 vừa xong và việc 3 đang được nhận chỗ.
+  const second = Promise.allSettled([run(task(4, 3)), run(task(5, 3))]);
+  const results = [...(await first), ...(await second)];
+  assert.equal(peak, 2);
+  assert.deepEqual(results.map((result) => (result.status === "fulfilled" ? result.value : result.reason.message)), [1, "lỗi 2", 3, 4, 5]);
 });

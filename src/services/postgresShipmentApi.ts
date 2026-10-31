@@ -163,11 +163,14 @@ const SNAPSHOT_KEYS = [
 /**
  * Tải mọi bảng của danh sách đơn hàng trong một request (/shipment-snapshot) thay vì 11 request
  * song song. BE cũ chưa có API này (404) thì quay về cách tải từng bảng.
+ * orderCode: chỉ dữ liệu của một đơn (cùng dạng, danh mục vẫn đủ). BE cũ bỏ qua tham số và trả cả danh sách: người gọi
+ * vẫn tìm đơn trong kết quả nên không lỗi.
  */
-export async function fetchPostgresShipmentListSnapshot(): Promise<PostgresShipmentSnapshot> {
+export async function fetchPostgresShipmentListSnapshot({ orderCode = "" }: { orderCode?: string } = {}): Promise<PostgresShipmentSnapshot> {
   let snapshot: PostgresShipmentSnapshot;
+  const path = orderCode.trim() ? `shipment-snapshot?orderCode=${encodeURIComponent(orderCode.trim())}` : "shipment-snapshot";
   try {
-    const data = unwrapRecord<Record<string, unknown>>(await databaseRequest<unknown>("shipment-snapshot"));
+    const data = unwrapRecord<Record<string, unknown>>(await databaseRequest<unknown>(path));
     const missing = SNAPSHOT_KEYS.filter((key) => !Array.isArray(data?.[key]));
     if (missing.length > 0) throw new Error(`Dữ liệu danh sách đơn hàng thiếu: ${missing.join(", ")}`);
     snapshot = data as unknown as PostgresShipmentSnapshot;
@@ -301,6 +304,12 @@ function nullablePackageCount(value: string | undefined): number | null | undefi
   return parsed;
 }
 
+/**
+ * Lưu các trường tóm tắt của đơn vào từng bảng. Kiểm tra / đổi giá trị và tra danh mục (song song) trước khi ghi gì, nên
+ * dữ liệu sai không để lại phần đã ghi; sau đó ghi các bảng độc lập song song (mỗi lệnh ghi là một lượt qua gateway).
+ * Chỉ tạo B/L mới → tạo container là nối tiếp (container cần id_xnk vừa tạo). Có lệnh ghi lỗi thì chờ các lệnh khác xong
+ * rồi báo lỗi đầu tiên (người gọi báo "đã lưu một phần").
+ */
 export async function updatePostgresShipmentFields(
   relations: PostgresShipmentRelations,
   fields: Record<string, string | number>,
@@ -310,17 +319,25 @@ export async function updatePostgresShipmentFields(
   const invoiceDate = fieldValue(fields, ["Ngày INV"]);
   const contractDate = fieldValue(fields, ["Ngày HĐ PI", "Ngày PI"]);
   const supplierName = fieldValue(fields, ["Nhà cung cấp"]);
+  const carrierName = fieldValue(fields, ["Hãng tàu"]);
   if (invoice !== undefined) purchasePatch.ma_inv = nullable(invoice);
   if (invoiceDate !== undefined) purchasePatch.ngay_inv = nullableDate(invoiceDate);
   if (contractDate !== undefined) purchasePatch.ngay_hop_dong = nullableDate(contractDate);
-  if (supplierName !== undefined && supplierName !== relations.supplier?.ten_ncc) {
-    const supplier = await findCatalogRow<SupplierRecord>(databaseEndpoints.suppliers, (item) => normalizeField(item.ten_ncc) === normalizeField(supplierName));
-    if (!supplier) throw new Error(`Nhà cung cấp ${supplierName} chưa có trong danh mục PostgreSQL`);
-    purchasePatch.id_ncc = supplier.id_ncc;
-  }
-  if (Object.keys(purchasePatch).length > 0) {
-    await updateDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, relations.purchase.ma_hop_dong, purchasePatch);
-  }
+  const [supplier, carrier] = await Promise.all([
+    supplierName !== undefined && supplierName !== relations.supplier?.ten_ncc
+      ? findCatalogRow<SupplierRecord>(databaseEndpoints.suppliers, (item) => normalizeField(item.ten_ncc) === normalizeField(supplierName)).then((row) => {
+        if (!row) throw new Error(`Nhà cung cấp ${supplierName} chưa có trong danh mục PostgreSQL`);
+        return row;
+      })
+      : undefined,
+    carrierName !== undefined
+      ? findCatalogRow<CarrierRecord>(databaseEndpoints.carriers, (item) => normalizeField(item.ten_hang_tau) === normalizeField(carrierName)).then((row) => {
+        if (!row) throw new Error(`Hãng tàu ${carrierName} chưa có trong danh mục PostgreSQL`);
+        return row;
+      })
+      : undefined,
+  ]);
+  if (supplier) purchasePatch.id_ncc = supplier.id_ncc;
 
   const firstDetail = relations.details[0];
   const detailPatch: Partial<PurchaseDetailRecord> = {};
@@ -334,33 +351,14 @@ export async function updatePostgresShipmentFields(
   if (packageCount !== undefined) detailPatch.so_kien = nullablePackageCount(packageCount);
   if (unitPrice !== undefined) detailPatch.don_gia = nullableNumber(unitPrice);
   if (totalPrice !== undefined) detailPatch.tong_gia = nullableNumber(totalPrice);
-  if (Object.keys(detailPatch).length > 0) {
-    if (!firstDetail) throw new Error("Đơn hàng chưa có dòng chi tiết mua hàng");
-    await updateDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, firstDetail.id_chi_tiet, detailPatch);
-  }
+  if (Object.keys(detailPatch).length > 0 && !firstDetail) throw new Error("Đơn hàng chưa có dòng chi tiết mua hàng");
 
   const firstItem = firstDetail?.itemCodes[0];
   const itemCode = fieldValue(fields, ["Item code"]);
   const factoryCode = fieldValue(fields, ["Mã nhà máy"]);
-  if (itemCode !== undefined || factoryCode !== undefined) {
-    if (firstItem) {
-      await updateDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, firstItem.id_item_code, {
-        ...(itemCode !== undefined ? { item_code: itemCode } : {}),
-        ...(factoryCode !== undefined ? { ma_nha_may: factoryCode } : {}),
-      });
-    } else if (firstDetail && itemCode) {
-      await createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
-        id_chi_tiet: firstDetail.id_chi_tiet,
-        item_code: itemCode,
-        ma_nha_may: factoryCode || "",
-      });
-    }
-  }
 
   const currentBill = relations.bills[0];
-  let targetXnkId = currentBill?.id_xnk;
   const billCode = fieldValue(fields, ["BL NO.", "Mã BL"]);
-  const carrierName = fieldValue(fields, ["Hãng tàu"]);
   const billPatch: Partial<XnkRecord> = {};
   const destination = fieldValue(fields, ["Cảng đến"]);
   const departure = fieldValue(fields, ["Cảng đi"]);
@@ -372,20 +370,46 @@ export async function updatePostgresShipmentFields(
   if (etd !== undefined) billPatch.etd = nullableDate(etd);
   if (eta !== undefined) billPatch.eta = nullableDate(eta);
   if (ata !== undefined) billPatch.ata = nullableDate(ata);
-  if (carrierName !== undefined) {
-    const carrier = await findCatalogRow<CarrierRecord>(databaseEndpoints.carriers, (item) => normalizeField(item.ten_hang_tau) === normalizeField(carrierName));
-    if (!carrier) throw new Error(`Hãng tàu ${carrierName} chưa có trong danh mục PostgreSQL`);
-    billPatch.id_hang_tau = carrier.id_hang_tau;
+  if (carrier) billPatch.id_hang_tau = carrier.id_hang_tau;
+  if (currentBill && billCode !== undefined) billPatch.ma_bl = billCode;
+  const createsBill = !currentBill && Boolean(billCode);
+  if (createsBill && !billPatch.id_hang_tau) throw new Error("Cần chọn hãng tàu trước khi tạo B/L");
+
+  const containerCode = fieldValue(fields, ["Mã Container", "Số Container", "Số cont", "Container"]);
+  const currentContainer = currentBill?.containers[0];
+
+  const writes: Array<Promise<unknown>> = [];
+  if (Object.keys(purchasePatch).length > 0) {
+    writes.push(updateDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, relations.purchase.ma_hop_dong, purchasePatch));
   }
-  if (currentBill) {
-    if (billCode !== undefined) billPatch.ma_bl = billCode;
-    if (Object.keys(billPatch).length > 0) {
-      await updateDatabaseRow<XnkRecord>(databaseEndpoints.bills, currentBill.id_xnk, billPatch);
+  if (Object.keys(detailPatch).length > 0 && firstDetail) {
+    writes.push(updateDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, firstDetail.id_chi_tiet, detailPatch));
+  }
+  if (itemCode !== undefined || factoryCode !== undefined) {
+    if (firstItem) {
+      writes.push(updateDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, firstItem.id_item_code, {
+        ...(itemCode !== undefined ? { item_code: itemCode } : {}),
+        ...(factoryCode !== undefined ? { ma_nha_may: factoryCode } : {}),
+      }));
+    } else if (firstDetail && itemCode) {
+      writes.push(createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
+        id_chi_tiet: firstDetail.id_chi_tiet,
+        item_code: itemCode,
+        ma_nha_may: factoryCode || "",
+      }));
     }
-  } else if (billCode) {
-    if (!billPatch.id_hang_tau) throw new Error("Cần chọn hãng tàu trước khi tạo B/L");
-    const createdBill = await createDatabaseRow<XnkRecord>(databaseEndpoints.bills, {
-      ma_bl: billCode,
+  }
+  if (currentBill && Object.keys(billPatch).length > 0) {
+    writes.push(updateDatabaseRow<XnkRecord>(databaseEndpoints.bills, currentBill.id_xnk, billPatch));
+  }
+  if (containerCode !== undefined && currentContainer) {
+    writes.push(updateDatabaseRow<ContainerRecord>(databaseEndpoints.containers, currentContainer.id_bl_container, {
+      ma_container: containerCode,
+    }));
+  }
+  if (createsBill) {
+    writes.push(createDatabaseRow<XnkRecord>(databaseEndpoints.bills, {
+      ma_bl: billCode as string,
       ma_hop_dong: relations.purchase.ma_hop_dong,
       id_hang_tau: billPatch.id_hang_tau,
       cang_di: billPatch.cang_di ?? null,
@@ -393,26 +417,18 @@ export async function updatePostgresShipmentFields(
       etd: billPatch.etd ?? null,
       eta: billPatch.eta ?? null,
       ata: billPatch.ata ?? null,
-    });
-    targetXnkId = createdBill.id_xnk;
+    }).then(async (createdBill) => {
+      // Container mới gắn vào B/L vừa tạo (cần id_xnk) nên chạy sau, vẫn song song với các bảng khác.
+      if (containerCode && !currentContainer && createdBill.id_xnk) {
+        await createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, { id_xnk: createdBill.id_xnk, ma_container: containerCode });
+      }
+    }));
+  } else if (containerCode && !currentContainer && currentBill?.id_xnk) {
+    writes.push(createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, { id_xnk: currentBill.id_xnk, ma_container: containerCode }));
   }
 
-  const containerCode = fieldValue(fields, ["Mã Container", "Số Container", "Số cont", "Container"]);
-  if (containerCode !== undefined) {
-    const currentContainer = currentBill?.containers[0];
-    if (currentContainer) {
-      await updateDatabaseRow<ContainerRecord>(databaseEndpoints.containers, currentContainer.id_bl_container, {
-        ma_container: containerCode,
-      });
-    } else {
-      if (targetXnkId && containerCode) {
-        await createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, {
-          id_xnk: targetXnkId,
-          ma_container: containerCode,
-        });
-      }
-    }
-  }
+  const failed = (await Promise.allSettled(writes)).find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failed) throw failed.reason;
 }
 
 /** Lưu OCR BL dạng nhiều dòng: một XNK và nhiều container, không ghi đè container cũ. */
@@ -663,7 +679,8 @@ export async function fetchPostgresReturnItem(contractCode: string): Promise<Ret
   return (await fetchPostgresReturnItems(contractCode))[0] || null;
 }
 
-export async function savePostgresReturnItem(item: ReturnItem): Promise<void> {
+/** Lưu dòng vận chuyển của container; trả id_van_chuyen của dòng đã lưu (dòng mới thì là id BE vừa tạo). */
+export async function savePostgresReturnItem(item: ReturnItem): Promise<string> {
   if (!item.idBlContainer) throw new Error("Đơn hàng chưa có container để cập nhật vận chuyển");
   const payload: Omit<ContainerTransportRecord, "id_van_chuyen"> = {
     id_bl_container: item.idBlContainer,
@@ -680,6 +697,8 @@ export async function savePostgresReturnItem(item: ReturnItem): Promise<void> {
     ? unwrapRecord<unknown>(await updateDatabaseRow<ContainerTransportRecord>(databaseEndpoints.transports, item.idVanChuyen, payload))
     : await createDatabaseRow<unknown>(databaseEndpoints.transports, payload);
   logTransportSheetSync(item, saved);
+  const savedId = isRecord(saved) ? saved.id_van_chuyen : undefined;
+  return savedId === undefined || savedId === null || savedId === "" ? item.idVanChuyen : String(savedId);
 }
 
 /**

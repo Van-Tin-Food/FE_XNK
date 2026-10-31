@@ -23,3 +23,27 @@ export async function runWithConcurrency<T>(
   await Promise.all(lanes);
   if (firstError) throw firstError;
 }
+
+/**
+ * Giới hạn dùng chung cho nhiều nhóm việc bắt đầu vào các thời điểm khác nhau: tối đa `limit` việc chạy cùng lúc,
+ * việc vượt giới hạn chờ theo thứ tự gọi. Lỗi của việc nào trả về đúng lời gọi đó.
+ */
+export function createConcurrencyLimit(limit: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  // Xong một việc: chuyển thẳng chỗ trống cho việc đang chờ (không giảm active) để việc mới gọi chen vào không vượt giới hạn.
+  const release = () => {
+    const next = waiting.shift();
+    if (next) next();
+    else active -= 1;
+  };
+  return async function run<T>(task: () => Promise<T>): Promise<T> {
+    if (active >= Math.max(1, limit)) await new Promise<void>((resolve) => waiting.push(resolve));
+    else active += 1;
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  };
+}

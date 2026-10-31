@@ -3,6 +3,7 @@
 import { useAuth } from "@/context/AuthContext";
 import { useSidebar } from "@/context/SidebarContext";
 import AiChatBox from "@/components/ai/AiChatBox";
+import { DocumentUploadQueueProvider } from "@/context/DocumentUploadQueueContext";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar from "@/layout/AppSidebar";
 import Backdrop from "@/layout/Backdrop";
@@ -40,21 +41,24 @@ export default function AdminLayout({
     : "lg:ml-[90px]";
 
   return (
-    <div className="min-h-screen xl:flex">
-      {/* Sidebar and Backdrop */}
-      <AppSidebar />
-      <Backdrop />
-      {/* Main Content Area */}
-      <div
-        className={`min-w-0 flex-1 transition-all duration-300 ease-in-out ${mainContentMargin}`}
-      >
-        {/* Header */}
-        <AppHeader />
-        {/* Page Content */}
-        <div className="mx-auto min-w-0 max-w-(--breakpoint-2xl) p-4 md:p-6">{children}</div>
+    // Hàng đợi upload chứng từ chạy nền nằm ở layout: chuyển trang trong app vẫn upload tiếp.
+    <DocumentUploadQueueProvider>
+      <div className="min-h-screen xl:flex">
+        {/* Sidebar and Backdrop */}
+        <AppSidebar />
+        <Backdrop />
+        {/* Main Content Area */}
+        <div
+          className={`min-w-0 flex-1 transition-all duration-300 ease-in-out ${mainContentMargin}`}
+        >
+          {/* Header */}
+          <AppHeader />
+          {/* Page Content */}
+          <div className="mx-auto min-w-0 max-w-(--breakpoint-2xl) p-4 md:p-6">{children}</div>
+        </div>
+        {/* Chatbox AI tra cứu đơn hàng: nút nổi góc phải dưới */}
+        <AiChatBox />
       </div>
-      {/* Chatbox AI tra cứu đơn hàng: nút nổi góc phải dưới */}
-      <AiChatBox />
-    </div>
+    </DocumentUploadQueueProvider>
   );
 }

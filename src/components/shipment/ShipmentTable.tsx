@@ -13,7 +13,8 @@ import { useAuth } from "@/context/AuthContext";
 interface ShipmentTableProps {
   shipments: Shipment[];
   onRowClick: (shipment: Shipment) => void;
-  onShipmentUpdated?: () => void | Promise<void>;
+  /** Đã sửa nhanh một đơn ngay trên bảng (ETA): tải lại đúng đơn đó. */
+  onShipmentUpdated?: (orderCode: string) => void | Promise<void>;
 }
 
 const DEFAULT_PAGE_SIZE = 15;
@@ -447,7 +448,7 @@ export default function ShipmentTable({ shipments, onRowClick, onShipmentUpdated
       await updateDatabaseRow(databaseEndpoints.bills, bill.id_xnk, { eta });
       setEditingEtaId(null);
       setDraftEta("");
-      await onShipmentUpdated?.();
+      await onShipmentUpdated?.(shipment.orderCode);
     } catch (error) {
       setEtaError(error instanceof Error ? error.message : t("etaUpdateFailed"));
     } finally {

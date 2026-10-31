@@ -19,7 +19,7 @@ import {
 import type { DriveDocumentFileRecord, DriveDocumentRecord, DriveDocumentValue, NotificationRecord, PostgresShipmentRelations, PostgresShipmentSnapshot, PurchaseRecord } from "@/types/postgresShipment";
 import { type ApiError, createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 import { getDocumentMimeType } from "@/utils/documentFile";
-import { uploadFileToDriveSession, type UploadProgress } from "@/utils/driveResumableUpload";
+import { DriveUploadError, preUploadToDriveSession, uploadFileToDriveSession, type UploadProgress } from "@/utils/driveResumableUpload";
 
 export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
 export type DriveFolderLinks = {
@@ -276,11 +276,32 @@ export function getCachedShipments(): ShipmentListResult | null {
 // luôn gọi request mới để không nhận kết quả của request bắt đầu trước khi lưu.
 let shipmentListInFlight: { token: string; promise: Promise<ShipmentListResult> } | null = null;
 
+// Đơn vừa tải lại riêng (fetchShipment, sau khi lưu) đánh số theo lúc bắt đầu tải. Lần tải cả danh sách bắt đầu TRƯỚC đó mà
+// về sau (dữ liệu trước khi lưu) thì thay các đơn này bằng bản mới, không ghi đè cache / bảng bằng dữ liệu cũ.
+let shipmentLoadSequence = 0;
+const freshShipments = new Map<string, { sequence: number; token: string; shipment: Shipment }>();
+const MAX_FRESH_SHIPMENTS = 100;
+
+function applyFreshShipments(result: ShipmentListResult, token: string, startedAt: number): ShipmentListResult {
+  const newer = [...freshShipments.entries()].filter(([, entry]) => entry.token === token && entry.sequence > startedAt);
+  if (newer.length === 0) return result;
+  const byCode = new Map(newer.map(([code, entry]) => [code, entry.shipment]));
+  return {
+    ...result,
+    shipments: result.shipments.map((item) => {
+      const fresh = byCode.get(item.orderCode.trim().toUpperCase());
+      return fresh ? { ...fresh, id: item.id } : item;
+    }),
+  };
+}
+
 export function fetchShipments({ shareInFlight = false }: { shareInFlight?: boolean } = {}): Promise<ShipmentListResult> {
   const token = getStoredUser()?.token || "";
   if (shareInFlight && shipmentListInFlight && shipmentListInFlight.token === token) return shipmentListInFlight.promise;
+  const startedAt = ++shipmentLoadSequence;
   const promise = loadShipmentList()
-    .then((result) => {
+    .then((loaded) => {
+      const result = applyFreshShipments(loaded, token, startedAt);
       shipmentListCache = { token, result };
       return result;
     })
@@ -289,6 +310,41 @@ export function fetchShipments({ shareInFlight = false }: { shareInFlight?: bool
     });
   shipmentListInFlight = { token, promise };
   return promise;
+}
+
+/**
+ * Tải lại một đơn (trang chi tiết đơn: mở trang, tải lại sau khi lưu) thay vì cả danh sách: BE chỉ đọc dòng của đơn đó.
+ * Có cache danh sách thì thay đúng đơn đó trong cache (giữ vị trí / id), để quay lại danh sách thấy dữ liệu mới ngay.
+ * Trả null khi không có đơn (đã tìm lại trong cả danh sách).
+ */
+export async function fetchShipment(orderCode: string): Promise<Shipment | null> {
+  const token = getStoredUser()?.token || "";
+  const wanted = orderCode.trim().toUpperCase();
+  const sequence = ++shipmentLoadSequence;
+  const database = await fetchPostgresShipmentListSnapshot({ orderCode: wanted });
+  const purchase = database.purchases.find((row) => String(row.ma_hop_dong || "").trim().toUpperCase() === wanted);
+  if (!purchase) {
+    // BE lọc bằng UPPER(TRIM()) của PostgreSQL, chỉ bỏ dấu cách: mã đơn trong DB có tab / xuống dòng / NBSP (dán từ Excel)
+    // thì không khớp. Tìm lại trong cả danh sách (so khớp như trước) rồi mới kết luận không có đơn; cache được thay luôn.
+    const full = await fetchShipments();
+    return full.shipments.find((item) => item.orderCode.trim().toUpperCase() === wanted) || null;
+  }
+  const totalMap = database.driveDocuments ? driveDocumentMap(database.driveDocuments) : await fetchDriveDocumentMap();
+  // Đọc cache sau khi tải xong (lúc chờ có thể đã có lần tải danh sách khác ghi vào); cache của tài khoản khác thì bỏ qua.
+  const cached = shipmentListCache && shipmentListCache.token === token ? shipmentListCache.result : null;
+  const cachedIndex = cached ? cached.shipments.findIndex((item) => item.orderCode.trim().toUpperCase() === wanted) : -1;
+  const position = cachedIndex >= 0 ? cachedIndex : (cached?.shipments.length ?? 0);
+  const shipment = mapPostgresShipment(purchase, buildRelationIndex(database), totalMap.get(wanted), position, new Date().toISOString());
+  freshShipments.delete(wanted);
+  freshShipments.set(wanted, { sequence, token, shipment });
+  if (freshShipments.size > MAX_FRESH_SHIPMENTS) freshShipments.delete(freshShipments.keys().next().value as string);
+  if (cached) {
+    const shipments = cachedIndex >= 0
+      ? cached.shipments.map((item, index) => (index === cachedIndex ? shipment : item))
+      : [...cached.shipments, shipment];
+    shipmentListCache = { token, result: { ...cached, shipments } };
+  }
+  return shipment;
 }
 
 async function loadShipmentList(): Promise<ShipmentListResult> {
@@ -672,11 +728,17 @@ export function checkDocumentFileNames(payload: DocumentUploadTarget & { fileNam
   });
 }
 
-interface DocumentUploadSession {
+export interface DocumentUploadSession {
   uploadUrl: string;
   uploadToken: string;
   fileName: string;
 }
+
+/** Lỗi mở phiên của một file: code của BE (DUPLICATE_FILE_NAME...), tên sẽ lưu và thư mục đích. */
+export type DocumentUploadSessionError = Error & { code?: string; targetName?: string; folderName?: string };
+
+/** Phiên upload của một file trong lượt: đã mở được, hoặc lỗi riêng của file đó (trùng tên, Drive không mở phiên...). */
+export type DocumentUploadSessionResult = { session: DocumentUploadSession; error?: undefined } | { session?: undefined; error: Error };
 
 function postJson<T>(path: string, body: object): Promise<T> {
   return requestJson<T>(path, {
@@ -687,28 +749,120 @@ function postJson<T>(path: string, body: object): Promise<T> {
 }
 
 /**
+ * Bước 1 cho cả lượt nhiều file, một request thay cho mở phiên từng file: BE kiểm tra đơn đã lưu trữ, tìm / tạo thư mục
+ * và chặn trùng tên một lần rồi mở phiên upload cho mọi file. Kết quả cùng thứ tự `files`; file trùng tên hay mở phiên
+ * lỗi chỉ hỏng file đó. Lỗi chung (đơn đã lưu trữ, hết quyền Google...) thì ném lỗi như các API khác.
+ */
+export async function openDocumentUploadSessions(target: DocumentUploadTarget, files: File[]): Promise<DocumentUploadSessionResult[]> {
+  for (const file of files) {
+    if (file.size <= 0) throw new Error(`File ${file.name} rỗng, không upload được`);
+    if (file.size > MAX_DOCUMENT_UPLOAD_BYTES) throw new Error(`File ${file.name} vượt quá dung lượng tối đa 1 GB`);
+  }
+  const response = await postJson<{ files?: unknown; folderName?: unknown }>("startDocumentUploads", {
+    ...target,
+    files: files.map((file) => ({ fileName: file.name, fileSize: file.size, mimeType: getDocumentMimeType(file) })),
+  });
+  const rows = Array.isArray(response.files) ? response.files : [];
+  return files.map((file, index) => {
+    const row = isRecord(rows[index]) ? rows[index] : {};
+    const uploadUrl = typeof row.uploadUrl === "string" ? row.uploadUrl : "";
+    const uploadToken = typeof row.uploadToken === "string" ? row.uploadToken : "";
+    if (uploadUrl && uploadToken) {
+      return { session: { uploadUrl, uploadToken, fileName: typeof row.fileName === "string" ? row.fileName : file.name } };
+    }
+    const error = new Error(typeof row.message === "string" && row.message ? row.message : "Máy chủ chưa mở được phiên upload Google Drive") as DocumentUploadSessionError;
+    if (typeof row.code === "string") error.code = row.code;
+    // Tên sẽ lưu + thư mục để FE tự dựng câu báo trùng tên theo ngôn ngữ giao diện.
+    error.targetName = typeof row.fileName === "string" ? row.fileName : file.name;
+    error.folderName = typeof response.folderName === "string" ? response.folderName : "";
+    return { error };
+  });
+}
+
+/** Một file đã mở phiên và gửi trước phần lớn trong lúc người dùng còn xác nhận (prepareDocumentUpload). */
+export interface PreparedDocumentUpload {
+  /** Phiên upload của file; lỗi = trùng tên, đơn đã lưu trữ, hết quyền Google... (như mở phiên thường). */
+  session: Promise<DocumentUploadSession>;
+  /** Phần gửi trước đã xong hoặc đã dừng (không bao giờ lỗi; gửi trước lỗi thì lúc xác nhận gửi lại phần còn thiếu). */
+  preUploaded: Promise<void>;
+  /** Huỷ (người dùng bỏ file): dừng gửi trước. Drive chưa tạo file nên không phải dọn gì. */
+  cancel: () => void;
+}
+
+/**
+ * Mở phiên upload và gửi trước gần hết file ngay khi người dùng chọn / bấm lưu, chạy song song với OCR hoặc ghi DB.
+ * Drive chỉ tạo file khi nhận byte cuối (preUploadToDriveSession), nên xác nhận thì uploadDocument(..., { prepared }) chỉ
+ * còn gửi phần cuối + lưu DB; huỷ thì không để lại file nào. target giống uploadDocument (không cần referenceCode /
+ * idChiTiet: hai trường này gửi lúc xác nhận).
+ */
+export function prepareDocumentUpload(
+  target: DocumentUploadTarget,
+  file: File,
+  options: { onProgress?: (progress: UploadProgress) => void } = {},
+): PreparedDocumentUpload {
+  const controller = new AbortController();
+  const session = openDocumentUploadSessions(target, [file]).then(([result]) => {
+    if (!result.session) throw result.error;
+    return result.session;
+  });
+  const preUploaded = session
+    .then((opened) => preUploadToDriveSession(opened.uploadUrl, file, { signal: controller.signal, onProgress: options.onProgress }))
+    .then(() => undefined, () => undefined);
+  // Người gọi có thể không chờ session (huỷ sớm): không để thành lỗi không ai bắt.
+  session.catch(() => {});
+  return { session, preUploaded, cancel: () => controller.abort() };
+}
+
+/**
  * Upload chứng từ thẳng lên Google Drive, không qua gateway Vercel (giới hạn 4,5 MB mỗi request):
- * 1. BE đặt tên, chọn thư mục, kiểm tra trùng và mở phiên upload Drive;
+ * 1. BE đặt tên, chọn thư mục, kiểm tra trùng và mở phiên upload Drive (bỏ qua khi đã có `options.session` từ
+ *    openDocumentUploadSessions, hoặc `options.prepared` từ prepareDocumentUpload: khi đó chỉ gửi phần còn lại; mở phiên
+ *    trước bị lỗi thì mở lại phiên mới như thường để báo đúng lỗi);
  * 2. trình duyệt gửi file từng phần tới Google (onProgress báo số byte đã gửi);
  * 3. BE kiểm tra file trên Drive rồi lưu chung_tu_drive, trả kết quả như upload cũ.
  */
 export async function uploadDocument(
   input: UploadDocumentInput,
-  options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal } = {},
+  options: {
+    onProgress?: (progress: UploadProgress) => void;
+    signal?: AbortSignal;
+    session?: DocumentUploadSession;
+    prepared?: PreparedDocumentUpload;
+  } = {},
 ): Promise<DriveDataResponse> {
   const { file, requestId, batch, ...target } = input;
   if (file.size <= 0) throw new Error(`File ${file.name} rỗng, không upload được`);
   if (file.size > MAX_DOCUMENT_UPLOAD_BYTES) throw new Error(`File ${file.name} vượt quá dung lượng tối đa 1 GB`);
   let result: DriveDataResponse;
   try {
-    const session = await postJson<DocumentUploadSession>("startDocumentUpload", {
+    let preparedSession: DocumentUploadSession | undefined;
+    if (options.prepared) {
+      preparedSession = await options.prepared.session.catch(() => undefined);
+      // Chờ phần gửi trước dừng hẳn rồi mới gửi tiếp, không để hai lượt gửi cùng một phiên.
+      if (preparedSession) await options.prepared.preUploaded;
+    }
+    const openSession = () => postJson<DocumentUploadSession>("startDocumentUpload", {
       ...target,
       fileName: file.name,
       fileSize: file.size,
       mimeType: getDocumentMimeType(file),
     });
+    let session = options.session ?? preparedSession ?? await openSession();
     if (!session.uploadUrl || !session.uploadToken) throw new Error("Máy chủ chưa mở được phiên upload Google Drive");
-    const uploaded = await uploadFileToDriveSession(session.uploadUrl, file, options);
+    let uploaded: { id: string };
+    try {
+      uploaded = await uploadFileToDriveSession(session.uploadUrl, file, {
+        onProgress: options.onProgress,
+        signal: options.signal,
+        resume: Boolean(preparedSession),
+      });
+    } catch (error) {
+      // Phiên mở trước (lúc chọn file / Thử lại sau lâu) đã hết hạn: mở phiên mới rồi gửi lại cả file.
+      if (!preparedSession || !(error instanceof DriveUploadError) || !error.sessionExpired) throw error;
+      session = await openSession();
+      if (!session.uploadUrl || !session.uploadToken) throw new Error("Máy chủ chưa mở được phiên upload Google Drive");
+      uploaded = await uploadFileToDriveSession(session.uploadUrl, file, { onProgress: options.onProgress, signal: options.signal });
+    }
     result = await postJson<DriveDataResponse>("completeDocumentUpload", {
       uploadToken: session.uploadToken,
       fileId: uploaded.id,

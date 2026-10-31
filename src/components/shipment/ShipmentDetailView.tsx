@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, deleteDocumentFile, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, createUploadBatch, finishDocumentUploadBatch, MAX_DOCUMENT_UPLOAD_BYTES, MAX_OCR_FILE_BYTES, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, deleteDocumentFile, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, createUploadBatch, MAX_DOCUMENT_UPLOAD_BYTES, MAX_OCR_FILE_BYTES, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, prepareDocumentUpload, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse, type PreparedDocumentUpload } from "@/services/shipmentApi";
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listCatalogRows, passDriveDocument, returnItemsFromRelations, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord, XnkRecord } from "@/types/postgresShipment";
@@ -30,8 +30,7 @@ import {
 } from "@/utils/internationalNumber";
 import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@/utils/documentFile";
 import UploadProgressToast from "@/components/common/UploadProgressToast";
-import UploadBatchProgressToast, { type UploadBatchFile } from "@/components/common/UploadBatchProgressToast";
-import { runWithConcurrency } from "@/utils/concurrency";
+import { DOCUMENT_UPLOAD_EVENT, useDocumentUploadQueue, type DocumentUploadEventDetail } from "@/context/DocumentUploadQueueContext";
 import { shouldWatermark, watermarkImageFile } from "@/utils/imageWatermark";
 import logoChim from "@/icons/logo_chim.png";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
@@ -434,8 +433,6 @@ function formatUploadDateTime(value: string | null | undefined, language: string
 /** File đang gửi lên Google Drive: hiện thanh tiến độ trong modal. */
 type UploadProgressState = { fileName: string; index: number; total: number; loaded: number; size: number };
 type UploadTargetParams = { transportCode?: string; folderNote?: string; containerFolderName?: string };
-/** Số file upload cùng lúc trong một lượt (nhiều hơn dễ nghẽn mạng / bị Google giới hạn tốc độ). */
-const UPLOAD_CONCURRENCY = 3;
 
 /** Số file của một chứng từ trong kết quả tiến độ (để không ghi đè kết quả mới hơn bằng kết quả về muộn). */
 function progressFileCount(progress: DocumentProgressResponse | null | undefined, docId: string): number {
@@ -1265,13 +1262,18 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   const [ocrUploadDocId, setOcrUploadDocId] = useState<string | null>(null);
   const [ocrUploadFile, setOcrUploadFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
-  // Lượt upload nhiều file (chạy song song): trạng thái từng file cho thẻ tiến độ.
-  const [batchUploadFiles, setBatchUploadFiles] = useState<UploadBatchFile[] | null>(null);
-  // Lượt upload có file lỗi: giữ lại file để bấm "Thử lại" mà không phải chọn lại.
-  const [failedUploadRetry, setFailedUploadRetry] = useState<{ docId: string; files: File[]; target: UploadTargetParams } | null>(null);
-  const isUploadingFile = uploadProgress !== null || batchUploadFiles !== null;
+  // Upload không OCR / "Chỉ lưu file" chạy nền ở layout (thẻ tiến độ + Thử lại ở đó), rời trang vẫn upload tiếp.
+  const { enqueueDocumentUpload } = useDocumentUploadQueue();
+  const isUploadingFile = uploadProgress !== null;
   const [ocrUploadRequestId, setOcrUploadRequestId] = useState("");
-  const pendingUploadRequestIds = React.useRef(new Map<string, string>());
+  // File OCR đang chờ xác nhận: phiên upload đã mở và gửi trước gần hết file trong lúc chạy OCR, xác nhận chỉ còn gửi phần
+  // cuối. Huỷ / chọn file khác thì dừng (Drive chưa tạo file nên không phải dọn).
+  const preparedOcrUploadRef = React.useRef<PreparedDocumentUpload | null>(null);
+  const cancelPreparedOcrUpload = React.useCallback(() => {
+    preparedOcrUploadRef.current?.cancel();
+    preparedOcrUploadRef.current = null;
+  }, []);
+  useEffect(() => cancelPreparedOcrUpload, [cancelPreparedOcrUpload]);
   const [ocrUploadRows, setOcrUploadRows] = useState<Array<Record<string, string>>>([]);
   const [pklTargetDetailIds, setPklTargetDetailIds] = useState<string[]>([]);
   const [isOcrAnalyzing, setIsOcrAnalyzing] = useState(false);
@@ -1318,6 +1320,20 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   const [emailSent] = useState(false);
   const [documentFolderNames, setDocumentFolderNames] = useState<Record<string, string>>({});
   const [documentProgress, setDocumentProgress] = useState<DocumentProgressResponse | null>(null);
+  // Tiến độ chứng từ đến từ nhiều nguồn chạy song song (mở trang, tải lại sau lưu, từng file upload nền, xoá file): đánh số
+  // lúc bắt đầu lấy, chỉ nhận kết quả mới hơn kết quả đang hiện, để kết quả về muộn không ghi đè bản mới (tạm thiếu file).
+  const progressSequenceRef = React.useRef(0);
+  const appliedProgressRef = React.useRef(0);
+  const nextProgressStamp = React.useCallback(() => {
+    progressSequenceRef.current += 1;
+    return progressSequenceRef.current;
+  }, []);
+  const applyDocumentProgress = React.useCallback((progress: DocumentProgressResponse, stamp: number) => {
+    if (stamp < appliedProgressRef.current) return;
+    appliedProgressRef.current = stamp;
+    setDocumentProgress(progress);
+    setDocumentProgressError("");
+  }, []);
   const [documentProgressError, setDocumentProgressError] = useState("");
   const [supplierOptions, setSupplierOptions] = useState<SupplierRecord[]>([]);
   const [carrierOptions, setCarrierOptions] = useState<CarrierRecord[]>([]);
@@ -1483,16 +1499,15 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   useEffect(() => {
     setDocumentProgress(null);
     setDocumentProgressError("");
+    cancelPreparedOcrUpload();
     setOcrUploadDocId(null);
     setOcrUploadFile(null);
     setOcrUploadRequestId("");
-    pendingUploadRequestIds.current.clear();
     setOcrUploadRows([]);
     setPklTargetDetailIds([]);
     setOcrUploadError("");
     setPassingDocumentId(null);
     setLocallyPassedDocumentIds([]);
-    setArchived(null);
     setIsArchiveStateLoading(true);
     setReturnItems([]);
     setReturnItem(null);
@@ -1542,9 +1557,24 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         setReturnForm(null);
       })
       .finally(() => setIsReturnLoading(false));
-    const archiveStateRequest = getArchivedDocuments(shipment.orderCode)
+    // Đã lưu trữ hay chưa lấy từ DB (archiveStatus) nên chỉ chờ tiến độ chứng từ là mở khoá nút sửa, không chờ Google Drive.
+    const progressStamp = nextProgressStamp();
+    void checkDocumentProgress(shipment.orderCode)
+      .then((progress) => applyDocumentProgress(progress, progressStamp))
+      .catch((progressError) => {
+        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể kiểm tra tiến độ chứng từ");
+      })
+      .finally(() => setIsArchiveStateLoading(false));
+  }, [applyDocumentProgress, cancelPreparedOcrUpload, nextProgressStamp, shipment]);
+
+  // Thư mục lưu trữ trên Drive (link + tab Thư mục): chỉ hỏi Drive khi đổi đơn, không hỏi lại sau mỗi lần lưu dữ liệu, và
+  // không chặn thao tác (BE vẫn chặn upload vào đơn đã lưu trữ).
+  useEffect(() => {
+    let active = true;
+    setArchived(null);
+    getArchivedDocuments(shipment.orderCode)
       .then((result) => {
-        setArchived(result);
+        if (active) setArchived(result);
       })
       // Đơn chưa có thư mục lưu trữ có thể được backend trả về dưới dạng lỗi/not found.
       // Đánh dấu là chưa lưu trữ để quyền admin/xnk vẫn hoạt động bình thường.
@@ -1553,16 +1583,12 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
           orderCode: shipment.orderCode,
           error: error instanceof Error ? error.message : error,
         });
-        setArchived({ success: true, archived: false });
+        if (active) setArchived({ success: true, archived: false });
       });
-    const documentProgressRequest = checkDocumentProgress(shipment.orderCode)
-      .then(setDocumentProgress)
-      .catch((progressError) => {
-        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể kiểm tra tiến độ chứng từ");
-      });
-    void Promise.all([archiveStateRequest, documentProgressRequest])
-      .finally(() => setIsArchiveStateLoading(false));
-  }, [shipment]);
+    return () => {
+      active = false;
+    };
+  }, [shipment.orderCode]);
 
 
   const isCancelled = shipment.status === "cancelled";
@@ -1905,13 +1931,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         location: `ShipmentDetailModal/Documents/${docId}`,
         detail: `Đánh dấu PASS chứng từ ${docId} cho đơn ${shipment.orderCode}`,
       });
-      await onRefresh?.();
-      try {
-        setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
-        setDocumentProgressError("");
-      } catch (progressError) {
-        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
-      }
+      await reloadAfterDocumentUpload();
       window.dispatchEvent(new Event(NOTIFICATIONS_SYNC_EVENT));
       notify(t("passDocumentSuccess", { document: docId }), "success");
     } catch (error) {
@@ -1947,10 +1967,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         setPreviewItems(remaining);
         setPreviewIndex((current) => Math.min(current, remaining.length - 1));
       }
-      if (result.documentProgress) {
-        setDocumentProgress(result.documentProgress);
-        setDocumentProgressError("");
-      }
+      if (result.documentProgress) applyDocumentProgress(result.documentProgress, nextProgressStamp());
       await onRefresh?.();
       window.dispatchEvent(new Event(NOTIFICATIONS_SYNC_EVENT));
       notify(t("deleteDocumentFileSuccess", { file: fileName }), "success");
@@ -1962,126 +1979,67 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   };
 
   /**
-   * Upload nhiều file chứng từ (không OCR) thẳng lên Google Drive. File đầu chạy một mình (tạo thư mục container nếu
-   * cần, tránh hai file cùng tạo trùng thư mục), các file sau chạy song song tối đa UPLOAD_CONCURRENCY. Một file lỗi
-   * không dừng file khác; file nào lưu xong hiện ngay trong danh sách chứng từ. Gọi sau khi đã kiểm tra trùng tên.
+   * Upload nhiều file chứng từ (không OCR) chạy nền: hàng đợi ở layout mở phiên cho cả lượt, gửi file song song, một
+   * file lỗi không dừng file khác (Thử lại ở thẻ tiến độ). Ảnh hiện trường (INSPECTION) đưa ra thị trường được đóng dấu
+   * chìm logo trước khi upload, chỉ lưu bản có dấu; không đóng dấu được thì file đó lỗi. Gọi sau khi đã kiểm tra trùng tên.
    */
-  const uploadDocumentFiles = async (docId: string, files: File[], uploadTarget: UploadTargetParams) => {
-    // Cả lượt chỉ thành một thông báo Google Chat ("đã upload N file").
-    const uploadBatch = createUploadBatch(files.length);
-    const uploadedNames: string[] = [];
-    const failures: string[] = [];
-    const failedFiles: File[] = [];
-    let lastContainerFolderName = "";
-    const updateFile = (index: number, patch: Partial<UploadBatchFile>) => setBatchUploadFiles((current) => (
-      current ? current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)) : current
-    ));
-    setFailedUploadRetry(null);
-    setBatchUploadFiles(files.map((selectedFile, index) => ({
-      key: `${index}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`,
-      fileName: selectedFile.name,
-      size: selectedFile.size,
-      loaded: 0,
-      status: "queued",
-    })));
-
-    const uploadOne = async (selectedFile: File, index: number) => {
-      const fingerprint = `${shipment.orderCode}:${docId}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`;
-      const requestId = pendingUploadRequestIds.current.get(fingerprint) || crypto.randomUUID();
-      pendingUploadRequestIds.current.set(fingerprint, requestId);
-      updateFile(index, { status: "uploading" });
-      try {
-        // Ảnh hiện trường (INSPECTION) đưa ra thị trường: đóng dấu chìm logo trước khi upload, chỉ lưu bản có dấu.
-        // Không đóng dấu được thì file này lỗi (không upload ảnh không có dấu).
-        let fileToUpload = selectedFile;
-        if (shouldWatermark(docId, selectedFile)) {
-          fileToUpload = await watermarkImageFile(selectedFile, logoChim.src);
-          updateFile(index, { size: fileToUpload.size });
-        }
-        const result = await uploadDocument(
-          { orderCode: shipment.orderCode, documentCode: docId, file: fileToUpload, requestId, batch: uploadBatch, ...uploadTarget },
-          { onProgress: ({ loaded }) => updateFile(index, { loaded }) },
-        );
-        uploadedNames.push(selectedFile.name);
-        pendingUploadRequestIds.current.delete(fingerprint);
-        if (result.containerFolderName) lastContainerFolderName = result.containerFolderName;
-        updateFile(index, { status: "done", loaded: fileToUpload.size });
-        // BE trả tiến độ chứng từ ngay sau khi lưu: file hiện trong danh sách luôn, không đợi cả lượt. Các file chạy song
-        // song có thể trả về lệch thứ tự nên chỉ nhận kết quả có ít nhất bằng số file đang hiện.
-        const progress = (result as { documentProgress?: DocumentProgressResponse }).documentProgress;
-        if (progress?.documents) {
-          setDocumentProgress((current) => (progressFileCount(progress, docId) >= progressFileCount(current, docId) ? progress : current));
-        }
-      } catch (uploadError) {
-        failures.push(`${selectedFile.name} (${uploadError instanceof Error ? uploadError.message : t("uploadDocumentFailed")})`);
-        failedFiles.push(selectedFile);
-        updateFile(index, { status: "failed" });
-      }
-    };
-
-    try {
-      await uploadOne(files[0], 0);
-      await runWithConcurrency(files.slice(1), UPLOAD_CONCURRENCY, (selectedFile, index) => uploadOne(selectedFile, index + 1));
-    } finally {
-      setBatchUploadFiles(null);
-    }
-
-    // Có file lỗi nên lượt không đủ số file: báo BE gửi thông báo cho các file đã lưu luôn.
-    if (uploadedNames.length > 0 && failures.length > 0) void finishDocumentUploadBatch(uploadBatch, docId);
-    if (uploadedNames.length > 0) {
-      recordActivity(user, {
+  const uploadDocumentFiles = (docId: string, files: File[], uploadTarget: UploadTargetParams) => {
+    const orderCode = shipment.orderCode;
+    enqueueDocumentUpload({
+      target: { orderCode, documentCode: docId, ...uploadTarget },
+      files,
+      // Chỉ lượt có ảnh cần đóng dấu mới qua bước chuẩn bị (mở phiên theo nhóm nhỏ); lượt còn lại mở phiên cả lượt một lần.
+      ...(files.some((selectedFile) => shouldWatermark(docId, selectedFile)) ? {
+        prepareFile: (selectedFile: File) => (shouldWatermark(docId, selectedFile) ? watermarkImageFile(selectedFile, logoChim.src) : Promise.resolve(selectedFile)),
+      } : {}),
+      onUploaded: ({ uploadedNames, containerFolderName }) => recordActivity(user, {
         action: "UPLOAD_DOCUMENT",
         location: "ShipmentDetailModal/Documents",
-        detail: `Đã upload file chứng từ ${docId} cho đơn ${shipment.orderCode}; ${uploadedNames.join(", ")}${lastContainerFolderName ? `; thư mục ${lastContainerFolderName}` : ""}`,
-      });
-      // Lần upload sau mặc định vào thư mục ảnh vừa dùng.
-      if (docId === "INSPECTION" && lastContainerFolderName) setInspectionFolderChoice(lastContainerFolderName);
-      setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
-      await onRefresh?.();
-      try {
-        setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
-        setDocumentProgressError("");
-      } catch (progressError) {
-        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
-      }
-    }
-    if (failures.length === 0) {
-      notify(t("uploadDocumentsSuccess", { count: uploadedNames.length, document: docId }), "success");
-    } else {
-      const message = t("uploadDocumentsPartialFailure", { uploaded: uploadedNames.length, total: files.length, failures: failures.join("; ") });
-      setOcrUploadError(message);
-      setFailedUploadRetry({ docId, files: failedFiles, target: uploadTarget });
-      notify(message, "error");
-    }
+        detail: `Đã upload file chứng từ ${docId} cho đơn ${orderCode}; ${uploadedNames.join(", ")}${containerFolderName ? `; thư mục ${containerFolderName}` : ""}`,
+      }),
+    });
   };
 
-  /** Upload lại các file lỗi của lượt trước (kiểm tra trùng tên lại vì có file có thể đã lên Drive). */
-  const handleRetryFailedUploads = async () => {
-    const retry = failedUploadRetry;
-    if (!retry || retry.files.length === 0 || !canUploadDocuments || !canUploadDocumentType(user, retry.docId) || isArchived || isOcrAnalyzing || isOcrSaving) return;
-    setIsOcrSaving(true);
-    setOcrUploadError("");
-    try {
-      const nameCheck = await checkDocumentFileNames({
-        orderCode: shipment.orderCode,
-        documentCode: retry.docId,
-        fileNames: retry.files.map((selectedFile) => selectedFile.name),
-        ...retry.target,
-      });
-      if (nameCheck.hasDuplicates) {
-        const message = formatDuplicateFileNames(nameCheck);
-        setFailedUploadRetry(null);
-        setOcrUploadError(message);
-        notify(message, "error");
+  // Kết quả upload chạy nền của đơn đang mở (kể cả lượt bắt đầu trước khi rời trang rồi quay lại): cập nhật danh sách
+  // chứng từ. Handler mới nhất nằm trong ref để không gắn lại listener mỗi lần render.
+  const documentUploadEventRef = React.useRef<(detail: DocumentUploadEventDetail) => void>(() => {});
+  useEffect(() => {
+    documentUploadEventRef.current = (detail) => {
+      if (detail.orderCode !== shipment.orderCode) return;
+      const docId = detail.documentCode;
+      if (detail.kind === "file") {
+        // Các file chạy song song có thể trả về lệch thứ tự nên chỉ nhận kết quả có ít nhất bằng số file đang hiện.
+        const progress = detail.documentProgress;
+        if (progress?.documents && progressFileCount(progress, docId) >= progressFileCount(documentProgress, docId)) {
+          applyDocumentProgress(progress, nextProgressStamp());
+        }
         return;
       }
-      await uploadDocumentFiles(retry.docId, retry.files, retry.target);
-    } catch (error) {
-      setOcrUploadError(error instanceof Error ? error.message : t("uploadDocumentFailed"));
-    } finally {
-      setIsOcrSaving(false);
-    }
-  };
+      // Lần upload sau mặc định vào thư mục ảnh vừa dùng.
+      if (docId === "INSPECTION" && detail.containerFolderName) setInspectionFolderChoice(detail.containerFolderName);
+      const lastFile = detail.uploadedFiles?.at(-1);
+      if (lastFile) setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(lastFile) }));
+      // Tải lại đơn dựng lại toàn bộ form (effect theo shipment): đang sửa / đang xem kết quả OCR thì để sau, tránh mất phần
+      // đang nhập. Danh sách chứng từ đã cập nhật theo tiến độ BE trả sau từng file.
+      if (hasUnsavedWork) {
+        pendingUploadRefreshRef.current = true;
+        return;
+      }
+      void reloadAfterDocumentUpload();
+    };
+  });
+  useEffect(() => {
+    const handle = (event: Event) => documentUploadEventRef.current((event as CustomEvent<DocumentUploadEventDetail>).detail);
+    window.addEventListener(DOCUMENT_UPLOAD_EVENT, handle);
+    return () => window.removeEventListener(DOCUMENT_UPLOAD_EVENT, handle);
+  }, []);
+  // Upload nền đã xong trong lúc còn phần chưa lưu: lưu / huỷ xong thì tải lại đơn.
+  const pendingUploadRefreshRef = React.useRef(false);
+  useEffect(() => {
+    if (hasUnsavedWork || !pendingUploadRefreshRef.current) return;
+    pendingUploadRefreshRef.current = false;
+    void onRefresh?.();
+  }, [hasUnsavedWork, onRefresh]);
 
   const handleUploadSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -2096,7 +2054,6 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     event.target.value = "";
     setAllowMultipleUpload(false);
     const documentType = getOcrDocumentType(docId);
-    setFailedUploadRetry(null);
     setOcrUploadError("");
     setOcrUploadRows([]);
     setPklTargetDetailIds([]);
@@ -2139,13 +2096,16 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         return;
       }
       if (!documentType) {
-        await uploadDocumentFiles(docId, files, uploadTarget);
+        uploadDocumentFiles(docId, files, uploadTarget);
         return;
       }
       setIsOcrSaving(false);
       setOcrUploadFile(file);
       setOcrUploadDocId(docId);
       setOcrUploadRequestId(crypto.randomUUID());
+      // Gửi file lên Drive song song với OCR (chưa hoàn tất, chờ người dùng xác nhận).
+      cancelPreparedOcrUpload();
+      preparedOcrUploadRef.current = prepareDocumentUpload({ orderCode: shipment.orderCode, documentCode: docId, ...uploadTarget }, file);
       setIsOcrAnalyzing(true);
       let result: Awaited<ReturnType<typeof analyzeDocument>>;
       try {
@@ -2188,6 +2148,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         : ""));
     } catch (error) {
       setOcrUploadError(error instanceof Error ? error.message : "Không thể upload hoặc phân tích chứng từ");
+      cancelPreparedOcrUpload();
       setOcrUploadFile(null);
       setOcrUploadDocId(null);
         setOcrUploadRequestId("");
@@ -2202,6 +2163,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
   };
 
   const clearOcrUpload = () => {
+    cancelPreparedOcrUpload();
     setOcrUploadFile(null);
     setOcrUploadDocId(null);
     setOcrUploadRequestId("");
@@ -2209,57 +2171,50 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     setPklTargetDetailIds([]);
   };
 
+  // Tải lại đơn và tiến độ chứng từ song song (hai request độc lập, trước đây chạy nối tiếp).
   const reloadAfterDocumentUpload = async () => {
-    await onRefresh?.();
-    try {
-      setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
-      setDocumentProgressError("");
-    } catch (progressError) {
-      setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
-    }
+    const progressStamp = nextProgressStamp();
+    const progressRequest = checkDocumentProgress(shipment.orderCode)
+      .then((progress) => applyDocumentProgress(progress, progressStamp))
+      .catch((progressError) => {
+        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
+      });
+    await Promise.all([onRefresh?.(), progressRequest]);
   };
 
   /**
    * "Chỉ lưu file": đưa file lên Drive, không ghi số liệu OCR vào đơn (OCR có thể đọc sai số liệu;
    * người dùng nhập tay ở tab Chi tiết). Không bắt buộc đủ trường OCR.
    */
-  const handleSaveOcrFileOnly = async () => {
+  const handleSaveOcrFileOnly = () => {
     if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadRequestId || !canUploadDocuments || !canUploadDocumentType(user, ocrUploadDocId) || isOcrSaving) return;
     const documentType = getOcrDocumentType(ocrUploadDocId);
     const billCode = documentType === "BL" ? ocrUploadRows[0]?.["BL NO."]?.trim() : "";
     const pklDetailId = documentType === "PKL" ? pklTargetDetailIds[0] || "" : "";
-    setIsOcrSaving(true);
+    const docId = ocrUploadDocId;
+    const file = ocrUploadFile;
+    const orderCode = shipment.orderCode;
     setOcrUploadError("");
-    try {
-      setUploadProgress({ fileName: ocrUploadFile.name, index: 1, total: 1, loaded: 0, size: ocrUploadFile.size });
-      await uploadDocument({
-        orderCode: shipment.orderCode,
-        documentCode: ocrUploadDocId,
-        file: ocrUploadFile,
-        requestId: ocrUploadRequestId,
-        batch: createUploadBatch(1),
+    // Không ghi số liệu nên không cần chờ: hàng đợi upload nền, thẻ tiến độ báo xong / lỗi (Thử lại ở đó).
+    enqueueDocumentUpload({
+      target: {
+        orderCode,
+        documentCode: docId,
         ...(billCode ? { referenceCode: billCode } : {}),
         ...(pklDetailId ? { idChiTiet: pklDetailId } : {}),
-      }, { onProgress: ({ loaded }) => setUploadProgress((current) => (current ? { ...current, loaded } : current)) });
-      setUploadProgress(null);
-      recordActivity(user, {
+      },
+      files: [file],
+      requestIds: [ocrUploadRequestId],
+      preparedUploads: [preparedOcrUploadRef.current ?? undefined],
+      successMessage: t("ocrFileOnlySaved", { document: docId }),
+      onUploaded: () => recordActivity(user, {
         action: "UPLOAD_DOCUMENT",
-        location: `ShipmentDetailModal/Documents/${ocrUploadDocId}`,
-        detail: `Đã upload file ${ocrUploadFile.name} chứng từ ${ocrUploadDocId} cho đơn ${shipment.orderCode}; chỉ lưu file, không cập nhật số liệu OCR`,
-      });
-      setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: URL.createObjectURL(ocrUploadFile) }));
-      const savedDocument = ocrUploadDocId;
-      clearOcrUpload();
-      await reloadAfterDocumentUpload();
-      notify(t("ocrFileOnlySaved", { document: savedDocument }), "success");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Không thể lưu chứng từ";
-      setOcrUploadError(message);
-      notify(message, "error");
-    } finally {
-      setUploadProgress(null);
-      setIsOcrSaving(false);
-    }
+        location: `ShipmentDetailModal/Documents/${docId}`,
+        detail: `Đã upload file ${file.name} chứng từ ${docId} cho đơn ${orderCode}; chỉ lưu file, không cập nhật số liệu OCR`,
+      }),
+    });
+    preparedOcrUploadRef.current = null;
+    clearOcrUpload();
   };
 
   const handleConfirmOcrUpload = async () => {
@@ -2297,7 +2252,10 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         batch: createUploadBatch(1),
         ...(documentType === "BL" ? { referenceCode: ocrUploadRows[0]?.["BL NO."]?.trim() } : {}),
         ...(documentType === "PKL" ? { idChiTiet: pklTargetDetailIds[0] || "" } : {}),
-      }, { onProgress: ({ loaded }) => setUploadProgress((current) => (current ? { ...current, loaded } : current)) });
+      }, {
+        prepared: preparedOcrUploadRef.current ?? undefined,
+        onProgress: ({ loaded }) => setUploadProgress((current) => (current ? { ...current, loaded } : current)),
+      });
       setUploadProgress(null);
 
       const data = Object.fromEntries(
@@ -2681,60 +2639,67 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
       ]);
       const parallelFailure = parallelResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
       if (parallelFailure) throw parallelFailure.reason;
-      for (const { detail, payload } of newPurchaseDetailPayloads) {
-        const created = await step(t("saveStepProduct", { name: detail.ten_hang }), () => createDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, payload));
-        for (const item of detail.itemCodes) {
-          if (!item.item_code.trim()) continue;
-          if (!created.id_chi_tiet) throw new Error("Backend không trả id_chi_tiet cho dòng hàng mới");
-          await step(t("saveStepItemCode", { code: item.item_code.trim() }), () => createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
-            id_chi_tiet: created.id_chi_tiet,
-            item_code: item.item_code.trim(),
-            ma_nha_may: item.ma_nha_may || "",
-            ten_nha_may: item.ten_nha_may || "",
-          }));
-        }
-      }
-      for (const { detailId, item } of newItemCodes) {
-        await step(t("saveStepItemCode", { code: item.item_code.trim() }), () => createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
+      // Các nhóm ghi độc lập chạy song song (mỗi lệnh ghi là một lượt qua gateway); trong mỗi nhóm vẫn tạo lần lượt để dòng mới
+      // giữ đúng thứ tự người dùng nhập (danh sách hiển thị theo id). allSettled: chờ mọi nhóm xong rồi mới báo lỗi.
+      const inOrder = async <T,>(items: readonly T[], run: (item: T) => Promise<unknown>) => {
+        for (const item of items) await run(item);
+      };
+      const groupResults = await Promise.allSettled([
+        inOrder(newPurchaseDetailPayloads, async ({ detail, payload }) => {
+          const created = await step(t("saveStepProduct", { name: detail.ten_hang }), () => createDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, payload));
+          for (const item of detail.itemCodes) {
+            if (!item.item_code.trim()) continue;
+            if (!created.id_chi_tiet) throw new Error("Backend không trả id_chi_tiet cho dòng hàng mới");
+            await step(t("saveStepItemCode", { code: item.item_code.trim() }), () => createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
+              id_chi_tiet: created.id_chi_tiet,
+              item_code: item.item_code.trim(),
+              ma_nha_may: item.ma_nha_may || "",
+              ten_nha_may: item.ten_nha_may || "",
+            }));
+          }
+        }),
+        inOrder(newItemCodes, ({ detailId, item }) => step(t("saveStepItemCode", { code: item.item_code.trim() }), () => createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
           id_chi_tiet: detailId,
           item_code: item.item_code.trim(),
           ma_nha_may: String(item.ma_nha_may || "").trim(),
           ten_nha_may: String(item.ten_nha_may || "").trim(),
-        }));
-      }
-      for (const detail of newContainerDetails) {
-        await step(t("saveStepContainerCargo"), () => createDatabaseRow<ContainerDetailRecord>(databaseEndpoints.containerDetails, {
+        }))),
+        inOrder(newContainerDetails, (detail) => step(t("saveStepContainerCargo"), () => createDatabaseRow<ContainerDetailRecord>(databaseEndpoints.containerDetails, {
           id_bl_container: detail.id_bl_container,
           id_item_code: detail.id_item_code,
           so_kien: containerDetailPackages.get(detail.id_chi_tiet_container) ?? null,
-        }));
-      }
-      // B/L, container nhập tay: chạy sau khi đã lưu các trường của B/L chính (hãng tàu, cảng, ngày).
-      for (const bill of billChanges.changedBills) {
-        await step(t("saveStepBill", { code: bill.after }), () => updateDatabaseRow<XnkRecord>(databaseEndpoints.bills, bill.id, { ma_bl: bill.after }));
-      }
-      for (const container of billChanges.changedContainers) {
-        await step(t("saveStepContainer", { code: container.after }), () => updateDatabaseRow<ContainerRecord>(databaseEndpoints.containers, container.id, { ma_container: container.after }));
-      }
-      for (const container of billChanges.newContainers) {
-        await step(t("saveStepContainer", { code: container.code }), () => createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, { id_xnk: container.billId, ma_container: container.code }));
-      }
-      for (const bill of billChanges.newBills) {
-        const createdBill = await step(t("saveStepBill", { code: bill.code }), () => createDatabaseRow<XnkRecord>(databaseEndpoints.bills, {
-          ma_bl: bill.code,
-          ma_hop_dong: database.purchase.ma_hop_dong,
-          id_hang_tau: newBillCarrierId,
-          cang_di: formValue("Cảng đi") || null,
-          cang_den: formValue("Cảng đến") || null,
-          etd: toDateInputValue(formValue("ETD")) || null,
-          eta: toDateInputValue(formValue("ETA")) || null,
-          ata: toDateInputValue(formValue("ATA")) || null,
-        }));
-        if (!createdBill.id_xnk) throw new Error(`Backend không trả id_xnk cho B/L ${bill.code}`);
-        for (const code of bill.containers) {
-          await step(t("saveStepContainer", { code }), () => createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, { id_xnk: createdBill.id_xnk, ma_container: code }));
-        }
-      }      const logChanges = [
+        }))),
+        // B/L, container nhập tay: chạy sau khi đã lưu các trường của B/L chính (hãng tàu, cảng, ngày). Đổi số B/L / container
+        // (song song) xong mới tạo B/L / container mới, để số mới không trùng với số cũ đang được đổi.
+        (async () => {
+          const renames = await Promise.allSettled([
+            ...billChanges.changedBills.map((bill) => step(t("saveStepBill", { code: bill.after }), () => updateDatabaseRow<XnkRecord>(databaseEndpoints.bills, bill.id, { ma_bl: bill.after }))),
+            ...billChanges.changedContainers.map((container) => step(t("saveStepContainer", { code: container.after }), () => updateDatabaseRow<ContainerRecord>(databaseEndpoints.containers, container.id, { ma_container: container.after }))),
+          ]);
+          const renameFailure = renames.find((result): result is PromiseRejectedResult => result.status === "rejected");
+          if (renameFailure) throw renameFailure.reason;
+          await inOrder(billChanges.newContainers, (container) => step(t("saveStepContainer", { code: container.code }), () => createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, { id_xnk: container.billId, ma_container: container.code })));
+          await inOrder(billChanges.newBills, async (bill) => {
+            const createdBill = await step(t("saveStepBill", { code: bill.code }), () => createDatabaseRow<XnkRecord>(databaseEndpoints.bills, {
+              ma_bl: bill.code,
+              ma_hop_dong: database.purchase.ma_hop_dong,
+              id_hang_tau: newBillCarrierId,
+              cang_di: formValue("Cảng đi") || null,
+              cang_den: formValue("Cảng đến") || null,
+              etd: toDateInputValue(formValue("ETD")) || null,
+              eta: toDateInputValue(formValue("ETA")) || null,
+              ata: toDateInputValue(formValue("ATA")) || null,
+            }));
+            if (!createdBill.id_xnk) throw new Error(`Backend không trả id_xnk cho B/L ${bill.code}`);
+            for (const code of bill.containers) {
+              await step(t("saveStepContainer", { code }), () => createDatabaseRow<ContainerRecord>(databaseEndpoints.containers, { id_xnk: createdBill.id_xnk, ma_container: code }));
+            }
+          });
+        })(),
+      ]);
+      const groupFailure = groupResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (groupFailure) throw groupFailure.reason;
+      const logChanges = [
         ...Object.entries(data).map(([field, value]) => {
           const before = getOriginalSummaryValue(shipment.summaryFields, field).trim();
           // Nhật ký xem được bởi role khác (IT), nên không ghi số tiền.
@@ -2803,11 +2768,17 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     }
   };
 
+  /** Huỷ sửa vận chuyển: trả form về dữ liệu đã lưu (như Huỷ ở tab Chi tiết). */
+  const cancelReturnEdit = () => {
+    setReturnForm(returnItem || { idVanChuyen: "", idBlContainer: "", ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", tenTaiXe: "", bienSoXe: "", noiDi: "", noiTraContainer: "", idKho: "", tenKho: "", ghiChu: "" });
+    setIsReturnEditing(false);
+  };
+
   const handleSaveReturn = async () => {
     if (!canEditReturnItem || !returnForm || isSavingReturn) return;
     setIsSavingReturn(true);
     try {
-      await savePostgresReturnItem(returnForm);
+      const idVanChuyen = await savePostgresReturnItem(returnForm);
       const transportChanges = describeEditedFields(
         `Container ${returnForm.soCont || returnItem?.soCont || "(chưa có mã)"}`,
         returnItem || undefined,
@@ -2828,12 +2799,16 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         location: "ShipmentDetailModal/ReturnItem",
         detail: `Đơn ${shipment.orderCode}; ${transportChanges.length > 0 ? transportChanges.join(" | ") : "Không thay đổi dữ liệu"}`,
       });
-      const refreshed = await fetchReturnItems(shipment.database?.purchase.ma_hop_dong || shipment.orderCode);
-      const displayResults = refreshed.map((item) => ({ ...item, soHd: shipment.orderCode }));
-      const displayResult = displayResults.find((item) => item.idBlContainer === returnForm.idBlContainer) || displayResults[0] || null;
-      setReturnItems(displayResults);
-      setReturnItem(displayResult);
-      setReturnForm(displayResult || returnForm);
+      // Hiện ngay dữ liệu vừa lưu (không tải lại 4 bảng vận chuyển); id dòng mới lấy từ response để lần lưu sau là cập nhật.
+      // onRefresh bên dưới dựng lại đúng từ DB.
+      const savedItem: ReturnItem = {
+        ...returnForm,
+        idVanChuyen: idVanChuyen || returnForm.idVanChuyen,
+        tenKho: warehouseOptions.find((warehouse) => String(warehouse.id_kho) === String(returnForm.idKho))?.ten_kho || (returnForm.idKho ? returnForm.tenKho : ""),
+      };
+      setReturnItems((current) => current.map((item) => (item.idBlContainer === savedItem.idBlContainer ? savedItem : item)));
+      setReturnItem(savedItem);
+      setReturnForm(savedItem);
       setIsReturnEditing(false);
       preferredReturnContainerRef.current = { orderCode: shipment.orderCode, idBlContainer: returnForm.idBlContainer };
       // Làm mới danh sách để lần mở sau / Xuất Excel dùng dữ liệu vận chuyển mới.
@@ -2845,6 +2820,29 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
       setIsSavingReturn(false);
     }
   };
+
+  // Cụm Sửa / Huỷ / Lưu trên thanh tab dính của tab đang mở (Chi tiết hoặc Vận chuyển container): cuộn tới đâu cũng bấm được.
+  const editingActions = currentTab === "details" && canEditDetails
+    ? {
+      editing: isDetailsEditing,
+      canStart: true,
+      onStart: handleToggleDetailsEditing,
+      label: t("editingSection", { section: t("details") }),
+      onCancel: resetDetailForms,
+      onSave: () => void handleSaveDetails(),
+      saving: isSavingDetails,
+    }
+    : currentTab === "return" && canEditReturnItem
+      ? {
+        editing: isReturnEditing,
+        canStart: !isReturnLoading && returnItems.length > 0,
+        onStart: () => setIsReturnEditing(true),
+        label: t("editingSection", { section: t("emptyReturn") }),
+        onCancel: cancelReturnEdit,
+        onSave: () => void handleSaveReturn(),
+        saving: isSavingReturn,
+      }
+      : null;
 
   const handleCancelOrder = async () => {
     if (!canCancelShipment || isCancelling) return;
@@ -2928,7 +2926,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
       </div>
 
       {/* Tabs: dính dưới header app khi cuộn trang. */}
-      <div className={`sticky z-30 flex flex-shrink-0 items-start gap-2 border-b border-gray-100 bg-white/95 px-3 py-2 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95 sm:items-center sm:px-6 ${isSplitPreview ? "top-[65px] md:top-0" : "top-[65px] lg:top-[73px]"}`}>
+      <div className={`sticky z-30 flex flex-shrink-0 flex-wrap items-start gap-2 border-b border-gray-100 bg-white/95 px-3 py-2 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95 sm:items-center sm:px-6 ${isSplitPreview ? "top-[65px] md:top-0" : "top-[65px] lg:top-[73px]"}`}>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 no-scrollbar sm:flex-nowrap sm:overflow-x-auto">
         {TAB_LIST.filter((tab) => isTabVisible(tab.key)).map(tab => (
           <button
@@ -2947,6 +2945,28 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
           </button>
         ))}
       </div>
+      {/* Đang sửa: Huỷ / Lưu nằm trên thanh dính này nên cuộn tới đâu cũng bấm được, không phải cuộn xuống cuối tab. */}
+      {editingActions && !editingActions.editing && (
+        <div className="flex w-full justify-end sm:w-auto sm:shrink-0">
+          <button
+            type="button"
+            onClick={editingActions.onStart}
+            disabled={!editingActions.canStart}
+            className="min-h-9 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300"
+          >
+            {t("edit")}
+          </button>
+        </div>
+      )}
+      {editingActions?.editing && (
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-amber-600 dark:text-amber-400" title={editingActions.label}>{editingActions.label}</span>
+          <div className="flex shrink-0 gap-2">
+            <button type="button" onClick={editingActions.onCancel} disabled={editingActions.saving} className="min-h-9 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
+            <button type="button" onClick={editingActions.onSave} disabled={editingActions.saving} className="min-h-9 rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{editingActions.saving ? t("saving") : t("save")}</button>
+          </div>
+        </div>
+      )}
       </div>
 
       <input id="shipment-document-upload" type="file" className="hidden" accept={DOCUMENT_FILE_ACCEPT} multiple={allowMultipleUpload} onChange={handleUploadSelected} />
@@ -3094,14 +3114,6 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
               </>
             )}
             {ocrUploadError && !ocrUploadFile && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
-            {ocrUploadError && !ocrUploadFile && failedUploadRetry && failedUploadRetry.files.length > 0 && (
-              <div className="mt-2 flex flex-wrap justify-end gap-2">
-                <button type="button" onClick={() => { setFailedUploadRetry(null); setOcrUploadError(""); }} disabled={isOcrSaving} className="min-h-9 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("close")}</button>
-                <button type="button" onClick={() => void handleRetryFailedUploads()} disabled={isOcrSaving || isOcrAnalyzing || isUploadingFile} className="min-h-9 rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">
-                  {t("retryFailedUploads", { count: failedUploadRetry.files.length })}
-                </button>
-              </div>
-            )}
           </div>
         )}
 
@@ -3524,16 +3536,6 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
                 <p className="text-sm font-semibold text-gray-800 dark:text-white">{t("emptyReturnInformation")}</p>
                 <p className="mt-1 text-xs text-gray-400">{t("emptyReturnSource")}</p>
               </div>
-              {canEditReturnItem && (
-                <button
-                  type="button"
-                  disabled={isReturnLoading || returnItems.length === 0}
-                  onClick={() => setIsReturnEditing((current) => !current)}
-                  className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300"
-                >
-                  {isReturnEditing ? t("closeEdit") : t("edit")}
-                </button>
-              )}
             </div>
             {!isReturnLoading && returnItems.length > 0 && (
               <section className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-white/[0.02]">
@@ -3648,12 +3650,6 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
                 </section>
               </div>
             )}
-            {canEditReturnItem && isReturnEditing && (
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => { setReturnForm(returnItem || { idVanChuyen: "", idBlContainer: "", ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", tenTaiXe: "", bienSoXe: "", noiDi: "", noiTraContainer: "", idKho: "", tenKho: "", ghiChu: "" }); setIsReturnEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
-                <button type="button" onClick={handleSaveReturn} disabled={isSavingReturn} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingReturn ? t("saving") : t("save")}</button>
-              </div>
-            )}
             {!isReturnLoading && !returnItem && (!isReturnEditing || !canEditReturnItem) && (
               <p className="py-4 text-center text-sm text-gray-400">{t("noEmptyReturn")}</p>
             )}
@@ -3672,13 +3668,8 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
                 <p className="text-sm font-semibold text-gray-800 dark:text-white">{t("shipmentDetails")}</p>
                 <p className="mt-1 text-xs text-gray-400">{t("summarySheetFields")}</p>
               </div>
-              {(canEditDetails || canCancelShipment) && (
+              {canCancelShipment && (
                 <div className="flex flex-wrap justify-end gap-2">
-                  {canEditDetails && (
-                  <button type="button" onClick={handleToggleDetailsEditing} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
-                    {isDetailsEditing ? t("closeEdit") : t("edit")}
-                  </button>
-                  )}
                   {canCancelShipment && (
                   <button type="button" onClick={handleCancelOrder} disabled={isCancelling} title={t("cancelShipmentHint")} className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-xs font-semibold text-error-600 hover:bg-error-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
                     {isCancelling ? t("updatingShipment") : t("deleteShipment")}
@@ -3881,12 +3872,6 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
                 />
               )}
             </div>
-            {canEditDetails && isDetailsEditing && (
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={resetDetailForms} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
-                <button type="button" onClick={handleSaveDetails} disabled={isSavingDetails} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingDetails ? t("saving") : t("save")}</button>
-              </div>
-            )}
           </div>
         )}
 
@@ -3965,7 +3950,6 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
           total={uploadProgress.total}
         />
       )}
-      {batchUploadFiles && <UploadBatchProgressToast files={batchUploadFiles} />}
       {previewUrl && !isPreviewCollapsed && (
         <aside className={`fixed right-0 top-0 z-[100000] flex h-screen min-h-0 flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isPreviewMaximized ? "w-full" : "w-[92vw] md:w-1/2"}`}>
           <div className="flex min-h-14 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 py-2 sm:gap-3 sm:px-4 dark:border-gray-700">

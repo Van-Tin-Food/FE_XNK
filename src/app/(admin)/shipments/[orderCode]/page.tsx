@@ -7,7 +7,7 @@ import ShipmentDetailView from "@/components/shipment/ShipmentDetailView";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
-import { fetchShipments, getCachedShipments } from "@/services/shipmentApi";
+import { fetchShipment, getCachedShipments } from "@/services/shipmentApi";
 import type { Shipment } from "@/types/shipment";
 import { SHIPMENT_LIST_PATH } from "@/utils/shipmentRoutes";
 
@@ -39,12 +39,12 @@ export default function ShipmentDetailPage() {
   // Đánh số từng lần tải: lần tải ngầm lúc mở trang về sau lần tải sau khi lưu thì bỏ, không ghi đè dữ liệu mới bằng cũ.
   const loadSequenceRef = useRef(0);
 
-  const loadShipment = useCallback(async ({ initial = false }: { initial?: boolean } = {}) => {
+  // Chỉ tải dữ liệu của đơn này (không tải cả danh sách mọi đơn): mở trang, và tải lại sau mỗi lần lưu.
+  const loadShipment = useCallback(async () => {
     const sequence = ++loadSequenceRef.current;
     try {
-      const result = await fetchShipments({ shareInFlight: initial });
+      const found = await fetchShipment(orderCode);
       if (sequence !== loadSequenceRef.current) return;
-      const found = findShipment(result.shipments, orderCode);
       hasShipmentRef.current = Boolean(found);
       setShipment((current) => (current && found && shipmentDataKey(current) === shipmentDataKey(found) ? current : found));
       setLoadError("");
@@ -61,7 +61,7 @@ export default function ShipmentDetailPage() {
 
   useEffect(() => {
     if (!canViewShipments) return;
-    const timer = window.setTimeout(() => void loadShipment({ initial: true }), 0);
+    const timer = window.setTimeout(() => void loadShipment(), 0);
     return () => window.clearTimeout(timer);
   }, [canViewShipments, loadShipment]);
 

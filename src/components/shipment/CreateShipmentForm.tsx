@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { analyzeDocument, checkDocumentFileNames, createUploadBatch, MAX_OCR_FILE_BYTES, uploadDocument } from "@/services/shipmentApi";
+import { analyzeDocument, createUploadBatch, MAX_OCR_FILE_BYTES, prepareDocumentUpload, uploadDocument, type DocumentUploadSessionError, type PreparedDocumentUpload } from "@/services/shipmentApi";
 import { createDatabaseRow, databaseEndpoints, listCatalogRows } from "@/services/postgresShipmentApi";
 import type { PurchaseDetailRecord, PurchaseItemCodeRecord, PurchaseRecord, SupplierRecord } from "@/types/postgresShipment";
 import { useAuth } from "@/context/AuthContext";
@@ -300,16 +300,26 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
     setIsSaving(true);
     setError("");
     let shipmentCreated = false;
+    let preparedPi: PreparedDocumentUpload | null = null;
     try {
-      // Kiểm tra trùng tên file PI trước khi ghi DB để không tạo đơn rỗng khi upload bị từ chối.
+      // Mở phiên upload PI trước khi ghi DB: BE kiểm tra trùng tên lúc mở phiên (trùng thì báo, không tạo đơn rỗng). Sau đó
+      // file PI gửi trước song song với ghi DB; Drive chỉ tạo file khi gửi phần cuối (sau khi đơn đã tạo), nên tạo đơn lỗi
+      // thì không để lại file PI nào.
       if (piFile) {
-        const nameCheck = await checkDocumentFileNames({ orderCode: normalizedOrderCode, documentCode: "PI", fileNames: [piFile.name] });
-        if (nameCheck.hasDuplicates) {
+        preparedPi = prepareDocumentUpload({ orderCode: normalizedOrderCode, documentCode: "PI" }, piFile, {
+          onProgress: ({ loaded }) => setUploadedBytes(loaded),
+        });
+        try {
+          await preparedPi.session;
+        } catch (sessionError) {
+          const { code, targetName, folderName } = sessionError as DocumentUploadSessionError;
+          if (code !== "DUPLICATE_FILE_NAME") throw sessionError;
           setError(t("duplicateDocumentFileNames", {
-            files: `${nameCheck.files[0]?.targetName || piFile.name} (${t("duplicateReasonExists", { folder: nameCheck.folderName })})`,
+            files: `${targetName || piFile.name} (${t("duplicateReasonExists", { folder: folderName || "" })})`,
           }));
           return;
         }
+        setUploadedBytes(0);
       }
       await createDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, {
         ma_hop_dong: normalizedOrderCode,
@@ -344,14 +354,13 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
         }
       }
       if (piFile) {
-        setUploadedBytes(0);
         await uploadDocument({
           orderCode: normalizedOrderCode,
           documentCode: "PI",
           file: piFile,
           requestId: uploadRequestIdRef.current || (uploadRequestIdRef.current = crypto.randomUUID()),
           batch: createUploadBatch(1),
-        }, { onProgress: ({ loaded }) => setUploadedBytes(loaded) });
+        }, { prepared: preparedPi ?? undefined, onProgress: ({ loaded }) => setUploadedBytes(loaded) });
       }
       recordActivity(user, {
         action: "CREATE_SHIPMENT",
@@ -364,6 +373,8 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
       onCreated(normalizedOrderCode);
     } catch (err) {
       const reason = err instanceof Error ? err.message : t("createShipmentError");
+      // Chưa tạo được đơn: dừng gửi trước PI (Drive chưa tạo file nên không phải dọn).
+      if (!shipmentCreated) preparedPi?.cancel();
       if (shipmentCreated) {
         // Đơn đã ghi DB nhưng PI chưa lên Drive: báo rõ để upload lại PI ở chi tiết đơn, không tạo đơn lần nữa.
         const message = t("shipmentCreatedPiUploadFailed", { orderCode: normalizedOrderCode, reason });

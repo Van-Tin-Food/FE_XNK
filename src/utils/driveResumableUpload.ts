@@ -18,9 +18,13 @@ interface SendResult {
 }
 
 export class DriveUploadError extends Error {
-  constructor(message: string) {
+  /** true = phiên upload không còn (Google trả 404 / 410): phải mở phiên mới. */
+  readonly sessionExpired: boolean;
+
+  constructor(message: string, { sessionExpired = false }: { sessionExpired?: boolean } = {}) {
     super(message);
     this.name = "DriveUploadError";
+    this.sessionExpired = sessionExpired;
   }
 }
 
@@ -71,21 +75,69 @@ function parseUploadedFile(result: SendResult): { id: string } {
 const isRetryable = (status: number) => status === 0 || status === 429 || status >= 500;
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+/** Phần không phải phần cuối phải là bội số 256 KB. */
+const CHUNK_ALIGN_BYTES = 256 * 1024;
+
+type UploadOptions = { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal };
+
+/**
+ * Gửi file tới phiên upload; `resume` = phiên đã gửi trước một phần (preUploadToDriveSession): hỏi Google đã nhận tới đâu
+ * rồi gửi tiếp phần còn lại.
+ */
 export async function uploadFileToDriveSession(
   uploadUrl: string,
   file: File,
-  options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal } = {},
+  options: UploadOptions & { resume?: boolean } = {},
 ): Promise<{ id: string }> {
+  const result = await pump(uploadUrl, file, file.size, options);
+  if (!("id" in result)) throw new DriveUploadError("Google Drive chưa nhận đủ file");
+  return result;
+}
+
+/**
+ * Gửi trước gần hết file (bội số 256 KB, chừa phần cuối) mà Google chưa tạo file: Drive chỉ tạo file khi nhận byte cuối.
+ * Dùng khi người dùng còn phải xác nhận (OCR, tạo đơn): xác nhận thì uploadFileToDriveSession(..., { resume: true }) chỉ
+ * gửi phần còn lại; huỷ thì bỏ phiên, Drive không có file thừa nên không bị coi là trùng tên. Trả số byte Google đã nhận.
+ */
+export async function preUploadToDriveSession(uploadUrl: string, file: File, options: UploadOptions = {}): Promise<number> {
+  const limit = Math.floor((file.size - 1) / CHUNK_ALIGN_BYTES) * CHUNK_ALIGN_BYTES;
+  if (limit <= 0) return 0;
+  const result = await pump(uploadUrl, file, limit, options);
+  return "id" in result ? file.size : result.offset;
+}
+
+/** Gửi từ byte Google đang chờ tới stopAt (stopAt = file.size thì hoàn tất và trả mã file). */
+async function pump(
+  uploadUrl: string,
+  file: File,
+  stopAt: number,
+  options: UploadOptions & { resume?: boolean },
+): Promise<{ id: string } | { offset: number }> {
   const total = file.size;
   const report = (loaded: number) => options.onProgress?.({ loaded: Math.min(loaded, total), total });
   let offset = 0;
   let failures = 0;
-  report(0);
+  if (options.resume) {
+    const status = await send(uploadUrl, null, `bytes */${total}`, undefined, options.signal).catch((error: unknown) => {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      return { status: 0, range: null, body: "" } as SendResult;
+    });
+    if (status.status === 200 || status.status === 201) {
+      report(total);
+      return parseUploadedFile(status);
+    }
+    if (status.status === 404 || status.status === 410) {
+      throw new DriveUploadError("Phiên upload Google Drive đã hết hạn, vui lòng upload lại", { sessionExpired: true });
+    }
+    if (status.status === 308) offset = nextOffset(status.range);
+  }
+  report(offset);
 
   while (true) {
+    if (offset >= stopAt && stopAt < total) return { offset };
     let result: SendResult;
     try {
-      const end = Math.min(offset + CHUNK_BYTES, total);
+      const end = Math.min(offset + CHUNK_BYTES, stopAt);
       const chunkStart = offset;
       result = await send(uploadUrl, file.slice(chunkStart, end), `bytes ${chunkStart}-${end - 1}/${total}`, (loaded) => report(chunkStart + loaded), options.signal);
     } catch (error) {
@@ -104,7 +156,7 @@ export async function uploadFileToDriveSession(
       continue;
     }
     if (result.status === 404 || result.status === 410) {
-      throw new DriveUploadError("Phiên upload Google Drive đã hết hạn, vui lòng upload lại");
+      throw new DriveUploadError("Phiên upload Google Drive đã hết hạn, vui lòng upload lại", { sessionExpired: true });
     }
     if (!isRetryable(result.status)) {
       throw new DriveUploadError(`Google Drive từ chối file (HTTP ${result.status})`);
@@ -126,7 +178,7 @@ export async function uploadFileToDriveSession(
       }
       if (status.status === 308) offset = nextOffset(status.range);
       if (status.status === 404 || status.status === 410) {
-        throw new DriveUploadError("Phiên upload Google Drive đã hết hạn, vui lòng upload lại");
+        throw new DriveUploadError("Phiên upload Google Drive đã hết hạn, vui lòng upload lại", { sessionExpired: true });
       }
     } catch (error) {
       if (error instanceof DriveUploadError || (error instanceof DOMException && error.name === "AbortError")) throw error;
