@@ -9,7 +9,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { fetchShipments, getCachedShipments } from "@/services/shipmentApi";
 import { SHIPMENT_LIST_PATH, shipmentDetailPath } from "@/utils/shipmentRoutes";
 
-// Tạo đơn mới từ file PI (trước là modal trên trang chủ). Tạo xong mở chi tiết đơn vừa tạo để upload tiếp chứng từ.
+// Tạo đơn mới từ file PI hoặc nhập tay (trước là modal trên trang chủ). Tạo xong mở chi tiết đơn vừa tạo để upload tiếp chứng từ.
 export default function CreateShipmentPage() {
   const { t } = useLanguage();
   const { can } = useAuth();

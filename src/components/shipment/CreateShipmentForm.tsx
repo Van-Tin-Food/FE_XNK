@@ -41,6 +41,11 @@ const REQUIRED_REVIEW_FIELDS: Array<{ key: keyof ReviewFields; labelKey: string 
   { key: "productName", labelKey: "productName" },
 ];
 
+// "file": chọn PI → OCR điền form → tạo đơn và upload PI. "manual": nhập tay, không cần file (upload PI sau ở chi tiết đơn).
+type CreateMode = "file" | "manual";
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 const EMPTY_FIELDS: ReviewFields = {
   orderCode: "",
   orderDate: "",
@@ -91,6 +96,7 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
   const canCreateShipment = can("shipments", "edit");
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadRequestIdRef = useRef<string | null>(null);
+  const [mode, setMode] = useState<CreateMode>("file");
   const [file, setFile] = useState<File | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
@@ -115,7 +121,7 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
       .catch((loadError) => setError(loadError instanceof Error ? loadError.message : t("supplierLoadError")));
   }, [t]);
 
-  // Đã chọn PI (kể cả lúc đang tạo): rời trang (Back, link, đóng tab) sẽ mất form nên hỏi trước.
+  // Đã chọn PI / đã nhập tay (kể cả lúc đang tạo): rời trang (Back, link, đóng tab) sẽ mất form nên hỏi trước.
   const confirmLeavePage = React.useCallback(() => confirm({
     title: t("unsavedChangesTitle"),
     message: t("unsavedChangesMessage"),
@@ -123,7 +129,8 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
     cancelText: t("stayOnPage"),
     tone: "danger",
   }), [confirm, t]);
-  const { allowLeave } = useLeaveGuard(Boolean(file), confirmLeavePage);
+  const hasUnsavedInput = Boolean(file) || (mode === "manual" && Object.values(fields).some((value) => value.trim()));
+  const { allowLeave } = useLeaveGuard(hasUnsavedInput, confirmLeavePage);
   // Đang xem PI ở nửa phải (từ md): form nổi ở nửa trái như modal cũ, khoá cuộn trang phía sau.
   const isSplitPreview = Boolean(isFilePanelOpen && filePreviewUrl && !isFilePanelMaximized);
   useEffect(() => {
@@ -173,17 +180,37 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
 
   const handleClose = async () => {
     if (isSaving) return;
-    if (file && !(await confirmLeavePage())) return;
+    if (hasUnsavedInput && !(await confirmLeavePage())) return;
     allowLeave();
     reset();
     onCancel();
+  };
+
+  // Đổi chế độ giữ lại thông tin đã có (OCR hoặc nhập tay), chỉ bỏ file PI đang chọn.
+  const handleModeChange = (nextMode: CreateMode) => {
+    if (nextMode === mode || isAnalyzing || isSaving) return;
+    uploadRequestIdRef.current = null;
+    setFile(null);
+    setIsFilePanelOpen(false);
+    setIsFilePanelMaximized(false);
+    setError("");
+    setMode(nextMode);
+    if (nextMode === "manual") {
+      // Ô ngày nhập tay là ô chọn ngày (yyyy-mm-dd): đổi ngày OCR sang dạng này, không đọc được thì để trống.
+      setFields((current) => {
+        const orderDate = normalizeDatabaseDate(current.orderDate) || "";
+        return { ...current, orderDate: ISO_DATE_PATTERN.test(orderDate) ? orderDate : "" };
+      });
+    } else {
+      window.setTimeout(() => inputRef.current?.click(), 0);
+    }
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!canCreateShipment) return;
     const selected = event.target.files?.[0];
     event.target.value = "";
-    if (!selected) return;
+    if (!selected || mode === "manual") return;
     if (!isSupportedDocumentFile(selected)) {
       setError(t("piPdfOnly"));
       return;
@@ -244,10 +271,16 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
     .map(({ labelKey }) => t(labelKey));
   const hasMissingRequiredFields = missingRequiredFields.length > 0;
 
+  const isManualMode = mode === "manual";
+  const showFields = isManualMode || Boolean(file && !isAnalyzing);
+
   const handleConfirm = async () => {
-    if (!canCreateShipment || !file || isSaving) return;
+    if (!canCreateShipment || isSaving) return;
+    // Chế độ file cần PI; nhập tay thì tạo đơn không kèm file.
+    const piFile = isManualMode ? null : file;
+    if (!isManualMode && !piFile) return;
     if (duplicateOrderCode) {
-      setError(t("duplicatePi", { orderCode: fields.orderCode.trim() }));
+      setError(t(isManualMode ? "duplicateOrderManual" : "duplicatePi", { orderCode: fields.orderCode.trim() }));
       return;
     }
     if (hasMissingRequiredFields) {
@@ -269,12 +302,14 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
     let shipmentCreated = false;
     try {
       // Kiểm tra trùng tên file PI trước khi ghi DB để không tạo đơn rỗng khi upload bị từ chối.
-      const nameCheck = await checkDocumentFileNames({ orderCode: normalizedOrderCode, documentCode: "PI", fileNames: [file.name] });
-      if (nameCheck.hasDuplicates) {
-        setError(t("duplicateDocumentFileNames", {
-          files: `${nameCheck.files[0]?.targetName || file.name} (${t("duplicateReasonExists", { folder: nameCheck.folderName })})`,
-        }));
-        return;
+      if (piFile) {
+        const nameCheck = await checkDocumentFileNames({ orderCode: normalizedOrderCode, documentCode: "PI", fileNames: [piFile.name] });
+        if (nameCheck.hasDuplicates) {
+          setError(t("duplicateDocumentFileNames", {
+            files: `${nameCheck.files[0]?.targetName || piFile.name} (${t("duplicateReasonExists", { folder: nameCheck.folderName })})`,
+          }));
+          return;
+        }
       }
       await createDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, {
         ma_hop_dong: normalizedOrderCode,
@@ -289,20 +324,22 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
         ten_hang: fields.productName.trim(),
       });
       shipmentCreated = true;
-      setUploadedBytes(0);
-      await uploadDocument({
-        orderCode: normalizedOrderCode,
-        documentCode: "PI",
-        file,
-        requestId: uploadRequestIdRef.current || (uploadRequestIdRef.current = crypto.randomUUID()),
-        batch: createUploadBatch(1),
-      }, { onProgress: ({ loaded }) => setUploadedBytes(loaded) });
+      if (piFile) {
+        setUploadedBytes(0);
+        await uploadDocument({
+          orderCode: normalizedOrderCode,
+          documentCode: "PI",
+          file: piFile,
+          requestId: uploadRequestIdRef.current || (uploadRequestIdRef.current = crypto.randomUUID()),
+          batch: createUploadBatch(1),
+        }, { onProgress: ({ loaded }) => setUploadedBytes(loaded) });
+      }
       recordActivity(user, {
         action: "CREATE_SHIPMENT",
         location: "ShipmentDashboard/CreateShipmentModal",
-        detail: `Tạo đơn hàng ${fields.orderCode.trim()}`,
+        detail: piFile ? `Tạo đơn hàng ${fields.orderCode.trim()}` : `Tạo đơn hàng ${fields.orderCode.trim()} (nhập tay, chưa có PI)`,
       });
-      notify(t("shipmentCreated", { orderCode: fields.orderCode.trim() }), "success");
+      notify(t(piFile ? "shipmentCreated" : "shipmentCreatedManual", { orderCode: fields.orderCode.trim() }), "success");
       allowLeave();
       reset();
       onCreated(normalizedOrderCode);
@@ -352,22 +389,41 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
       <section className="flex min-w-0 flex-col rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
       <div className="border-b border-gray-100 px-4 pb-4 pt-5 dark:border-gray-800 sm:px-6 sm:pt-6">
         <h1 className="text-lg font-semibold text-gray-900 dark:text-white">{t("createNewShipment")}</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("selectPiDescription")}</p>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t(isManualMode ? "manualCreateDescription" : "selectPiDescription")}</p>
       </div>
       <div className="flex min-w-0 flex-col gap-4 px-4 py-5 sm:px-6">
+        <div role="tablist" aria-label={t("createShipmentMode")} className="grid grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
+          {([["file", "createModeFromPi"], ["manual", "createModeManual"]] as Array<[CreateMode, string]>).map(([value, labelKey]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={mode === value}
+              onClick={() => handleModeChange(value)}
+              disabled={isAnalyzing || isSaving}
+              className={`min-h-10 min-w-0 rounded-lg px-2 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${mode === value
+                ? "bg-white text-brand-600 shadow-sm dark:bg-gray-900 dark:text-brand-300"
+                : "text-gray-600 hover:text-brand-600 dark:text-gray-300 dark:hover:text-brand-300"}`}
+            >
+              {t(labelKey)}
+            </button>
+          ))}
+        </div>
         <input ref={inputRef} type="file" accept={DOCUMENT_FILE_ACCEPT} className="hidden" onChange={handleFileChange} />
-        <button type="button" onClick={() => inputRef.current?.click()} disabled={!canCreateShipment || isAnalyzing || isSaving} className="rounded-xl border border-dashed border-brand-300 bg-brand-50 px-4 py-5 text-sm font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300">
-          {file ? file.name : t("selectPi")}
-        </button>
+        {!isManualMode && (
+          <button type="button" onClick={() => inputRef.current?.click()} disabled={!canCreateShipment || isAnalyzing || isSaving} className="min-w-0 break-all rounded-xl border border-dashed border-brand-300 bg-brand-50 px-4 py-5 text-sm font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300">
+            {file ? file.name : t("selectPi")}
+          </button>
+        )}
 
         {isAnalyzing && <OcrLoadingCard title={t("analyzingPi")} fileName={file?.name} />}
-        {duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{t("duplicateOrder", { orderCode: fields.orderCode.trim() })}</p>}
+        {duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{t(isManualMode ? "duplicateOrderManual" : "duplicateOrder", { orderCode: fields.orderCode.trim() })}</p>}
         {error && !duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{error}</p>}
 
-        {file && !isAnalyzing && (
+        {showFields && (
           <>
             <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">
-              {t("reviewOcrBeforeCreate")}
+              {t(isManualMode ? "manualCreatePiLater" : "reviewOcrBeforeCreate")}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="hidden">
@@ -386,6 +442,8 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
                           )}
                           {suppliers.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.ten_ncc}</option>)}
                       </select>
+                    ) : key === "orderDate" && isManualMode ? (
+                      <input type="date" value={fields.orderDate} onChange={(event) => updateField("orderDate", event.target.value)} className="min-h-10 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                     ) : (
                       <input type="text" value={fields[key]} readOnly={key === "origin"} onChange={(event) => updateField(key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:read-only:bg-gray-800" />
                     )}
@@ -404,7 +462,7 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
       <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 px-4 py-4 dark:border-gray-800 sm:px-6">
         {filePreviewUrl && <button type="button" onClick={() => setIsFilePanelOpen(true)} className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">{t("viewPiFile")}</button>}
         <button type="button" onClick={() => void handleClose()} disabled={isSaving} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
-        <button type="button" onClick={handleConfirm} disabled={!canCreateShipment || !file || isAnalyzing || isSaving || duplicateOrderCode || hasMissingRequiredFields} title={hasMissingRequiredFields ? t("requiredMissing", { fields: missingRequiredFields.join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? t("saving") : t("confirmCreate")}</button>
+        <button type="button" onClick={handleConfirm} disabled={!canCreateShipment || (!isManualMode && !file) || isAnalyzing || isSaving || duplicateOrderCode || hasMissingRequiredFields} title={hasMissingRequiredFields ? t("requiredMissing", { fields: missingRequiredFields.join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? t("saving") : t("confirmCreate")}</button>
       </div>
       </section>
       </div>
