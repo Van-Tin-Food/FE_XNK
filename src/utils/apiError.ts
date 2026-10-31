@@ -204,6 +204,16 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Google Chat chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
     case "GOOGLE_CHAT_REQUEST_FAILED":
       return "Không gửi được lên Google Chat. Vui lòng thử lại sau.";
+    case "GOOGLE_SHEETS_CONFIG_MISSING":
+      return "Google Sheets chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
+    case "GOOGLE_SHEETS_PERMISSION_DENIED":
+      return "Tài khoản Google của bạn chưa có quyền chỉnh sửa file Google Sheet. Vui lòng nhờ quản trị viên chia sẻ quyền.";
+    case "GOOGLE_SHEETS_NOT_FOUND":
+      return backendMessage || "Không tìm thấy file hoặc trang tính Google Sheet đã cấu hình. Vui lòng liên hệ quản trị viên.";
+    case "GOOGLE_SHEETS_TIMEOUT":
+      return "Google Sheets phản hồi quá lâu. Vui lòng thử lại sau.";
+    case "GOOGLE_SHEETS_REQUEST_FAILED":
+      return "Không ghi được lên Google Sheets. Vui lòng thử lại sau.";
     // Lỗi ràng buộc PostgreSQL từ API bảng nghiệp vụ: BE đã ghi rõ trường + giá trị sai (databaseErrorMessage.js).
     case "23505":
       return backendMessage || "Dữ liệu bị trùng với bản ghi đã có. Vui lòng nhập giá trị khác.";
