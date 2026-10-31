@@ -29,6 +29,7 @@ const AppSidebar: React.FC = () => {
   const [catalogOpen, setCatalogOpen] = useState(pathname === "/master-data");
   const [costOpen, setCostOpen] = useState(pathname === "/payment-costs" || (pathname === "/master-data" && searchParams.get("catalog") === "paymentCategories"));
   const [logsOpen, setLogsOpen] = useState(pathname === "/activity-logs");
+  const [reportsOpen, setReportsOpen] = useState(pathname.startsWith("/reports"));
   // Bấm logo (sidebar, header) hoặc menu "Mua hàng & ETA": danh sách đơn về bộ lọc mặc định.
   useShipmentListResetLinks();
   // Menu hiện theo quyền thực tế của tài khoản (mức view trở lên), không theo tên role.
@@ -47,9 +48,9 @@ const AppSidebar: React.FC = () => {
   const canViewPaymentRequests = can("paymentRequests");
   // Menu Đề nghị thanh toán: thêm người được uỷ quyền duyệt / xác nhận chứng từ (khớp quyền xem danh sách ở BE).
   const canOpenPaymentRequestList = canOpenPaymentRequests(can);
-  // Tổng quan chi phí (toàn công ty): quyền costReports (ban giám đốc) hoặc xem đề nghị của mọi người (kế toán, admin).
-  const canViewMonthlyCosts = can("costReports") || can("paymentRequestsAll");
-  const canViewCostManagement = canViewPaymentCategories || canViewPaymentRequests || canViewMonthlyCosts;
+  const canViewCostManagement = canViewPaymentCategories || canViewPaymentRequests;
+  // Mục Báo cáo: báo cáo chi phí & công nợ phải trả — chỉ admin (costReports là chức năng chỉ admin có).
+  const canViewCostReport = can("costReports");
   const { t } = useLanguage();
 
   return (
@@ -176,9 +177,26 @@ const AppSidebar: React.FC = () => {
                 {showText && <span className="ml-auto text-xs">{costOpen ? "−" : "+"}</span>}
               </button>
               {costOpen && showText && <ul className="mt-1 space-y-1 pl-11">
-                {canViewMonthlyCosts && <li><Link href="/cost-management" className={`menu-dropdown-item ${pathname.startsWith("/cost-management") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("costOverview")}</Link></li>}
                 {canViewPaymentCategories && <li><Link href="/master-data?catalog=paymentCategories" className={`menu-dropdown-item ${searchParams.get("catalog") === "paymentCategories" ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("paymentCategories")}</Link></li>}
                 {canViewPaymentRequests && <li><Link href="/payment-costs" className={`menu-dropdown-item ${pathname.startsWith("/payment-costs") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("myCosts")}</Link></li>}
+              </ul>}
+            </li>
+          )}
+
+          {canViewCostReport && (
+            <li>
+              <button type="button" onClick={() => setReportsOpen((current) => !current)} className={`menu-item group w-full ${reportsOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={reportsOpen}>
+                <span className={reportsOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 3v18h18" />
+                    <path d="M7 15v2M11 11v6M15 8v9M19 5v12" />
+                  </svg>
+                </span>
+                {showText && <span className="menu-item-text">{t("reportsMenu")}</span>}
+                {showText && <span className="ml-auto text-xs">{reportsOpen ? "−" : "+"}</span>}
+              </button>
+              {reportsOpen && showText && <ul className="mt-1 space-y-1 pl-11">
+                <li><Link href="/reports/costs" className={`menu-dropdown-item ${pathname.startsWith("/reports/costs") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("costPayableReport")}</Link></li>
               </ul>}
             </li>
           )}

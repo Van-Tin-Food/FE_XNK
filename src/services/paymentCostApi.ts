@@ -1,4 +1,4 @@
-import type { CostKind, MonthlyCost, ShipmentCost, ShipmentInfo } from "@/utils/costStatistics";
+import type { CostKind, MonthlyCost, Payable, ShipmentCost, ShipmentInfo } from "@/utils/costStatistics";
 import { getStoredUser } from "@/services/authApi";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
@@ -287,6 +287,8 @@ export interface CostOverview {
   costs: MonthlyCost[];
   shipments: ShipmentInfo[];
   shipmentCosts: ShipmentCost[];
+  /** Công nợ phải trả tính đến asOf (YYYY-MM-DD, giờ Việt Nam): đề nghị đã trình chưa chi tiền, mọi kỳ. */
+  payables: { asOf: string; rows: Payable[]; truncated: boolean };
   /** Không có quyền xem tiền hàng: số tiền cọc / còn lại bị ẩn (null). */
   amountsHidden: boolean;
   /** Tháng có quá nhiều khoản, BE chỉ trả 10.000 khoản mới nhất. */
@@ -297,13 +299,14 @@ const kindOf = (value: unknown): CostKind => (value === "goods" || value === "in
 const nullableAmount = (value: unknown) => (value === null || value === undefined ? null : str(value));
 
 /**
- * Trang Quản lý chi phí: các khoản chi phí nhập trong tháng (YYYY-MM) kèm đề nghị chứa khoản + chi phí lũy kế của các lô
- * hàng có chi phí trong tháng (theo container) — một lần gọi.
+ * Báo cáo chi phí & công nợ phải trả (chỉ admin): các khoản chi phí phát sinh trong kỳ (YYYY-MM) kèm đề nghị chứa khoản +
+ * chi phí lũy kế của các lô hàng có chi phí trong kỳ (theo container) + công nợ phải trả tính đến hôm nay — một lần gọi.
  */
 export async function getCostOverview(month: string, signal?: AbortSignal): Promise<CostOverview> {
   const payload = await request("GET", `/overview?month=${encodeURIComponent(month)}`, undefined, signal);
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   const list = (value: unknown) => (Array.isArray(value) ? value.filter(isRecord) : []);
+  const payables = isRecord(data.payables) ? data.payables : {};
   return {
     month: str(data.month) || month,
     amountsHidden: data.amountsHidden === true,
@@ -319,6 +322,7 @@ export async function getCostOverview(month: string, signal?: AbortSignal): Prom
       type: str(row.loai_phi),
       code: str(row.ma_phi).toUpperCase(),
       categoryName: str(row.ten_phi),
+      account: str(row.tai_khoang),
       flow: str(row.vung_phi),
       userName: str(row.nguoi_nhap),
       requestId: str(row.id_payment_request),
@@ -344,5 +348,19 @@ export async function getCostOverview(month: string, signal?: AbortSignal): Prom
       count: Number(row.so_khoan) || 0,
       amount: nullableAmount(row.so_tien),
     })).filter((item) => item.contract),
+    payables: {
+      asOf: str(payables.asOf),
+      truncated: payables.truncated === true,
+      rows: list(payables.rows).map((row): Payable => ({
+        requestId: str(row.id_payment_request),
+        content: str(row.noi_dung),
+        requester: str(row.nguoi_de_nghi),
+        state: Number(row.status) === 1 ? "approved" : "pending",
+        currency: str(row.loai_tien) || "VND",
+        amount: nullableAmount(row.tong_tien),
+        dueDate: str(row.han_thanh_toan),
+        requestDate: str(row.ngay_de_nghi),
+      })).filter((item) => item.requestId),
+    },
   };
 }

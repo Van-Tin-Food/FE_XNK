@@ -45,7 +45,7 @@ export const PERMISSION_FUNCTIONS = {
   paymentApprove: ["none", "edit"], // Duyệt / từ chối trên Google Chat
   paymentDocuments: ["none", "edit"], // Upload chứng từ + lưu trữ hồ sơ đề nghị
   containerCosts: ["none", "view", "edit"], // Tab Chi phí của đơn: chi phí container
-  costReports: ["none", "view"], // Quản lý chi phí: số liệu chi phí toàn công ty (chỉ xem, ban giám đốc / quản lý)
+  costReports: ["none", "view"], // Báo cáo chi phí & công nợ phải trả: CHỈ admin (ADMIN_ONLY_FUNCTIONS)
 } as const satisfies Record<string, readonly PermissionLevel[]>;
 
 export type PermissionFunction = keyof typeof PERMISSION_FUNCTIONS;
@@ -53,13 +53,16 @@ export type PermissionMap = Record<PermissionFunction, PermissionLevel>;
 
 export const PERMISSION_FUNCTION_KEYS = Object.keys(PERMISSION_FUNCTIONS).filter((fn) => fn !== "masterData") as PermissionFunction[];
 
+// Chức năng chỉ admin có (đồng bộ ADMIN_ONLY_FUNCTIONS ở BE): không hiện trên màn phân quyền, không cấp riêng được.
+export const ADMIN_ONLY_FUNCTIONS: readonly PermissionFunction[] = ["costReports"];
+
 // Nhóm hiển thị trên màn quản lý tài khoản.
 export const PERMISSION_GROUPS: ReadonlyArray<{ key: string; functions: readonly PermissionFunction[] }> = [
   { key: "permissionGroupShipments", functions: ["shipments", "shipmentCancel", "tracking", "exportShipments", "aiChat", "containerCosts"] },
   { key: "permissionGroupDocuments", functions: ["documents", "documentArchive", "documentDelete", "containerTransport"] },
   // Khớp đúng 4 mục của menu "Công cụ hỗ trợ" trên sidebar.
   { key: "supportTools", functions: ["email", "documentSync", "marketResearch", "legacyEtaOrders"] },
-  { key: "permissionGroupPayments", functions: ["paymentRequests", "paymentRequestsAll", "paymentRequestsOnBehalf", "paymentApprove", "paymentDocuments", "costReports"] },
+  { key: "permissionGroupPayments", functions: ["paymentRequests", "paymentRequestsAll", "paymentRequestsOnBehalf", "paymentApprove", "paymentDocuments"] },
   { key: "permissionGroupSensitive", functions: ["purchaseAmounts", "supplierContact"] },
   { key: "permissionGroupCatalogs", functions: ["catalogSuppliers", "catalogCarriers", "catalogWarehouses", "paymentCategories"] },
   { key: "permissionGroupSystem", functions: ["users", "activityLogs", "userGuide"] },
@@ -98,9 +101,10 @@ export function normalizePermissionMap(value: unknown): Partial<PermissionMap> {
   return result;
 }
 
-/** Chuyển override masterData cũ thành các quyền danh mục riêng khi nạp tài khoản quản lý. */
+/** Chuyển override masterData cũ thành các quyền danh mục riêng khi nạp tài khoản quản lý; bỏ chức năng chỉ admin. */
 export function normalizeCustomPermissionMap(value: unknown): Partial<PermissionMap> {
   const result = normalizePermissionMap(value);
+  for (const fn of ADMIN_ONLY_FUNCTIONS) delete result[fn];
   if (result.masterData) {
     for (const fn of ["catalogSuppliers", "catalogCarriers", "catalogWarehouses", "paymentCategories"] as const) {
       if (result[fn] === undefined) result[fn] = result.masterData;
@@ -126,7 +130,7 @@ export function completePermissions(value: Partial<PermissionMap> | undefined): 
 export function effectivePermissions(role: string, standard: Partial<PermissionMap> | undefined, custom: Partial<PermissionMap> | undefined): PermissionMap {
   if (isAdminRole(role)) return fullPermissions();
   const base = completePermissions(standard);
-  return Object.fromEntries(PERMISSION_FUNCTION_KEYS.map((fn) => [fn, custom?.[fn] || base[fn]])) as PermissionMap;
+  return Object.fromEntries(PERMISSION_FUNCTION_KEYS.map((fn) => [fn, ADMIN_ONLY_FUNCTIONS.includes(fn) ? "none" : custom?.[fn] || base[fn]])) as PermissionMap;
 }
 
 /** Chỉ giữ chức năng khác chuẩn của role (chỉnh về đúng chuẩn thì không còn là tùy chỉnh). */
