@@ -206,8 +206,11 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Không gửi được lên Google Chat. Vui lòng thử lại sau.";
     case "GOOGLE_SHEETS_CONFIG_MISSING":
       return "Google Sheets chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
+    // BE ghi kèm email tài khoản ghi sheet (GOOGLE_SHEETS_USER_ID) cần quyền / cần đăng nhập lại.
     case "GOOGLE_SHEETS_PERMISSION_DENIED":
-      return "Tài khoản Google của bạn chưa có quyền chỉnh sửa file Google Sheet. Vui lòng nhờ quản trị viên chia sẻ quyền.";
+      return backendMessage || "Tài khoản ghi Google Sheets chưa có quyền chỉnh sửa file. Vui lòng liên hệ quản trị viên.";
+    case "GOOGLE_SHEETS_ACCOUNT_AUTH_REQUIRED":
+      return backendMessage || "Tài khoản ghi Google Sheets cần đăng nhập lại bằng Google. Vui lòng liên hệ quản trị viên.";
     case "GOOGLE_SHEETS_NOT_FOUND":
       return backendMessage || "Không tìm thấy file hoặc trang tính Google Sheet đã cấu hình. Vui lòng liên hệ quản trị viên.";
     case "GOOGLE_SHEETS_API_DISABLED":

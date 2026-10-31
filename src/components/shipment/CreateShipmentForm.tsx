@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { analyzeDocument, checkDocumentFileNames, createUploadBatch, MAX_OCR_FILE_BYTES, uploadDocument } from "@/services/shipmentApi";
 import { createDatabaseRow, databaseEndpoints, listCatalogRows } from "@/services/postgresShipmentApi";
-import type { PurchaseRecord, SupplierRecord } from "@/types/postgresShipment";
+import type { PurchaseDetailRecord, PurchaseItemCodeRecord, PurchaseRecord, SupplierRecord } from "@/types/postgresShipment";
 import { useAuth } from "@/context/AuthContext";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
@@ -14,6 +14,7 @@ import UploadProgressToast from "@/components/common/UploadProgressToast";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import OcrLoadingCard from "./OcrLoadingCard";
+import SupplierPicker from "./SupplierPicker";
 
 // Trang /shipments/new (trước là modal: bấm ra ngoài / nút Back của trình duyệt làm mất form đang nhập).
 interface CreateShipmentFormProps {
@@ -29,7 +30,8 @@ interface ReviewFields {
   orderDate: string;
   supplier: string;
   supplierId: string;
-  origin: string;
+  /** Không bắt buộc; lưu vào chi_tiet_mua_hang_item_code.ten_nha_may của dòng hàng vừa tạo. */
+  factoryName: string;
   productName: string;
 }
 
@@ -37,7 +39,6 @@ const REQUIRED_REVIEW_FIELDS: Array<{ key: keyof ReviewFields; labelKey: string 
   { key: "orderCode", labelKey: "orderCode" },
   { key: "orderDate", labelKey: "piDate" },
   { key: "supplier", labelKey: "supplier" },
-  { key: "origin", labelKey: "origin" },
   { key: "productName", labelKey: "productName" },
 ];
 
@@ -51,7 +52,7 @@ const EMPTY_FIELDS: ReviewFields = {
   orderDate: "",
   supplier: "",
   supplierId: "",
-  origin: "",
+  factoryName: "",
   productName: "",
 };
 
@@ -82,7 +83,7 @@ function mapOcrFields(data: Record<string, string>): ReviewFields {
     orderDate: readField(data, ["Ngày HĐ PI", "Ngày HĐ", "Order date"]),
     supplier: readField(data, ["Nhà cung cấp", "Nha_cung_cap"]),
     supplierId: readField(data, ["id_ncc", "ID NCC"]),
-    origin: readField(data, ["XUẤT XỨ", "Xuat_xu"]),
+    factoryName: "",
     productName,
   };
 }
@@ -151,7 +152,6 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
         ...current,
         supplier: supplier.ten_ncc,
         supplierId: supplier.id_ncc,
-        origin: String(supplier.quoc_gia || ""),
       };
     });
   }, [suppliers]);
@@ -233,9 +233,12 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
       const mapped = mappedRows[0];
       const supplier = suppliers.find((item) => item.id_ncc === mapped.supplierId)
         || findBestCatalogMatch(mapped.supplier, suppliers, "ten_ncc");
-      setFields(supplier
-        ? { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: supplier.ten_ncc, supplierId: supplier.id_ncc, origin: String(supplier.quoc_gia || ""), productName: mapped.productName }
-        : { orderCode: mapped.orderCode, orderDate: mapped.orderDate, supplier: mapped.supplier, supplierId: mapped.supplierId, origin: mapped.origin, productName: mapped.productName });
+      // PI không OCR tên nhà máy: giữ tên đã nhập (nếu có) khi chọn lại file.
+      setFields((current) => ({
+        ...mapped,
+        ...(supplier ? { supplier: supplier.ten_ncc, supplierId: supplier.id_ncc } : {}),
+        factoryName: current.factoryName,
+      }));
     } catch (err) {
       setFile(null);
       setError(err instanceof Error ? err.message : t("analyzePiError"));
@@ -248,15 +251,12 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
     setFields((current) => ({ ...current, [key]: value }));
   };
 
-  const handleSupplierChange = (supplierName: string) => {
-    const supplier = suppliers.find((item) => item.ten_ncc === supplierName);
-    setFields((current) => ({
-      ...current,
-      supplier: supplierName,
-      supplierId: supplier?.id_ncc || "",
-      origin: String(supplier?.quoc_gia || ""),
-    }));
+  const handleSupplierSelect = (supplier: SupplierRecord) => {
+    setFields((current) => ({ ...current, supplier: supplier.ten_ncc, supplierId: supplier.id_ncc }));
   };
+  // Nhà cung cấp đã khớp danh mục (theo id, không thì theo đúng tên); chưa khớp thì tên OCR hiện làm gợi ý dưới ô chọn.
+  const selectedSupplier = suppliers.find((item) => item.id_ncc === fields.supplierId)
+    || suppliers.find((item) => item.ten_ncc === fields.supplier);
 
   const normalizedOrderCode = fields.orderCode.trim().toUpperCase().replace(/\s+/g, "");
   const duplicateOrderCode = Boolean(normalizedOrderCode && existingOrderCodes.some(
@@ -319,11 +319,30 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
         id_ncc: supplier.id_ncc,
         is_deleted: false,
       });
-      await createDatabaseRow(databaseEndpoints.purchaseDetails, {
+      const purchaseDetail = await createDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, {
         ma_hop_dong: normalizedOrderCode,
         ten_hang: fields.productName.trim(),
       });
       shipmentCreated = true;
+      // Tên nhà máy nằm ở dòng Item Code của mặt hàng (như tab Chi tiết: Item Code có thể để trống).
+      // Lỗi chỗ này không chặn upload PI: đơn đã tạo, báo để nhập lại ở tab Chi tiết.
+      const factoryName = fields.factoryName.trim();
+      if (factoryName) {
+        try {
+          if (!purchaseDetail?.id_chi_tiet) throw new Error("Backend không trả id_chi_tiet cho dòng hàng mới");
+          await createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
+            id_chi_tiet: purchaseDetail.id_chi_tiet,
+            item_code: "",
+            ma_nha_may: "",
+            ten_nha_may: factoryName,
+          });
+        } catch (factoryError) {
+          notify(t("shipmentFactoryNameSaveFailed", {
+            orderCode: normalizedOrderCode,
+            reason: factoryError instanceof Error ? factoryError.message : t("createShipmentError"),
+          }), "warning");
+        }
+      }
       if (piFile) {
         setUploadedBytes(0);
         await uploadDocument({
@@ -366,7 +385,7 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
     ["orderCode", "orderCode"],
     ["orderDate", "piDate"],
     ["supplier", "supplier"],
-    ["origin", "origin"],
+    ["factoryName", "factoryName"],
     ["productName", "productName"],
   ];
 
@@ -433,19 +452,20 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
               <div className="col-span-full grid content-start gap-3 sm:grid-cols-2">
                 {reviewFields.map(([key, labelKey]) => (
                   <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                    <span>{t(labelKey)} <span className="text-error-500">*</span></span>
+                    <span>{t(labelKey)}{REQUIRED_REVIEW_FIELDS.some((field) => field.key === key) && <> <span className="text-error-500">*</span></>}</span>
                     {key === "supplier" ? (
-                      <select value={fields.supplier} onChange={(event) => handleSupplierChange(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
-                          <option value="">{t("selectSupplier")}</option>
-                          {fields.supplier && !suppliers.some((supplier) => supplier.ten_ncc === fields.supplier) && (
-                            <option value={fields.supplier} disabled>{t("ocrNotMatched", { value: fields.supplier })}</option>
-                          )}
-                          {suppliers.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.ten_ncc}</option>)}
-                      </select>
+                      <SupplierPicker
+                        id="create-shipment-supplier"
+                        suppliers={suppliers}
+                        selectedId={selectedSupplier?.id_ncc || ""}
+                        unmatchedText={selectedSupplier ? "" : fields.supplier.trim()}
+                        disabled={isSaving}
+                        onSelect={handleSupplierSelect}
+                      />
                     ) : key === "orderDate" && isManualMode ? (
                       <input type="date" value={fields.orderDate} onChange={(event) => updateField("orderDate", event.target.value)} className="min-h-10 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                     ) : (
-                      <input type="text" value={fields[key]} readOnly={key === "origin"} onChange={(event) => updateField(key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:read-only:bg-gray-800" />
+                      <input type="text" value={fields[key]} onChange={(event) => updateField(key, event.target.value)} className="min-h-10 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                     )}
                   </label>
                 ))}
