@@ -676,9 +676,24 @@ export async function savePostgresReturnItem(item: ReturnItem): Promise<void> {
     id_kho: item.idKho || null,
     ghi_chu: item.ghiChu || null,
   };
-  if (item.idVanChuyen) {
-    await updateDatabaseRow<ContainerTransportRecord>(databaseEndpoints.transports, item.idVanChuyen, payload);
+  const saved = item.idVanChuyen
+    ? unwrapRecord<unknown>(await updateDatabaseRow<ContainerTransportRecord>(databaseEndpoints.transports, item.idVanChuyen, payload))
+    : await createDatabaseRow<unknown>(databaseEndpoints.transports, payload);
+  logTransportSheetSync(item, saved);
+}
+
+/**
+ * BE đồng bộ dòng vận chuyển sang Google Sheet (Eir-Logs) khi lưu và trả kết quả ở `sheet_sync`. Lỗi đồng bộ không làm hỏng
+ * thao tác lưu nên chỉ in ra console để chẩn đoán (không xem được log BE).
+ */
+function logTransportSheetSync(item: ReturnItem, saved: unknown) {
+  const sheetSync = isRecord(saved) ? saved.sheet_sync : undefined;
+  const context = { soCont: item.soCont, soHd: item.soHd };
+  if (!isRecord(sheetSync)) {
+    console.warn("[Google Sheets] BE không trả kết quả đồng bộ sheet vận chuyển (BE chưa phải bản mới?)", context);
+  } else if (sheetSync.synced === true) {
+    console.info("[Google Sheets] Đã đồng bộ sheet vận chuyển", { ...context, ...sheetSync });
   } else {
-    await createDatabaseRow<ContainerTransportRecord>(databaseEndpoints.transports, payload);
+    console.error("[Google Sheets] Không đồng bộ được sheet vận chuyển", { ...context, ...sheetSync });
   }
 }

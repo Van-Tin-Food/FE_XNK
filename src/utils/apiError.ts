@@ -210,6 +210,8 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Tài khoản Google của bạn chưa có quyền chỉnh sửa file Google Sheet. Vui lòng nhờ quản trị viên chia sẻ quyền.";
     case "GOOGLE_SHEETS_NOT_FOUND":
       return backendMessage || "Không tìm thấy file hoặc trang tính Google Sheet đã cấu hình. Vui lòng liên hệ quản trị viên.";
+    case "GOOGLE_SHEETS_API_DISABLED":
+      return "Google Sheets API chưa được bật cho ứng dụng. Vui lòng liên hệ quản trị viên.";
     case "GOOGLE_SHEETS_TIMEOUT":
       return "Google Sheets phản hồi quá lâu. Vui lòng thử lại sau.";
     case "GOOGLE_SHEETS_REQUEST_FAILED":
@@ -270,6 +272,8 @@ export function createHttpApiError(
     status: response.status,
     code: code || undefined,
     message: detail,
+    // Chi tiết lỗi Google Sheets từ BE (action, HTTP, lý do, câu lỗi gốc của Google).
+    googleSheets: isRecord(payload) && payload.google_sheets ? payload.google_sheets : undefined,
   });
   if (response.status === 403 && code === "PERMISSION_DENIED" && typeof window !== "undefined") {
     window.dispatchEvent(new Event(PERMISSIONS_STALE_EVENT));
