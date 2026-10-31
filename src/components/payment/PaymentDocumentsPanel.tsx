@@ -5,7 +5,9 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import {
+  INVOICE,
   PAYMENT_PROOF,
+  SIGNED_FORM,
   listPaymentDocuments,
   removePaymentDocument,
   sendPaymentDocument,
@@ -46,7 +48,7 @@ interface Props {
   requestId: string;
   /** Upload + bỏ chứng từ (đề nghị chưa hoàn thành, chưa hủy). */
   canUpload: boolean;
-  /** payment_proof: khung ủy nhiệm chi / ảnh chuyển tiền (bước chi tiền); null: mọi chứng từ hồ sơ. */
+  /** payment_proof: khung ủy nhiệm chi / ảnh chuyển tiền (bước chi tiền); invoice: khung hóa đơn; null: mọi chứng từ hồ sơ. */
   kind?: PaymentDocumentKind;
   /** Danh sách chung: được bỏ cả ủy nhiệm chi (người có quyền chi tiền). */
   canRemoveProof?: boolean;
@@ -64,6 +66,7 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
   const proofMode = kind === PAYMENT_PROOF;
+  const invoiceMode = kind === INVOICE;
   const [removing, setRemoving] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<PaymentDocuments | null>(null);
@@ -76,7 +79,8 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
   const [refreshing, setRefreshing] = useState(false);
   // File đang xem trong khung xem trước (null = đóng): mở ngay trong trang như chứng từ XNK, không mở tab mới.
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
-  const files = useMemo(() => (documents?.files || []).filter((file) => !proofMode || file.kind === PAYMENT_PROOF), [documents, proofMode]);
+  // Khung theo loại (UNC / hóa đơn) chỉ hiện file đúng loại; khung chung hiện mọi file.
+  const files = useMemo(() => (documents?.files || []).filter((file) => !kind || file.kind === kind), [documents, kind]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -84,14 +88,14 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
       .then((data) => {
         setDocuments(data);
         setError("");
-        onFilesChange?.(data.files.filter((file) => !proofMode || file.kind === PAYMENT_PROOF).length);
+        onFilesChange?.(data.files.filter((file) => !kind || file.kind === kind).length);
       })
       .catch((loadError: unknown) => {
         if (!controller.signal.aborted) setError(loadError instanceof Error ? loadError.message : t("prDocsLoadError"));
       })
       .finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
     return () => controller.abort();
-  }, [onFilesChange, proofMode, reload, requestId, t]);
+  }, [kind, onFilesChange, reload, requestId, t]);
 
   const refresh = () => {
     if (refreshing || progress || removing) return;
@@ -150,7 +154,7 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
         });
       }
       if (failures.length) notify(t("prUploadPartial", { done, total, errors: failures.join("; ") }), done ? "warning" : "error");
-      else notify(proofMode ? t("prProofUploaded", { count: total }) : t("prUploaded", { count: total }), "success");
+      else notify(proofMode ? t("prProofUploaded", { count: total }) : invoiceMode ? t("prInvoiceUploaded", { count: total }) : t("prUploaded", { count: total }), "success");
       if (done) onUploaded?.();
     } catch (uploadError) {
       notify(uploadError instanceof Error ? uploadError.message : String(uploadError), "error");
@@ -159,7 +163,7 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
       reloadList(uploadedFiles.length > 0);
       if (inputRef.current) inputRef.current.value = "";
     }
-  }, [kind, notify, onUploaded, progress, proofMode, reloadList, requestId, t]);
+  }, [invoiceMode, kind, notify, onUploaded, progress, proofMode, reloadList, requestId, t]);
 
   const remove = async (fileId: string, fileName: string) => {
     if (removing || progress) return;
@@ -186,7 +190,7 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-gray-600 dark:text-gray-300">
-          {proofMode ? t("prProofHint") : t("prDocsHint", { folder: documents?.folderName || requestId.replace(/-/g, "_") })}
+          {proofMode ? t("prProofHint") : invoiceMode ? t("prInvoiceHint") : t("prDocsHint", { folder: documents?.folderName || requestId.replace(/-/g, "_") })}
         </p>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <button type="button" onClick={refresh} disabled={refreshing || Boolean(progress) || Boolean(removing)} title={t("prRefreshDocsHint")}
@@ -208,7 +212,7 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
       )}
       {!documents && !error && <div className="mt-3 h-12 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />}
       {documents && (files.length === 0 ? (
-        <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-center text-sm text-gray-500 dark:border-gray-700">{proofMode ? t("prProofEmpty") : t("prDocsEmpty")}</p>
+        <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-center text-sm text-gray-500 dark:border-gray-700">{proofMode ? t("prProofEmpty") : invoiceMode ? t("prInvoiceEmpty") : t("prDocsEmpty")}</p>
       ) : (
         <ul className="mt-3 divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
           {files.map((file, index) => {
@@ -220,6 +224,12 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     {isProof && !proofMode && (
                       <span className="shrink-0 rounded-md bg-blue-light-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-light-700 dark:bg-blue-light-500/10 dark:text-blue-light-300" title={t("prProofTitle")}>UNC</span>
+                    )}
+                    {file.kind === INVOICE && !invoiceMode && (
+                      <span className="shrink-0 rounded-md bg-success-50 px-1.5 py-0.5 text-[11px] font-semibold text-success-700 dark:bg-success-500/10 dark:text-success-300" title={t("prInvoiceTitle")}>{t("prInvoiceBadge")}</span>
+                    )}
+                    {file.kind === SIGNED_FORM && (
+                      <span className="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-300" title={t("prSignedFormTitle")}>{t("prSignedFormBadge")}</span>
                     )}
                     <button type="button" onClick={() => setPreviewIndex(index)} className="min-w-0 flex-1 truncate text-left text-sm font-medium text-brand-600 hover:underline dark:text-brand-400" title={file.fileName}>{file.fileName}</button>
                   </div>
@@ -251,7 +261,7 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
               className={`flex h-11 w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold disabled:opacity-60 sm:w-auto sm:px-6 ${proofMode
                 ? "bg-brand-500 text-white hover:bg-brand-600"
                 : "text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-500/10"}`}>
-              {progress ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />{t("prUploading", { done: progress.done, total: progress.total })}</> : `⬆ ${proofMode ? t("prChooseProofFiles") : t("prChooseFiles")}`}
+              {progress ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />{t("prUploading", { done: progress.done, total: progress.total })}</> : `⬆ ${proofMode ? t("prChooseProofFiles") : invoiceMode ? t("prChooseInvoiceFiles") : t("prChooseFiles")}`}
             </button>
           </div>
           {progress && (

@@ -24,7 +24,9 @@ export const PAYMENT_STATUS_LABEL_KEYS: Record<PaymentRequestStatus, string> = {
 export const PAYMENT_PROOF = "payment_proof" as const;
 /** Giấy đề nghị đã ký (PDF bản in tự tạo và lưu ngay sau khi upload ủy nhiệm chi — utils/paymentRequestSignedPdf.ts). */
 export const SIGNED_FORM = "signed_form" as const;
-export type PaymentDocumentKind = typeof PAYMENT_PROOF | typeof SIGNED_FORM | null;
+/** Hóa đơn (mục "Hóa đơn" ở bước lưu trữ): đề nghị luồng đỏ bắt buộc có trước khi lưu trữ, quá 15 ngày chưa có thì BE nhắc. */
+export const INVOICE = "invoice" as const;
+export type PaymentDocumentKind = typeof PAYMENT_PROOF | typeof SIGNED_FORM | typeof INVOICE | null;
 
 export interface PaymentCategory {
   id: string;
@@ -542,7 +544,7 @@ function normalizeDocumentFile(row: unknown): PaymentDocumentFile | null {
     fileUrl: str(row.fileUrl),
     uploadedAt: str(row.uploadedAt),
     uploadedBy: str(row.uploadedBy),
-    kind: row.kind === PAYMENT_PROOF || row.kind === SIGNED_FORM ? row.kind : null,
+    kind: row.kind === PAYMENT_PROOF || row.kind === SIGNED_FORM || row.kind === INVOICE ? row.kind : null,
   };
 }
 

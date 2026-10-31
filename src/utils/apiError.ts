@@ -165,6 +165,7 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
     case "PAYMENT_REQUEST_NOT_APPROVED":
     case "PAYMENT_REQUEST_NOT_PAID":
     case "PAYMENT_REQUEST_LINK_REQUIRED":
+    case "PAYMENT_REQUEST_INVOICE_REQUIRED":
     case "PAYMENT_REQUEST_NOTICE_NOT_ALLOWED":
       return backendMessage || "Trạng thái đề nghị đã thay đổi. Vui lòng tải lại.";
     case "PAYMENT_REQUESTER_NO_CHAT":

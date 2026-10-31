@@ -14,6 +14,7 @@ import {
   fetchPaymentRequestPrintHtml,
   PAYMENT_METHOD_LABEL_KEYS,
   PAYMENT_PROOF,
+  INVOICE,
   getPaymentRequest,
   approvePaymentRequest,
   notifyMissingPaymentDocuments,
@@ -174,6 +175,8 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   // Đang tạo + lưu giấy đề nghị đã ký (PDF) sau khi upload ủy nhiệm chi.
   const [savingSignedForm, setSavingSignedForm] = useState(false);
   const [fileCount, setFileCount] = useState(0);
+  // Số file hóa đơn (mục "Hóa đơn"): đề nghị luồng đỏ phải có mới lưu trữ được.
+  const [invoiceCount, setInvoiceCount] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -650,6 +653,14 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
 
         {/* 4. Lưu trữ hồ sơ (sau khi đã chi tiền) */}
         <NodeCard index={3} title={titles[3]} state={states[3]} last>
+          {/* Hóa đơn: luồng đỏ bắt buộc trước khi lưu trữ (quá 15 ngày từ ngày đề nghị chưa có thì app nhắc người đề nghị). */}
+          <div className={`mb-4 rounded-xl border p-3 sm:p-4 ${request.hasRed && invoiceCount === 0 && request.status === 3 ? "border-error-200 dark:border-error-500/30" : "border-gray-200 dark:border-gray-700"}`}>
+            <p className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-gray-800 dark:text-white/90">
+              {t("prInvoiceTitle")}
+              {request.hasRed && <span className="rounded-md bg-error-50 px-1.5 py-0.5 text-[11px] font-semibold text-error-700 dark:bg-error-500/10 dark:text-error-300">{t("prInvoiceRequired")}</span>}
+            </p>
+            <PaymentDocumentsPanel requestId={request.id} kind={INVOICE} canUpload={canUploadDocs} canRemove={canRemoveDocs} onFilesChange={setInvoiceCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
+          </div>
           <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
           {canUploadDocs && !canRemoveDocs && <p className="mt-2 text-xs text-gray-500">{t("prPaidAddOnlyHint")}</p>}
           {request.status === 3 && (
@@ -657,13 +668,14 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
               {fileCount > 0 && <p className="mb-3 rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("prDocsDraftHint", { count: fileCount })}</p>}
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
                 {canArchive && (
-                  <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0} className="h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto">
+                  <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0 || (request.hasRed && invoiceCount === 0)} className="h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto">
                     {busy === "archive" ? t("prSaving") : `🗄 ${t("prArchive")}`}
                   </button>
                 )}
                 {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
               </div>
               {canArchive && fileCount === 0 && <p className="mt-2 text-xs text-gray-500">{t("prArchiveNeedsFile")}</p>}
+              {request.hasRed && invoiceCount === 0 && <p className="mt-2 text-xs font-medium text-error-600 dark:text-error-400">{t("prArchiveNeedsInvoice")}</p>}
               {!canArchive && <p className="mt-2 text-sm text-gray-500">{t("prWaitArchive")}</p>}
             </div>
           )}
