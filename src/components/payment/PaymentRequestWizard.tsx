@@ -4,12 +4,15 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import {
+  INVOICE,
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABEL_KEYS,
   TRANSFER_FIELDS,
   buildTransferInfo,
   createPaymentRequest,
   getPaymentRequestOptions,
+  sendPaymentDocument,
+  startPaymentDocumentUploads,
   parseTransferInfo,
   searchPaymentBeneficiaries,
   updatePaymentRequest,
@@ -23,6 +26,7 @@ import {
   type TransferField,
   type TransferKind,
 } from "@/services/paymentRequestApi";
+import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
 import { addVat, costCodeName, formatAmount, formatMoney, parseAmountLoose, parseVatInput, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
 import { goodsPaymentKind } from "@/services/paymentCostApi";
 import BankPicker, { matchBank } from "./BankPicker";
@@ -90,6 +94,12 @@ const MAX_COSTS = 100;
 /** Số gợi ý khoản phí hiện trước (còn lại bấm "Xem thêm"). */
 const SUGGESTION_LIMIT = 8;
 const BENEFICIARY_DEBOUNCE_MS = 250;
+const MAX_ATTACHMENT_SIZE = 1024 * 1024 * 1024;
+
+interface CreateAttachment {
+  file: File;
+  isInvoice: boolean;
+}
 
 /** Ngày (YYYY-MM-DD) theo giờ Việt Nam, cộng thêm số ngày. */
 function vnDate(addDays = 0): string {
@@ -225,6 +235,10 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [contentTouched, setContentTouched] = useState(false);
   const [paymentTouched, setPaymentTouched] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [attachments, setAttachments] = useState<CreateAttachment[]>([]);
+  const [attachmentDragActive, setAttachmentDragActive] = useState(false);
+  const [attachmentInputKey, setAttachmentInputKey] = useState(0);
+  const [attachmentUploadProgress, setAttachmentUploadProgress] = useState<{ done: number; total: number; percent: number } | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -491,6 +505,42 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         ...(!editing && requester ? { requesterId: requester.id } : {}),
       };
       const saved = editing ? await updatePaymentRequest(editing.id, input) : await createPaymentRequest(input);
+      if (!editing && attachments.length) {
+        try {
+          const invoiceFiles = attachments.filter((item) => item.isInvoice);
+          const regularFiles = attachments.filter((item) => !item.isInvoice);
+          let done = 0;
+          const totalBytes = attachments.reduce((sum, item) => sum + item.file.size, 0);
+          let uploadedBytes = 0;
+          for (const { files, kind } of [{ files: invoiceFiles, kind: INVOICE }, { files: regularFiles, kind: null }] as const) {
+            if (!files.length) continue;
+            const { duplicates, sessions } = await startPaymentDocumentUploads(
+              saved.id,
+              files.map(({ file }) => ({ file, mimeType: getDocumentMimeType(file) })),
+              kind,
+            );
+            if (duplicates.length) throw new Error(t("prDuplicateFiles", { names: duplicates.join(", ") }));
+            for (let index = 0; index < files.length; index += 1) {
+              const file = files[index].file;
+              await sendPaymentDocument(saved.id, sessions[index], file, {
+                onProgress: ({ loaded }) => setAttachmentUploadProgress({
+                  done,
+                  total: attachments.length,
+                  percent: totalBytes ? Math.min(99, Math.floor(((uploadedBytes + loaded) / totalBytes) * 100)) : 0,
+                }),
+              });
+              uploadedBytes += file.size;
+              done += 1;
+              setAttachmentUploadProgress({ done, total: attachments.length, percent: totalBytes ? Math.floor((uploadedBytes / totalBytes) * 100) : 100 });
+            }
+          }
+          notify(t("prDraftAttachmentsUploaded", { count: attachments.length }), "success");
+        } catch (uploadError) {
+          notify(uploadError instanceof Error ? uploadError.message : String(uploadError), "error");
+        } finally {
+          setAttachmentUploadProgress(null);
+        }
+      }
       notify(t(editing ? "prChangesSaved" : "prDraftSaved", { id: saved.id }), "success");
       onSaved(saved);
     } catch (saveError) {
@@ -985,6 +1035,88 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
             </div>
             {hasVat && <p className="text-right text-xs text-gray-500">{t("prVatTotalLine", { tax: money(taxTotal) })}</p>}
           </div>
+          {!editing && (
+            <div className="mt-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700 sm:p-4">
+              <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prAttachBeforeSend")}</p>
+              <p className="mt-1 text-xs text-gray-500">{t("prCreateAttachmentKindHint")}</p>
+              <input
+                key={attachmentInputKey}
+                type="file"
+                multiple
+                accept={DOCUMENT_FILE_ACCEPT}
+                className="hidden"
+                id="payment-request-create-attachments"
+                disabled={saving}
+                onChange={(event) => {
+                  const chosen = Array.from(event.target.files || []);
+                  const unsupported = chosen.filter((file) => !isSupportedDocumentFile(file));
+                  const tooLarge = chosen.filter((file) => file.size > MAX_ATTACHMENT_SIZE);
+                  const empty = chosen.find((file) => file.size <= 0);
+                  if (unsupported.length) notify(t("prUnsupportedFiles", { names: unsupported.map((file) => file.name).join(", ") }), "error");
+                  else if (tooLarge.length) notify(t("prFileTooLarge", { size: 1024, names: tooLarge.map((file) => file.name).join(", ") }), "error");
+                  else if (empty) notify(t("prEmptyFile", { name: empty.name }), "error");
+                  else setAttachments((current) => [
+                    ...current,
+                    ...chosen.filter((file) => !current.some((item) => item.file.name === file.name && item.file.size === file.size))
+                      .map((file) => ({ file, isInvoice: false })),
+                  ]);
+                  setAttachmentInputKey((key) => key + 1);
+                }}
+              />
+              <div
+                onDragEnter={(event) => { event.preventDefault(); setAttachmentDragActive(true); }}
+                onDragOver={(event) => { event.preventDefault(); setAttachmentDragActive(true); }}
+                onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setAttachmentDragActive(false); }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setAttachmentDragActive(false);
+                  const chosen = Array.from(event.dataTransfer.files);
+                  const unsupported = chosen.filter((file) => !isSupportedDocumentFile(file));
+                  const tooLarge = chosen.filter((file) => file.size > MAX_ATTACHMENT_SIZE);
+                  const empty = chosen.find((file) => file.size <= 0);
+                  if (unsupported.length) notify(t("prUnsupportedFiles", { names: unsupported.map((file) => file.name).join(", ") }), "error");
+                  else if (tooLarge.length) notify(t("prFileTooLarge", { size: 1024, names: tooLarge.map((file) => file.name).join(", ") }), "error");
+                  else if (empty) notify(t("prEmptyFile", { name: empty.name }), "error");
+                  else setAttachments((current) => [
+                    ...current,
+                    ...chosen.filter((file) => !current.some((item) => item.file.name === file.name && item.file.size === file.size))
+                      .map((file) => ({ file, isInvoice: false })),
+                  ]);
+                }}
+                className={`mt-3 rounded-xl border-2 border-dashed p-3 text-center transition-colors ${attachmentDragActive ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10" : "border-gray-300 dark:border-gray-700"}`}
+              >
+                <p className="text-xs text-gray-500">{t("prDropFilesHint")}</p>
+                <label htmlFor="payment-request-create-attachments" className="mt-2 inline-flex h-10 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-500/10">{t("prChooseFiles")}</label>
+              </div>
+              {attachments.length > 0 && (
+                <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
+                  {attachments.map(({ file, isInvoice }, index) => (
+                    <li key={`${file.name}-${file.size}-${index}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-gray-200" title={file.name}>{file.name}</span>
+                      <label className="inline-flex shrink-0 cursor-pointer items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={isInvoice}
+                          disabled={saving}
+                          onChange={(event) => setAttachments((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, isInvoice: event.target.checked } : item))}
+                          className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                        />
+                        <span>{t("prMarkAsInvoice")}</span>
+                        {isInvoice && <span aria-label={t("prInvoiceTitle")} title={t("prInvoiceTitle")} className="font-bold text-success-600 dark:text-success-400">✓</span>}
+                      </label>
+                      <button type="button" disabled={saving} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="shrink-0 text-gray-400 hover:text-error-600 disabled:opacity-50" aria-label={t("prRemoveDoc")}>×</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {attachmentUploadProgress && (
+                <div className="mt-2" role="status" aria-live="polite">
+                  <div className="mb-1 flex justify-between text-xs text-gray-500"><span>{t("prUploading", { done: attachmentUploadProgress.done, total: attachmentUploadProgress.total })}</span><span>{attachmentUploadProgress.percent}%</span></div>
+                  <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800"><div className="h-full bg-brand-500 transition-[width]" style={{ width: `${attachmentUploadProgress.percent}%` }} /></div>
+                </div>
+              )}
+            </div>
+          )}
           <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">{t("prSaveHint")}</p>
           {error && <p role="alert" className="mt-3 break-words rounded-lg bg-error-50 px-3 py-2 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-300">{error}</p>}
           <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
