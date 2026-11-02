@@ -13,7 +13,6 @@ import {
   sendPaymentDocument,
   startPaymentDocumentUploads,
   type PaymentDocumentKind,
-  type PaymentDocumentFile,
   type PaymentDocuments,
 } from "@/services/paymentRequestApi";
 import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
@@ -112,7 +111,6 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
     const empty = selected.find((file) => file.size <= 0);
     if (empty) return notify(t("prEmptyFile", { name: empty.name }), "error");
     const total = selected.length;
-    const uploadedFiles: PaymentDocumentFile[] = [];
     setProgress({ done: 0, total, percent: 0 });
     try {
       // Một lần gọi BE cho cả lượt: báo trùng tên (không tự đổi tên / ghi đè) và mở phiên upload Drive cho mọi file.
@@ -132,7 +130,6 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
       };
       const sendOne = async (index: number, announce: boolean) => {
         const uploaded = await sendPaymentDocument(requestId, sessions[index], selected[index], { announce, onProgress: ({ loaded }) => reportProgress(index, loaded) });
-        uploadedFiles.push(uploaded);
         done += 1;
         reportProgress(index, selected[index].size);
         setDocuments((current) => current ? {
@@ -141,8 +138,10 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
         } : current);
       };
       if (proofMode) {
-        // Ủy nhiệm chi: lần lượt, file cuối mới báo "Đã chi tiền" lên Google Chat (một lần, đủ các file).
-        for (const index of selected.keys()) await sendOne(index, index === total - 1);
+        // Ủy nhiệm chi: các file trước gửi song song (không báo Chat), file cuối gửi sau cùng mới báo "Đã chi tiền" lên
+        // Google Chat (một lần, đủ các file).
+        await runLimited(total - 1, PARALLEL_UPLOADS, (index) => sendOne(index, false));
+        await sendOne(total - 1, true);
       } else {
         // Chứng từ hồ sơ: gửi song song; file lỗi không chặn các file khác, báo lại sau.
         await runLimited(total, PARALLEL_UPLOADS, async (index) => {
@@ -160,7 +159,9 @@ export default function PaymentDocumentsPanel({ requestId, canUpload, kind = nul
       notify(uploadError instanceof Error ? uploadError.message : String(uploadError), "error");
     } finally {
       setProgress(null);
-      reloadList(uploadedFiles.length > 0);
+      // BE đã ghi danh sách file của thư mục (gồm file vừa upload) vào DB lúc hoàn tất upload: tải lại từ DB, không bắt BE
+      // đọc lại thư mục Drive (chậm). Nút "Làm mới" vẫn đọc lại Drive khi cần.
+      reloadList();
       if (inputRef.current) inputRef.current.value = "";
     }
   }, [invoiceMode, kind, notify, onUploaded, progress, proofMode, reloadList, requestId, t]);

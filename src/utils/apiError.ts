@@ -174,6 +174,10 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
     case "PAYMENT_REQUEST_INVOICE_REQUIRED":
     case "PAYMENT_REQUEST_NOTICE_NOT_ALLOWED":
       return backendMessage || "Trạng thái đề nghị đã thay đổi. Vui lòng tải lại.";
+    case "PAYMENT_REQUEST_FLOW_CONFIRM_REQUIRED":
+      return backendMessage || "Đề nghị luồng cảnh báo: vui lòng xem lại quy chuẩn công ty và xác nhận trước khi gửi.";
+    case "PAYMENT_REQUEST_ACCOUNTANT_CONFIRM_ONLY":
+      return backendMessage || "Đề nghị luồng đỏ / vàng: chỉ kế toán hoặc admin được xác nhận đầy đủ chứng từ.";
     case "PAYMENT_REQUESTER_NO_CHAT":
       return backendMessage || "Người đề nghị chưa mở chat với app Đề nghị thanh toán trên Google Chat, nên app chưa nhắn riêng được.";
     case "GOOGLE_CHAT_SEND_FAILED":

@@ -19,6 +19,8 @@ import {
   approvePaymentRequest,
   notifyMissingPaymentDocuments,
   rejectPaymentRequest,
+  needsInvoice,
+  requestFlow,
   sendPaymentRequest,
   type PaymentRequest,
 } from "@/services/paymentRequestApi";
@@ -270,8 +272,15 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const canUploadProof = canRecordPayment && (request.status === 1 || request.status === 3);
   // Đã chi tiền (có ủy nhiệm chi): hồ sơ chỉ bổ sung, chỉ người có quyền chi tiền / lưu trữ bỏ được file (BE cũng chặn).
   const canRemoveDocs = request.status !== 3 || canRecordPayment;
-  // Lưu trữ (đầy đủ chứng từ) chỉ sau khi đã chi tiền.
-  const canArchive = can("paymentDocuments", "edit") && request.status === 3;
+  // Luồng của đề nghị: đỏ / vàng là luồng cảnh báo (gửi phải xác nhận quy chuẩn; lưu trữ chỉ kế toán xác nhận).
+  const flow = requestFlow(request);
+  const warningFlow = flow !== "xanh";
+  // Hóa đơn VAT chỉ cần khi có khoản thuộc danh mục có VAT; luồng đỏ có VAT bắt buộc hóa đơn trước khi lưu trữ.
+  const invoiceNeeded = needsInvoice(request);
+  const redNeedsInvoice = request.hasRed && invoiceNeeded;
+  // Lưu trữ (đầy đủ chứng từ) chỉ sau khi đã chi tiền; luồng đỏ / vàng chỉ kế toán, admin (BE trả can_confirm_documents).
+  const canArchive = can("paymentDocuments", "edit") && request.canConfirmDocuments !== false && request.status === 3;
+  const accountantOnlyArchive = can("paymentDocuments", "edit") && request.canConfirmDocuments === false && request.status === 3;
   // Báo thiếu chứng từ vào Chat cá nhân người đề nghị: khi đã gửi và chưa lưu trữ / hủy.
   const canSendMissing = canRecordPayment && ((request.status === 0 && sent) || request.status === 1 || request.status === 3);
   // Luồng đỏ chỉ kế toán được duyệt / từ chối: BE trả can_decide theo người đang xem.
@@ -322,9 +331,16 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
 
   const send = async () => {
     if (busy) return;
+    // Luồng đỏ / vàng (luồng cảnh báo): người gửi xác nhận đã xem quy chuẩn công ty (BE cũng chặn nếu thiếu xác nhận).
+    if (warningFlow && !await confirm({
+      title: t("prFlowWarnTitle", { flow: t(`prFlow_${flow}`) }),
+      message: t("prFlowWarnMessage", { id: request.id, flow: t(`prFlow_${flow}`) }),
+      confirmText: t("prFlowWarnConfirm"),
+      tone: flow === "do" ? "danger" : "default",
+    })) return;
     setBusy("send");
     try {
-      setRequest(await sendPaymentRequest(request.id));
+      setRequest(await sendPaymentRequest(request.id, { confirmFlow: warningFlow }));
       notify(t("prSentSuccess", { id: request.id }), "success");
     } catch (sendError) {
       notify(sendError instanceof Error ? sendError.message : String(sendError), "error");
@@ -654,10 +670,10 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
         {/* 4. Lưu trữ hồ sơ (sau khi đã chi tiền) */}
         <NodeCard index={3} title={titles[3]} state={states[3]} last>
           {/* Hóa đơn: luồng đỏ bắt buộc trước khi lưu trữ (quá 15 ngày từ ngày đề nghị chưa có thì app nhắc người đề nghị). */}
-          <div className={`mb-4 rounded-xl border p-3 sm:p-4 ${request.hasRed && invoiceCount === 0 && request.status === 3 ? "border-error-200 dark:border-error-500/30" : "border-gray-200 dark:border-gray-700"}`}>
+          <div className={`mb-4 rounded-xl border p-3 sm:p-4 ${redNeedsInvoice && invoiceCount === 0 && request.status === 3 ? "border-error-200 dark:border-error-500/30" : "border-gray-200 dark:border-gray-700"}`}>
             <p className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-gray-800 dark:text-white/90">
               {t("prInvoiceTitle")}
-              {request.hasRed && <span className="rounded-md bg-error-50 px-1.5 py-0.5 text-[11px] font-semibold text-error-700 dark:bg-error-500/10 dark:text-error-300">{t("prInvoiceRequired")}</span>}
+              {redNeedsInvoice && <span className="rounded-md bg-error-50 px-1.5 py-0.5 text-[11px] font-semibold text-error-700 dark:bg-error-500/10 dark:text-error-300">{t("prInvoiceRequired")}</span>}
             </p>
             <PaymentDocumentsPanel requestId={request.id} kind={INVOICE} canUpload={canUploadDocs} canRemove={canRemoveDocs} onFilesChange={setInvoiceCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
           </div>
@@ -668,14 +684,16 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
               {fileCount > 0 && <p className="mb-3 rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("prDocsDraftHint", { count: fileCount })}</p>}
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
                 {canArchive && (
-                  <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0 || (request.hasRed && invoiceCount === 0)} className="h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto">
+                  <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0 || (redNeedsInvoice && invoiceCount === 0)} className="h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto">
                     {busy === "archive" ? t("prSaving") : `🗄 ${t("prArchive")}`}
                   </button>
                 )}
                 {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
               </div>
               {canArchive && fileCount === 0 && <p className="mt-2 text-xs text-gray-500">{t("prArchiveNeedsFile")}</p>}
-              {request.hasRed && invoiceCount === 0 && <p className="mt-2 text-xs font-medium text-error-600 dark:text-error-400">{t("prArchiveNeedsInvoice")}</p>}
+              {redNeedsInvoice && invoiceCount === 0 && <p className="mt-2 text-xs font-medium text-error-600 dark:text-error-400">{t("prArchiveNeedsInvoice")}</p>}
+              {!warningFlow && invoiceNeeded && invoiceCount === 0 && <p className="mt-2 text-xs text-gray-500">{t("prAutoArchiveHint")}</p>}
+              {accountantOnlyArchive && <p className="mt-2 text-xs font-medium text-warning-700 dark:text-warning-300">{t("prArchiveAccountantOnly")}</p>}
               {!canArchive && <p className="mt-2 text-sm text-gray-500">{t("prWaitArchive")}</p>}
             </div>
           )}

@@ -24,7 +24,11 @@ export const PAYMENT_STATUS_LABEL_KEYS: Record<PaymentRequestStatus, string> = {
 export const PAYMENT_PROOF = "payment_proof" as const;
 /** Giấy đề nghị đã ký (PDF bản in tự tạo và lưu ngay sau khi upload ủy nhiệm chi — utils/paymentRequestSignedPdf.ts). */
 export const SIGNED_FORM = "signed_form" as const;
-/** Hóa đơn (mục "Hóa đơn" ở bước lưu trữ): đề nghị luồng đỏ bắt buộc có trước khi lưu trữ, quá 15 ngày chưa có thì BE nhắc. */
+/**
+ * Hóa đơn VAT (mục "Hóa đơn" ở bước lưu trữ), chỉ cần khi đề nghị có khoản VAT (needsInvoice): luồng xanh đã chi tiền + có
+ * hóa đơn thì BE tự lưu trữ; luồng đỏ bắt buộc có trước khi lưu trữ; đúng ngày đề nghị + 15 ngày mà đã chi tiền, chưa có thì
+ * BE nhắc người đề nghị (luồng đỏ / vàng nhắc cả người duyệt theo luồng).
+ */
 export const INVOICE = "invoice" as const;
 export type PaymentDocumentKind = typeof PAYMENT_PROOF | typeof SIGNED_FORM | typeof INVOICE | null;
 
@@ -153,6 +157,8 @@ export interface PaymentRequest {
   canManage: boolean | null;
   /** Được upload / bỏ chứng từ hồ sơ; null = BE không trả (danh sách). */
   canUploadDocuments: boolean | null;
+  /** Được xác nhận đầy đủ chứng từ (luồng đỏ / vàng chỉ kế toán, admin); null = BE không trả (danh sách). */
+  canConfirmDocuments: boolean | null;
   costCount: number;
   costs: PaymentCost[];
 }
@@ -361,6 +367,7 @@ function normalizeRequest(row: unknown): PaymentRequest | null {
     canRecordPayment: row.can_record_payment === undefined || row.can_record_payment === null ? null : row.can_record_payment === true,
     canManage: row.can_manage === undefined || row.can_manage === null ? null : row.can_manage === true,
     canUploadDocuments: row.can_upload_documents === undefined || row.can_upload_documents === null ? null : row.can_upload_documents === true,
+    canConfirmDocuments: row.can_confirm_documents === undefined || row.can_confirm_documents === null ? null : row.can_confirm_documents === true,
     costCount: Number(row.cost_count ?? costs.length) || 0,
     costs,
   };
@@ -496,9 +503,24 @@ export async function updatePaymentRequest(id: string, input: PaymentRequestInpu
   return requireRequest(await request<unknown>("PUT", `/${encodeURIComponent(id)}`, toBody(input)));
 }
 
-/** Bước 2: xác nhận gửi (hoặc gửi lại) thẻ đề nghị lên Google Chat. */
-export async function sendPaymentRequest(id: string): Promise<PaymentRequest> {
-  return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/send`));
+/** Luồng của đề nghị = luồng cao nhất của các khoản (đỏ > vàng > xanh), như BE utils/paymentFlow.requestFlow. */
+export function requestFlow(paymentRequest: Pick<PaymentRequest, "hasRed" | "costs">): PaymentFlow {
+  if (paymentRequest.hasRed || paymentRequest.costs.some((cost) => cost.flow === "do")) return "do";
+  return paymentRequest.costs.some((cost) => cost.flow === "vang") ? "vang" : "xanh";
+}
+
+/**
+ * Đề nghị cần hóa đơn VAT: có ít nhất một khoản thuộc danh mục có thuế (co_thue), như BE utils/paymentFlow.needsInvoice.
+ * Toàn khoản không VAT thì không có hóa đơn VAT: không bắt hóa đơn, không nhắc.
+ */
+export const needsInvoice = (paymentRequest: Pick<PaymentRequest, "costs">): boolean => paymentRequest.costs.some((cost) => cost.taxed);
+
+/**
+ * Bước 2: xác nhận gửi (hoặc gửi lại) thẻ đề nghị lên Google Chat. Luồng đỏ / vàng (luồng cảnh báo): người gửi phải xác
+ * nhận đã xem quy chuẩn công ty (confirmFlow), thiếu thì BE trả 409 PAYMENT_REQUEST_FLOW_CONFIRM_REQUIRED.
+ */
+export async function sendPaymentRequest(id: string, { confirmFlow = false }: { confirmFlow?: boolean } = {}): Promise<PaymentRequest> {
+  return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/send`, confirmFlow ? { confirm_flow: true } : undefined));
 }
 
 /** Người tạo (hoặc kế toán) hủy đề nghị chưa duyệt / bị từ chối. Không có xóa đề nghị. */
