@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import PaginationControls from "@/components/common/PaginationControls";
 import { formatDueDate } from "@/components/payment/PaymentRequestParts";
@@ -21,7 +21,7 @@ import { paginateItems } from "@/utils/pagination";
 // Báo cáo chi phí (chỉ admin: chức năng costReports chỉ admin có), 5 mục:
 // 1. Chỉ tiêu tổng hợp của kỳ: chi phí mua hàng (tiền hàng + vận chuyển & phí gắn đơn hàng), chi phí vận hành (khoản không
 //    gắn đơn hàng), đã thanh toán, cần thanh toán;
-// 2. Đề nghị thanh toán của kỳ — bảng, mở từng đề nghị xem các khoản phí bên trong;
+// 2. Đề nghị thanh toán của kỳ — danh sách chọn bên trái, chi tiết khoản phí bên phải;
 // 3. Nợ phải thu: phí cược cont đã chi − phí sửa cont = nợ phải thu hãng tàu (tính đến hôm nay, hệ thống không quản lý thu
 //    tiền);
 // 4. Cơ cấu chi phí theo khoản mục;
@@ -91,10 +91,10 @@ function KpiCard({ tone, icon, label, value, hint }: { tone: "brand" | "orange" 
     <div className={`${CARD} min-w-0 border-l-4 p-4 ${tones.split(" ")[0]}`}>
       <div className="flex items-center gap-2">
         <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base ${tones.split(" ").slice(1).join(" ")}`} aria-hidden="true">{icon}</span>
-        <p className="min-w-0 text-sm font-medium text-gray-600 dark:text-gray-300">{label}</p>
+        <p className="min-w-0 text-[13px] font-medium text-gray-600 dark:text-gray-300">{label}</p>
       </div>
-      <p className="mt-3 break-words text-xl font-bold tabular-nums text-gray-900 dark:text-white sm:text-2xl">{value}</p>
-      {hint && <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">{hint}</p>}
+      <p className="mt-3 break-words text-base font-bold tabular-nums text-gray-900 dark:text-white sm:text-lg">{value}</p>
+      {hint && <p className="mt-1 break-words text-[11px] text-gray-500 dark:text-gray-400">{hint}</p>}
     </div>
   );
 }
@@ -125,7 +125,7 @@ export default function CostReportPage() {
   const [requestQuery, setRequestQuery] = useState("");
   const [requestPage, setRequestPage] = useState(1);
   const [requestPageSize, setRequestPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [openRequests, setOpenRequests] = useState<Set<string>>(() => new Set());
+  const [selectedRequest, setSelectedRequest] = useState<RequestTotals | null>(null);
   const [showAllDeposits, setShowAllDeposits] = useState(false);
   const [orderQuery, setOrderQuery] = useState("");
   const [orderPage, setOrderPage] = useState(1);
@@ -157,7 +157,7 @@ export default function CostReportPage() {
           setData(result);
           setRequestPage(1);
           setOrderPage(1);
-          setOpenRequests(new Set());
+          setSelectedRequest(null);
           setOpenOrders(new Set());
           setShowAllDeposits(false);
         })
@@ -228,7 +228,7 @@ export default function CostReportPage() {
     .filter((item) => !requestTerm || [item.requestId, item.content, item.requester, ...item.items.map((cost) => `${cost.categoryName} ${cost.container} ${cost.contract} ${cost.note}`)]
       .join(" ").toLocaleLowerCase("vi").includes(requestTerm));
   const requestPageData = paginateItems<RequestTotals>(requestRows, requestPage, requestPageSize);
-  const toggle = (setter: typeof setOpenRequests, key: string) => setter((current) => {
+  const toggle = (setter: typeof setOpenOrders, key: string) => setter((current) => {
     const next = new Set(current);
     if (next.has(key)) next.delete(key);
     else next.add(key);
@@ -246,48 +246,6 @@ export default function CostReportPage() {
   const stateBadge = (state: CostState) => (
     <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${STATE_BADGE[state]}`}>{t(`rpState_${state}`)}</span>
   );
-  /** Danh sách khoản phí của một đề nghị (bảng trên desktop, dòng trên mobile). */
-  const feeTable = (items: MonthlyCost[]) => (
-    <div className="bg-gray-50/80 px-4 py-3 dark:bg-white/[0.02] sm:px-5">
-      <ul className="space-y-2 md:hidden">
-        {items.map((cost) => (
-          <li key={cost.id} className="rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-gray-700 dark:bg-gray-900">
-            <div className="flex items-start justify-between gap-3">
-              <p className="min-w-0 font-medium text-gray-800 dark:text-white/90">{cost.categoryName}</p>
-              <p className="shrink-0 font-semibold tabular-nums text-gray-900 dark:text-white">{feeAmount(cost)}</p>
-            </div>
-            <p className="mt-0.5 text-xs text-gray-500">{[feePlace(cost), cost.vat ? `VAT ${cost.vat}%` : "", cost.note].filter(Boolean).join(" · ")}</p>
-          </li>
-        ))}
-      </ul>
-      <table className="hidden w-full text-left text-sm md:table">
-        <thead className="text-xs text-gray-500 dark:text-gray-400">
-          <tr>
-            <th className="py-1.5 pr-3 font-medium">{t("rpCostItem")}</th>
-            <th className="py-1.5 pr-3 font-medium">{t("rpAppliesTo")}</th>
-            <th className="py-1.5 pr-3 font-medium">{t("prCostNote")}</th>
-            <th className="py-1.5 pr-3 text-right font-medium">VAT</th>
-            <th className="py-1.5 text-right font-medium">{t("rpAmount")}</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200/70 dark:divide-gray-700/60">
-          {items.map((cost) => (
-            <tr key={cost.id}>
-              <td className="py-2 pr-3 text-gray-800 dark:text-white/90">
-                {cost.categoryName}
-                <span className="ml-1 text-xs text-gray-400">{cost.code}{cost.account ? ` · ${t("rpAccountShort")} ${cost.account}` : ""}</span>
-              </td>
-              <td className="py-2 pr-3 font-mono text-xs text-gray-600 dark:text-gray-300">{feePlace(cost)}</td>
-              <td className="max-w-[260px] truncate py-2 pr-3 text-gray-600 dark:text-gray-300" title={cost.note}>{cost.note || "—"}</td>
-              <td className="py-2 pr-3 text-right tabular-nums text-gray-500">{cost.vat ? `${cost.vat}%` : "—"}</td>
-              <td className="whitespace-nowrap py-2 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{feeAmount(cost)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-
   // ---- Mục 5: giá vốn đơn hàng ----
   const orderTerm = orderQuery.trim().toLocaleLowerCase("vi");
   const orderRows = orders.filter((item) => !orderTerm || `${item.contract} ${item.supplier} ${item.containers.map((c) => c.container).join(" ")}`.toLocaleLowerCase("vi").includes(orderTerm));
@@ -331,6 +289,62 @@ export default function CostReportPage() {
   };
 
   const empty = <p className="px-5 py-8 text-center text-sm text-gray-500">{t("rpNone")}</p>;
+  const requestDetail = selectedRequest ? (
+    <div id="selected-request-details" className="scroll-mt-24 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+      <div className="border-b border-gray-100 p-4 dark:border-gray-800 sm:p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-sm font-semibold text-brand-600 dark:text-brand-400">{selectedRequest.requestId || t("rpUnrequestedShort")}</span>
+          {stateBadge(selectedRequest.state)}
+        </div>
+        <h3 className="mt-2 break-words text-sm font-semibold leading-5 text-gray-900 dark:text-white">{selectedRequest.content || "—"}</h3>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("rpRequester")}: {selectedRequest.requester || "—"}</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800/70">
+            <p className="text-[11px] text-gray-500">{t("prDueDate")}</p>
+            <p className="mt-0.5 text-sm font-medium text-gray-800 dark:text-gray-200">{selectedRequest.dueDate ? formatDueDate(selectedRequest.dueDate) : "—"}</p>
+          </div>
+          <div className="rounded-lg bg-brand-50 px-3 py-2 dark:bg-brand-500/10">
+            <p className="text-[11px] text-brand-700 dark:text-brand-300">{t("rpAmountInPeriod")}</p>
+            <p className="mt-0.5 break-words text-sm font-bold tabular-nums text-brand-800 dark:text-brand-200">{money(selectedRequest.total)}</p>
+          </div>
+        </div>
+        {dueInfo(selectedRequest) && <p className="mt-2 text-xs">{dueInfo(selectedRequest)}</p>}
+      </div>
+      <div className="px-4 py-3 sm:px-5">
+        <div className="mb-1.5 flex items-center justify-between gap-3">
+          <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">{t("rpRequestBreakdown")}</h4>
+          <span className="text-[11px] text-gray-500">{t("rpCountLine", { count: selectedRequest.items.length })}</span>
+        </div>
+        {selectedRequest.items.length ? (
+          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+            {selectedRequest.items.map((cost) => (
+              <li key={cost.id} className="flex items-start justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <p className="break-words text-[13px] font-medium text-gray-800 dark:text-white/90">{cost.categoryName}</p>
+                    <span className="text-[10px] text-gray-400">{cost.code}{cost.account ? ` · ${t("rpAccountShort")} ${cost.account}` : ""}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-gray-500">{feePlace(cost)}{cost.vat ? ` · VAT ${cost.vat}%` : ""}</p>
+                  {cost.note && <p className="mt-0.5 break-words text-xs text-gray-500 dark:text-gray-400">{cost.note}</p>}
+                </div>
+                <p className="shrink-0 pt-0.5 text-right text-[13px] font-semibold tabular-nums text-gray-900 dark:text-white">{feeAmount(cost)}</p>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="py-4 text-center text-sm text-gray-500">{t("rpNone")}</p>}
+      </div>
+      {selectedRequest.requestId && (
+        <div className="border-t border-gray-100 px-4 py-3 dark:border-gray-800 sm:px-5">
+          <Link href={`/payment-requests/${encodeURIComponent(selectedRequest.requestId)}`} className="text-sm font-semibold text-brand-600 hover:underline dark:text-brand-400">{t("rpOpenRequest")} ↗</Link>
+        </div>
+      )}
+    </div>
+  ) : (
+    <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 px-6 text-center dark:border-gray-700">
+      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-50 text-xl text-brand-600 dark:bg-brand-500/10 dark:text-brand-300" aria-hidden="true">↙</span>
+      <p className="mt-3 text-sm font-medium text-gray-700 dark:text-gray-200">{t("rpSelectRequest")}</p>
+    </div>
+  );
 
   return (
     <div className="space-y-5">
@@ -373,25 +387,24 @@ export default function CostReportPage() {
           {/* 2. Đề nghị thanh toán của kỳ, chi tiết khoản phí */}
           <Section index={1} title={`${t("rpRequests", { month: monthLabel(month) })} (${byRequest.requests.length})`} hint={t("rpRequestsHint")} actions={(
             <div className="flex flex-col gap-2 sm:flex-row">
-              <input type="search" value={requestQuery} onChange={(event) => { setRequestQuery(event.target.value); setRequestPage(1); }}
+              <input type="search" value={requestQuery} onChange={(event) => { setRequestQuery(event.target.value); setRequestPage(1); setSelectedRequest(null); }}
                 placeholder={t("rpRequestSearch")} aria-label={t("rpRequestSearch")} className={`${FILTER} sm:w-48`} />
-              <select value={requestFilter} onChange={(event) => { setRequestFilter(event.target.value as "" | CostState); setRequestPage(1); }} aria-label={t("rpStatus")}
+              <select value={requestFilter} onChange={(event) => { setRequestFilter(event.target.value as "" | CostState); setRequestPage(1); setSelectedRequest(null); }} aria-label={t("rpStatus")}
                 className={`${FILTER} sm:w-36`}>
                 {REQUEST_FILTERS.map((value) => <option key={value || "all"} value={value}>{value ? t(`rpState_${value}`) : t("rpAllStates")}</option>)}
               </select>
             </div>
           )}>
             {requestPageData.total === 0 ? empty : (
-              <>
-                {/* Mobile / tablet: thẻ */}
-                <ul className="divide-y divide-gray-100 dark:divide-gray-800 lg:hidden">
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+                <div className="min-w-0">
+                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
                   {requestPageData.items.map((item) => {
-                    const key = item.requestId || "_loose";
-                    const open = openRequests.has(key);
+                    const selected = selectedRequest?.requestId === item.requestId;
                     return (
-                      <li key={key}>
-                        <button type="button" onClick={() => toggle(setOpenRequests, key)} aria-expanded={open} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-white/[0.02] sm:px-5">
-                          <span className={`mt-0.5 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden="true">›</span>
+                      <li key={item.requestId || "_loose"}>
+                        <button type="button" onClick={() => setSelectedRequest(item)} aria-pressed={selected} className={`group flex w-full items-start gap-3 border-l-2 px-4 py-3 text-left transition-colors sm:px-5 ${selected ? "border-brand-500 bg-brand-50/60 dark:bg-brand-500/[0.06]" : "border-transparent hover:bg-gray-50 dark:hover:bg-white/[0.02]"}`}>
+                          <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${selected ? "bg-brand-100 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300" : "bg-gray-100 text-gray-500 group-hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:group-hover:bg-gray-700"}`} aria-hidden="true">›</span>
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-mono text-sm font-semibold text-gray-900 dark:text-white">{item.requestId || t("rpUnrequestedShort")}</span>
@@ -404,63 +417,17 @@ export default function CostReportPage() {
                           </div>
                           <p className="shrink-0 text-right text-sm font-bold tabular-nums text-gray-900 dark:text-white">{money(item.total)}</p>
                         </button>
-                        {open && feeTable(item.items)}
                       </li>
                     );
                   })}
                 </ul>
-                {/* Desktop: bảng */}
-                <div className="hidden overflow-x-auto custom-scrollbar lg:block">
-                  <table className="w-full min-w-[900px] text-left text-sm">
-                    <thead className="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-900 dark:text-gray-400">
-                      <tr>
-                        <th className="w-10 px-4 py-3" aria-label={t("rpDetails")} />
-                        <th className="px-3 py-3">{t("rpRequest")}</th>
-                        <th className="px-3 py-3">{t("prContent")}</th>
-                        <th className="px-3 py-3">{t("prDueDate")}</th>
-                        <th className="px-3 py-3">{t("rpStatus")}</th>
-                        <th className="px-3 py-3 text-right">{t("rpFeeCount")}</th>
-                        <th className="px-4 py-3 text-right">{t("rpAmountInPeriod")}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {requestPageData.items.map((item, index) => {
-                        const key = item.requestId || "_loose";
-                        const open = openRequests.has(key);
-                        return (
-                          <Fragment key={key}>
-                            <tr onClick={() => toggle(setOpenRequests, key)} className={`cursor-pointer hover:bg-brand-50/40 dark:hover:bg-white/[0.03] ${index % 2 ? "bg-gray-50/40 dark:bg-white/[0.01]" : ""}`}>
-                              <td className="px-4 py-3">
-                                <button type="button" aria-expanded={open} aria-label={t("rpDetails")} onClick={(event) => { event.stopPropagation(); toggle(setOpenRequests, key); }}
-                                  className={`flex h-6 w-6 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 ${open ? "rotate-90" : ""} transition-transform`}>›</button>
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-3">
-                                {item.requestId
-                                  ? <Link href={`/payment-requests/${encodeURIComponent(item.requestId)}`} onClick={(event) => event.stopPropagation()} className="font-mono font-semibold text-brand-600 hover:underline dark:text-brand-400">{item.requestId}</Link>
-                                  : <span className="font-semibold text-gray-700 dark:text-gray-300">{t("rpUnrequestedShort")}</span>}
-                              </td>
-                              <td className="max-w-[360px] px-3 py-3">
-                                <p className="truncate text-gray-800 dark:text-white/90" title={item.content}>{item.content || "—"}</p>
-                                {item.requester && <p className="text-xs text-gray-500">{item.requester}</p>}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-3 text-gray-700 dark:text-gray-300">
-                                {item.dueDate ? formatDueDate(item.dueDate) : "—"}
-                                <p className="text-xs">{dueInfo(item)}</p>
-                              </td>
-                              <td className="px-3 py-3">{stateBadge(item.state)}</td>
-                              <td className="px-3 py-3 text-right tabular-nums text-gray-600 dark:text-gray-300">{item.count}</td>
-                              <td className="whitespace-nowrap px-4 py-3 text-right font-bold tabular-nums text-gray-900 dark:text-white">{money(item.total)}</td>
-                            </tr>
-                            {open && <tr><td colSpan={7} className="p-0">{feeTable(item.items)}</td></tr>}
-                          </Fragment>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
                 <PaginationControls page={requestPageData.safePage} totalPages={requestPageData.totalPages} pageSize={requestPageSize} totalItems={requestPageData.total} from={requestPageData.from} to={requestPageData.to}
-                  summaryKey="showingRecords" idPrefix="cost-requests" onPageChange={setRequestPage} onPageSizeChange={(value) => { setRequestPageSize(value); setRequestPage(1); }} />
-              </>
+                  summaryKey="showingRecords" idPrefix="cost-requests" onPageChange={(page) => { setRequestPage(page); setSelectedRequest(null); }} onPageSizeChange={(value) => { setRequestPageSize(value); setRequestPage(1); setSelectedRequest(null); }} />
+                </div>
+                <aside className="min-w-0 border-t border-gray-100 p-3 dark:border-gray-800 sm:p-4 lg:border-l lg:border-t-0">
+                  {requestDetail}
+                </aside>
+              </div>
             )}
           </Section>
 
@@ -598,13 +565,17 @@ export default function CostReportPage() {
                           <Stat label={t("rpContainerFees")} value={money(order.containerFees)} tone="text-theme-purple-500" />
                         </div>
                         <div className="mx-4 mb-4 grid grid-cols-1 gap-3 rounded-xl bg-gray-50 p-3 dark:bg-white/[0.03] sm:grid-cols-2">
-                          <Stat label={t("rpOrderTotal")} value={order.totalVnd !== null ? formatMoney(order.totalVnd, "VND", language) : money(order.total)} strong />
+                          <div>
+                            <Stat label={t("rpOrderTotal")} value={order.totalVnd !== null ? formatMoney(order.totalVnd, "VND", language) : money(order.total)} strong />
+                            <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t("rpOrderFormula")}</p>
+                          </div>
                           <div className="min-w-0 rounded-lg bg-success-50 p-2.5 dark:bg-success-500/10">
                             <p className="text-xs font-medium text-success-700 dark:text-success-300">{t("rpAvgPerKg")}</p>
                             <p className="mt-0.5 break-words text-lg font-bold tabular-nums text-success-700 dark:text-success-300">
                               {order.perKgVnd !== null ? `${formatMoney(order.perKgVnd, "VND", language)}/kg` : "—"}
                             </p>
-                            {order.perKgVnd === null && <p className="text-xs text-gray-500">{order.netKg <= 0 ? t("rpAvgNeedsNet") : t("rpAvgNeedsRate")}</p>}
+                            <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t("rpOrderTotal")} (VND) ÷ NET (kg)</p>
+                            {order.perKgVnd === null && <p className="mt-1 text-xs text-gray-500">{order.netKg <= 0 ? t("rpAvgNeedsNet") : t("rpAvgNeedsRate")}</p>}
                           </div>
                         </div>
                         {order.containers.length > 0 && (
@@ -615,14 +586,17 @@ export default function CostReportPage() {
                               <span className={`transition-transform ${open ? "rotate-90" : ""}`} aria-hidden="true">›</span>
                             </button>
                             {open && (
-                              <ul className="divide-y divide-gray-100 border-t border-gray-100 dark:divide-gray-800 dark:border-gray-800">
-                                {order.containers.map((item) => (
-                                  <li key={item.container} className="flex items-baseline justify-between gap-3 px-4 py-2 text-sm">
-                                    <span className="min-w-0 break-all font-mono text-gray-700 dark:text-gray-300">{item.container}</span>
-                                    <span className="shrink-0 tabular-nums text-gray-900 dark:text-white">{money(item.fees)}</span>
-                                  </li>
-                                ))}
-                              </ul>
+                              <>
+                                <p className="border-t border-gray-100 bg-gray-50 px-4 py-2 text-xs leading-relaxed text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">{t("rpContainerDetailHint")}</p>
+                                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                                  {order.containers.map((item) => (
+                                    <li key={item.container} className="flex items-baseline justify-between gap-3 px-4 py-2 text-sm">
+                                      <span className="min-w-0 break-all font-mono text-gray-700 dark:text-gray-300">{item.container}</span>
+                                      <span className="shrink-0 tabular-nums text-gray-900 dark:text-white">{money(item.fees)}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </>
                             )}
                           </div>
                         )}
