@@ -1,4 +1,4 @@
-import type { CostKind, CostSpecial, DepositRow, MonthlyCost, ShipmentCost, ShipmentInfo } from "@/utils/costStatistics";
+import type { CostKind, CostSpecial, DepositRow, MonthlyCost } from "@/utils/costStatistics";
 import { getStoredUser } from "@/services/authApi";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
@@ -285,8 +285,6 @@ export async function deleteMyCost(id: string): Promise<void> {
 export interface CostOverview {
   month: string;
   costs: MonthlyCost[];
-  shipments: ShipmentInfo[];
-  shipmentCosts: ShipmentCost[];
   /** Công nợ tiền cược container tính đến asOf: khoản cược cont / sửa cont theo container, mọi kỳ. */
   deposits: { asOf: string; rows: DepositRow[]; truncated: boolean };
   /** Không có quyền xem tiền hàng: số tiền cọc / còn lại bị ẩn (null). */
@@ -300,8 +298,8 @@ const specialOf = (value: unknown): CostSpecial => (value === "cuoc_cont" || val
 const nullableAmount = (value: unknown) => (value === null || value === undefined ? null : str(value));
 
 /**
- * Báo cáo chi phí (chỉ admin): các khoản chi phí phát sinh trong kỳ (YYYY-MM) kèm đề nghị chứa khoản + chi phí lũy kế của
- * các đơn hàng có chi phí trong kỳ (theo container, kèm NET kg) + nợ phải thu tiền cược tính đến hôm nay — một lần gọi.
+ * Báo cáo chi phí (quyền costReports): các khoản chi phí phát sinh trong kỳ (YYYY-MM) kèm đề nghị chứa khoản + nợ phải thu
+ * tiền cược tính đến hôm nay — một lần gọi.
  */
 export async function getCostOverview(month: string, signal?: AbortSignal): Promise<CostOverview> {
   const payload = await request("GET", `/overview?month=${encodeURIComponent(month)}`, undefined, signal);
@@ -337,20 +335,6 @@ export async function getCostOverview(month: string, signal?: AbortSignal): Prom
       kind: kindOf(row.nhom),
       special: specialOf(row.loai_dac_biet),
     })).filter((cost) => cost.id),
-    shipments: list(data.shipments).map((row): ShipmentInfo => ({
-      contract: str(row.ma_hop_dong),
-      supplier: str(row.ten_ncc),
-      containers: Array.isArray(row.containers) ? row.containers.map(str).filter(Boolean) : [],
-      netWeight: str(row.net_weight) || "0",
-    })).filter((item) => item.contract),
-    shipmentCosts: list(data.shipmentCosts).map((row): ShipmentCost => ({
-      contract: str(row.ma_hop_dong),
-      container: str(row.id_container),
-      kind: kindOf(row.nhom),
-      currency: str(row.currency) || "VND",
-      count: Number(row.so_khoan) || 0,
-      amount: nullableAmount(row.so_tien),
-    })).filter((item) => item.contract),
     deposits: {
       asOf: str(deposits.asOf),
       truncated: deposits.truncated === true,

@@ -3,7 +3,6 @@
 // - Chỉ tiêu tổng hợp của kỳ: chi phí mua hàng (cọc / còn lại = tiền hàng), chi phí vận hành (vận hành + phát sinh, tách giá
 //   trị chưa thuế / thuế GTGT), đã thanh toán, cần thanh toán.
 // - Đề nghị thanh toán của kỳ kèm từng khoản phí bên trong; cơ cấu chi phí theo khoản mục (tài khoản hạch toán, tỷ trọng).
-// - Giá vốn đơn hàng (lũy kế): tiền hàng + thuế & phí theo đơn + phí cont, giá vốn trung bình / kg (NET).
 // - Tiền cược container (BE nhận theo tên khoản phí — be/src/config/containerDepositFees.js): khoản ký cược / tạm ứng, hãng
 //   tàu hoàn lại khi trả cont — tách khỏi chi phí và giá vốn; công nợ tiền cược (phải thu hãng tàu) theo container = cược đã
 //   chi − phí sửa cont (phí sửa cont: chi phí thật, tính vào giá vốn; chưa vào đề nghị = đã cấn trừ vào tiền cược). Hệ thống
@@ -55,25 +54,6 @@ export interface MonthlyCost {
   currencyInferred: boolean;
   kind: CostKind;
   special: CostSpecial;
-}
-
-/** Đơn hàng (hợp đồng) có chi phí trong kỳ. */
-export interface ShipmentInfo {
-  contract: string;
-  supplier: string;
-  containers: string[];
-  /** Tổng NET (kg) trong chi tiết hợp đồng (chuỗi số, "0" = chưa có). */
-  netWeight: string;
-}
-
-/** Chi phí lũy kế của lô theo container × nhóm × loại tiền; container rỗng = chi phí chung của lô. */
-export interface ShipmentCost {
-  contract: string;
-  container: string;
-  kind: CostKind;
-  currency: string;
-  count: number;
-  amount: string | null;
 }
 
 /** Số tiền theo từng loại tiền (VND trước). */
@@ -318,124 +298,6 @@ export function groupByRequest(costs: MonthlyCost[]): { requests: RequestTotals[
     unrequested: { count: looseItems.length, total: moneyOf(loose), items: looseItems },
   };
 }
-
-// ---------- Giá vốn đơn hàng ----------
-
-/** Phí trực tiếp của một container trong đơn. */
-export interface OrderContainer {
-  container: string;
-  fees: Money;
-}
-
-/** Giá vốn một đơn hàng (hợp đồng), lũy kế mọi kỳ. */
-export interface OrderTotals {
-  contract: string;
-  supplier: string;
-  containerCount: number;
-  /** Tổng NET (kg) trong chi tiết hợp đồng; 0 = chưa có. */
-  netKg: number;
-  /** Tiền hàng (thanh toán quốc tế: cọc + thanh toán còn lại). */
-  goods: Money;
-  /** Thuế & phí theo đơn (không gắn container: thuế nhập khẩu, lệ phí, phí chung của lô...). */
-  orderFees: Money;
-  /** Phí theo container (cộng mọi container của đơn). */
-  containerFees: Money;
-  /** Tổng giá vốn theo nguyên tệ = tiền hàng + thuế & phí đơn + phí cont. */
-  total: Money;
-  containers: OrderContainer[];
-  /** Tiền hàng bị ẩn (không có quyền xem). */
-  hidden: boolean;
-  /** Tổng giá vốn quy đổi VND theo tỷ giá; null = có ngoại tệ mà chưa nhập tỷ giá (hoặc tiền hàng bị ẩn). */
-  totalVnd: string | null;
-  /** Giá vốn trung bình mỗi kg (VND, làm tròn đồng); null = chưa quy đổi được hoặc chưa có NET. */
-  perKgVnd: string | null;
-}
-
-/**
- * Tỷ giá USD/VND nhập trên báo cáo ("25.400", "25400", "25400,5") -> số xu VND cho 1 USD (BigInt), không hợp lệ / ≤ 0 thì
- * null.
- */
-export function parseRate(value: string): bigint | null {
-  const raw = String(value ?? "").trim().replace(/\s/g, "");
-  if (!raw) return null;
-  // "25.400" / "25,400" (phân tách nghìn) hoặc "25400,5" / "25400.5" (thập phân, tối đa 2 số).
-  const normalized = /^\d{1,3}([.,]\d{3})+$/.test(raw) ? raw.replace(/[.,]/g, "") : raw.replace(",", ".");
-  const cents = toCents(normalized);
-  return /^\d+(\.\d{1,2})?$/.test(normalized) && cents > ZERO ? cents : null;
-}
-
-/** Quy đổi tiền nhiều loại sang xu VND (USD × tỷ giá); có loại tiền khác hoặc USD mà chưa có tỷ giá thì null. */
-function toVndCents(money: Money, usdRate: bigint | null): bigint | null {
-  let total = ZERO;
-  for (const item of money) {
-    const cents = toCents(item.total);
-    if (item.currency === "VND") total += cents;
-    else if (item.currency === "USD" && usdRate !== null) total += (cents * usdRate + HUNDRED / BigInt(2)) / HUNDRED;
-    else return null;
-  }
-  return total;
-}
-
-/**
- * Giá vốn theo đơn hàng (hợp đồng có chi phí trong kỳ, lũy kế mọi kỳ): số cont, NET (kg), tiền hàng (thanh toán quốc tế),
- * thuế & phí theo đơn (không gắn container), phí theo container; tổng giá vốn theo nguyên tệ và quy đổi VND theo tỷ giá
- * USD/VND (usdRate = xu VND cho 1 USD, null = chưa nhập); giá vốn trung bình / kg = tổng VND ÷ NET. Tiền cược container
- * không tính (tạm ứng). Container của đơn = danh sách từ lô hàng ∪ container có chi phí. Sắp xếp tổng giá vốn giảm dần.
- */
-export function summarizeOrders(shipments: ShipmentInfo[], costs: ShipmentCost[], usdRate: bigint | null): OrderTotals[] {
-  const info = new Map(shipments.map((item) => [item.contract, item]));
-  const contracts = [...new Set([...shipments.map((item) => item.contract), ...costs.map((item) => item.contract)])];
-  const orders = contracts.map((contract) => {
-    const rows = costs.filter((item) => item.contract === contract && item.kind !== "deposit");
-    const names = [...new Set([...(info.get(contract)?.containers || []), ...rows.map((item) => item.container).filter(Boolean)])].sort();
-    const goods = new Map<string, bigint>();
-    const orderFees = new Map<string, bigint>();
-    const containerFees = new Map<string, bigint>();
-    const byContainer = new Map<string, Map<string, bigint>>(names.map((name) => [name, new Map<string, bigint>()]));
-    let hidden = false;
-    for (const row of rows) {
-      if (row.amount === null) {
-        hidden = true;
-        continue;
-      }
-      const cents = toCents(row.amount);
-      if (row.kind === "goods") addMoney(goods, row.currency, cents);
-      else if (!row.container) addMoney(orderFees, row.currency, cents);
-      else {
-        addMoney(containerFees, row.currency, cents);
-        addMoney(byContainer.get(row.container) as Map<string, bigint>, row.currency, cents);
-      }
-    }
-    const total = sumMoney(moneyOf(goods), moneyOf(orderFees), moneyOf(containerFees));
-    const netKg = Number(info.get(contract)?.netWeight || 0) || 0;
-    const vnd = hidden ? null : toVndCents(total, usdRate);
-    const item: OrderTotals = {
-      contract,
-      supplier: info.get(contract)?.supplier || "",
-      containerCount: names.length,
-      netKg,
-      goods: moneyOf(goods),
-      orderFees: moneyOf(orderFees),
-      containerFees: moneyOf(containerFees),
-      total,
-      containers: names.map((container) => ({ container, fees: moneyOf(byContainer.get(container) as Map<string, bigint>) })),
-      hidden,
-      totalVnd: vnd === null ? null : fromCents(vnd),
-      perKgVnd: vnd === null || netKg <= 0 ? null : String(Math.round(Number(vnd) / 100 / netKg)),
-    };
-    // Sắp xếp theo tổng giá vốn VND (chưa quy đổi được thì theo phần VND) — khóa giữ riêng, không lẫn vào dữ liệu trả về.
-    return { item, sortCents: vnd ?? toCents(total.find((entry) => entry.currency === "VND")?.total) };
-  });
-  return orders
-    .sort((a, b) => descCents(a.sortCents, b.sortCents) || a.item.contract.localeCompare(b.item.contract))
-    .map((entry) => entry.item);
-}
-
-/**
- * Khoản thuộc chi phí mua hàng: tiền hàng hoặc khoản gắn đơn hàng (hợp đồng / container — vận chuyển, thông quan, thuế, phí
- * liên quan). Khoản không gắn đơn nào (văn phòng, lương...) là chi phí vận hành.
- */
-export const isPurchaseCost = (cost: Pick<MonthlyCost, "kind" | "contract" | "container">) => cost.kind === "goods" || Boolean(cost.contract || cost.container);
 
 // ---------- Công nợ tiền cược container ----------
 

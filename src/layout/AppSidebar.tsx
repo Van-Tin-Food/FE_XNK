@@ -49,7 +49,7 @@ const AppSidebar: React.FC = () => {
   // Menu Đề nghị thanh toán: thêm người được uỷ quyền duyệt / xác nhận chứng từ (khớp quyền xem danh sách ở BE).
   const canOpenPaymentRequestList = canOpenPaymentRequests(can);
   const canViewCostManagement = canViewPaymentCategories || canViewPaymentRequests;
-  // Mục Báo cáo: báo cáo chi phí & công nợ phải trả — chỉ admin (costReports là chức năng chỉ admin có).
+  // Mục Báo cáo: báo cáo chi phí — quyền costReports (admin cấp riêng cho từng tài khoản).
   const canViewCostReport = can("costReports");
   const { t } = useLanguage();
 

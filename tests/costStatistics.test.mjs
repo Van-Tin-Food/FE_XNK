@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  costState, currentMonth, daysBetween, groupByRequest, isMonth, isPurchaseCost, parseRate, settlementStage, shiftMonth, stageMoney, summarizeCosts,
-  summarizeDeposits, summarizeOrders, todayVn, vatCents, fromCents, toCents, withoutDeposits,
+  costState, currentMonth, daysBetween, groupByRequest, isMonth, settlementStage, shiftMonth, stageMoney, summarizeCosts,
+  summarizeDeposits, todayVn, vatCents, fromCents, toCents, withoutDeposits,
 } from "../src/utils/costStatistics.ts";
 
 const cost = (overrides) => ({
@@ -88,47 +88,9 @@ test("theo đề nghị: gom các khoản của kỳ theo đề nghị (mới nh
     [2, [{ currency: "VND", total: "30.00" }, { currency: "USD", total: "2.00" }], ["5", "6"]]);
 });
 
-test("giá vốn đơn hàng: tiền hàng + thuế & phí theo đơn + phí cont; quy đổi VND theo tỷ giá, giá vốn trung bình / kg; không tính tiền cược", () => {
-  const shipments = [
-    { contract: "26010", supplier: "NCC A", containers: ["C1", "C2"], netWeight: "50000" },
-    { contract: "26011", supplier: "NCC B", containers: [], netWeight: "0" },
-  ];
-  const costs = [
-    { contract: "26010", container: "", kind: "goods", currency: "USD", count: 2, amount: "40000.00" },
-    { contract: "26010", container: "", kind: "operating", currency: "VND", count: 1, amount: "150000000.00" },
-    { contract: "26010", container: "C1", kind: "operating", currency: "VND", count: 2, amount: "3000000.00" },
-    { contract: "26010", container: "C3", kind: "incident", currency: "VND", count: 1, amount: "500000.00" },
-    { contract: "26010", container: "C2", kind: "deposit", currency: "VND", count: 1, amount: "2000000.00" },
-    { contract: "26011", container: "", kind: "operating", currency: "VND", count: 1, amount: "70000.00" },
-    { contract: "26011", container: "", kind: "goods", currency: "USD", count: 1, amount: null },
-  ];
-  const noRate = summarizeOrders(shipments, costs, null);
-  const order = noRate.find((item) => item.contract === "26010");
-  assert.deepEqual([order.containerCount, order.netKg, order.goods, order.orderFees, order.containerFees], [
-    3, 50000, [{ currency: "USD", total: "40000.00" }], [{ currency: "VND", total: "150000000.00" }], [{ currency: "VND", total: "3500000.00" }],
-  ], "container lệch dữ liệu (C3) vẫn tính; tiền cược (C2) không tính");
-  assert.deepEqual(order.total, [{ currency: "VND", total: "153500000.00" }, { currency: "USD", total: "40000.00" }]);
-  assert.deepEqual(order.containers, [
-    { container: "C1", fees: [{ currency: "VND", total: "3000000.00" }] },
-    { container: "C2", fees: [] },
-    { container: "C3", fees: [{ currency: "VND", total: "500000.00" }] },
-  ]);
-  assert.deepEqual([order.totalVnd, order.perKgVnd], [null, null], "có USD mà chưa nhập tỷ giá: chưa quy đổi");
-
-  const withRate = summarizeOrders(shipments, costs, parseRate("25.400"));
-  const converted = withRate.find((item) => item.contract === "26010");
-  assert.equal(converted.totalVnd, "1169500000.00", "40.000 USD × 25.400 + 153.500.000 VND");
-  assert.equal(converted.perKgVnd, "23390", "1.169.500.000 ÷ 50.000 kg");
-  const hidden = withRate.find((item) => item.contract === "26011");
-  assert.deepEqual([hidden.hidden, hidden.totalVnd, hidden.perKgVnd, hidden.containerCount], [true, null, null, 0], "tiền hàng bị ẩn: không quy đổi");
-  assert.deepEqual(withRate.map((item) => item.contract), ["26010", "26011"], "sắp xếp tổng giá vốn giảm dần");
-});
-
-test("tỷ giá USD/VND nhập tay: phân tách nghìn hoặc thập phân; không hợp lệ thì null", () => {
-  assert.deepEqual(["25.400", "25,400", "25400", "25400,5", "25400.25", " 25 400 "].map((value) => String(parseRate(value))),
-    ["2540000", "2540000", "2540000", "2540050", "2540025", "2540000"]);
-  assert.deepEqual(["", "0", "abc", "-1", "25.4.0"].map(parseRate), [null, null, null, null, null]);
+test("số ngày giữa hai ngày (YYYY-MM-DD)", () => {
   assert.equal(daysBetween("2026-10-01", "2026-10-31"), 30);
+  assert.equal(daysBetween("2026-10-31", "2026-10-01"), -30);
 });
 
 test("ngày tháng theo giờ Việt Nam, lùi / tiến qua năm", () => {
@@ -176,13 +138,4 @@ test("công nợ tiền cược theo container: phải thu = cược đã chi �
   assert.deepEqual(totals.receivable, [{ currency: "VND", total: "1350000.00" }, { currency: "USD", total: "150.00" }]);
   assert.deepEqual(totals.unpaid, [{ currency: "VND", total: "1000000.00" }]);
   assert.deepEqual([fromCents(-30050n), toCents("-300.50"), toCents("12.3")], ["-300.50", -30050n, 1230n], "số âm");
-});
-
-test("chi phí mua hàng = tiền hàng + khoản gắn đơn hàng (hợp đồng / container); chi phí vận hành = khoản không gắn đơn", () => {
-  assert.deepEqual([
-    cost({ kind: "goods", contract: "26010", code: "HD" }),
-    cost({ contract: "26010", categoryName: "Thuế nhập khẩu" }),
-    cost({ container: "TCLU1", categoryName: "Phí nâng hạ" }),
-    cost({ categoryName: "Tiền điện" }),
-  ].map(isPurchaseCost), [true, true, true, false]);
 });

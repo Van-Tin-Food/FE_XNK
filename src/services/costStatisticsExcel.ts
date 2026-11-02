@@ -1,14 +1,13 @@
 import type { CostOverview } from "@/services/paymentCostApi";
 import {
-  compareCurrency, costState, groupByRequest, isPurchaseCost, stageMoney, sumMoney, summarizeCosts, summarizeDeposits, summarizeOrders, toCents, vatCents,
-  fromCents, withoutDeposits, type Money, type MonthlyCost,
+  compareCurrency, costState, groupByRequest, summarizeCosts, summarizeDeposits, toCents, vatCents, fromCents, withoutDeposits,
+  type Money, type MonthlyCost,
 } from "@/utils/costStatistics";
 
-// Xuất Excel Báo cáo chi phí của một kỳ (tháng), cùng các mục trên trang: Tổng hợp (chỉ tiêu tổng hợp + nợ phải thu), Đề
-// nghị thanh toán (mỗi dòng một khoản phí, kèm đề nghị chứa khoản), Nợ phải thu (phí cược cont − phí sửa cont theo
-// container), Cơ cấu chi phí, Giá vốn đơn hàng (tiền hàng, thuế & phí đơn, phí cont, quy đổi VND theo tỷ giá đã nhập, giá
-// vốn trung bình / kg), Giá vốn theo container. Tiền cược container không tính vào số liệu nào ngoài Nợ phải thu. Số tiền
-// ghi dạng số theo nguyên tệ, mỗi loại tiền một cột (#,##0 cho VND, #,##0.00 cho USD). xlsx (SheetJS) nạp khi bấm xuất.
+// Xuất Excel Báo cáo chi phí của một kỳ (tháng), cùng các mục trên trang: Tổng hợp (nợ phải thu + ghi chú), Đề nghị thanh
+// toán (mỗi dòng một khoản phí, kèm đề nghị chứa khoản), Nợ phải thu (phí cược cont − phí sửa cont theo container), Cơ cấu
+// chi phí. Tiền cược container không tính vào số liệu nào ngoài Nợ phải thu. Số tiền ghi dạng số theo nguyên tệ, mỗi loại
+// tiền một cột (#,##0 cho VND, #,##0.00 cho USD). xlsx (SheetJS) nạp khi bấm xuất.
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 type Cell = string | number;
@@ -27,19 +26,7 @@ function formatDateTime(value: string): string {
 }
 const formatDate = (value: string) => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value.slice(8, 10)}/${value.slice(5, 7)}/${value.slice(0, 4)}` : value);
 
-/** Cột tiền: một cột cho mỗi loại tiền có trong dữ liệu ("Tiền hàng (VND)", "Tiền hàng (USD)"). */
-function moneyColumns<T>(rows: T[], label: string, pick: (row: T) => Money): Array<Column<T>> {
-  const currencies = [...new Set(rows.flatMap((row) => pick(row).map((item) => item.currency)))].sort(compareCurrency);
-  return (currencies.length ? currencies : ["VND"]).map((currency) => ({ label: `${label} (${currency})`, value: (row: T) => amountIn(pick(row), currency), currency, width: 18 }));
-}
-
-export async function exportCostOverviewExcel({ overview, t, usdRate = null, rateText = "" }: {
-  overview: CostOverview;
-  t: Translate;
-  /** Tỷ giá USD/VND (xu VND cho 1 USD) người xem đã nhập; null = không quy đổi. */
-  usdRate?: bigint | null;
-  rateText?: string;
-}): Promise<string> {
+export async function exportCostOverviewExcel({ overview, t }: { overview: CostOverview; t: Translate }): Promise<string> {
   const XLSX = await import("xlsx");
   type Sheet = ReturnType<typeof XLSX.utils.aoa_to_sheet>;
   /** Bảng có tiêu đề + bộ lọc; ô tiền theo định dạng loại tiền của cột. */
@@ -64,7 +51,6 @@ export async function exportCostOverviewExcel({ overview, t, usdRate = null, rat
   const summary = summarizeCosts(costs);
   const byRequest = groupByRequest(costs);
   const deposits = summarizeDeposits(overview.deposits.rows);
-  const orders = summarizeOrders(overview.shipments, overview.shipmentCosts, usdRate);
 
   // ---------- Tổng hợp ----------
   const summaryRows: Cell[][] = [
@@ -73,7 +59,6 @@ export async function exportCostOverviewExcel({ overview, t, usdRate = null, rat
     [t("rpBasisNote")],
     [t("rpCurrencyNote")],
     [],
-    [`1. ${t("rpKeyFigures", { month: monthLabel })}`, t("rpCurrency"), t("rpCount"), t("rpAmount")],
   ];
   // Ô tiền cần định dạng: hàng, các cột, loại tiền.
   const formats: Array<{ row: number; columns: number[]; currency: string }> = [];
@@ -81,29 +66,7 @@ export async function exportCostOverviewExcel({ overview, t, usdRate = null, rat
     formats.push({ row: summaryRows.length, columns, currency });
     summaryRows.push(cells);
   };
-  const stageOf = (stages: Array<"settled" | "approved" | "pending" | "unsubmitted" | "unrequested">) => {
-    const parts = stages.flatMap((stage) => [stageMoney(summary.costs, stage), stageMoney(summary.goods, stage)]);
-    return { count: parts.reduce((sum, item) => sum + item.count, 0), total: sumMoney(...parts.map((item) => item.total)) };
-  };
-  // Chi phí mua hàng = tiền hàng + khoản gắn đơn hàng (vận chuyển, phí liên quan); chi phí vận hành = khoản không gắn đơn.
-  const purchase = summarizeCosts(costs.filter(isPurchaseCost));
-  const operating = summarizeCosts(costs.filter((cost) => !isPurchaseCost(cost)));
-  const totalOf = (items: typeof summary.costs) => sumMoney(items.map((item) => ({ currency: item.currency, total: item.total })));
-  const countOf = (items: typeof summary.costs) => items.reduce((sum, item) => sum + item.count, 0);
-  const figures: Array<[string, number, Money]> = [
-    [t("rpPurchases"), countOf(purchase.goods) + countOf(purchase.costs), sumMoney(totalOf(purchase.goods), totalOf(purchase.costs))],
-    [`  ${t("rpPurchaseGoods")}`, countOf(purchase.goods), totalOf(purchase.goods)],
-    [`  ${t("rpPurchaseFees")}`, countOf(purchase.costs), totalOf(purchase.costs)],
-    [t("rpExpense"), countOf(operating.costs), totalOf(operating.costs)],
-  ];
-  const settled = stageOf(["settled"]);
-  const outstanding = stageOf(["approved", "pending", "unsubmitted", "unrequested"]);
-  figures.push([t("rpSettled"), settled.count, settled.total], [t("rpOutstanding"), outstanding.count, outstanding.total]);
-  for (const [label, count, total] of figures) {
-    if (!total.length) summaryRows.push([label, "", count, ""]);
-    for (const item of total) push([label, item.currency, count, toNumber(item.total)], item.currency, [3]);
-  }
-  summaryRows.push([], [`3. ${t("rpReceivableTitle", { date: formatDate(overview.deposits.asOf) })}`, t("rpCurrency"), t("rpDepositPaid"), t("rpRepairCost"), t("rpReceivable"), t("rpDepositUnpaid")]);
+  summaryRows.push([], [`2. ${t("rpReceivableTitle", { date: formatDate(overview.deposits.asOf) })}`, t("rpCurrency"), t("rpDepositPaid"), t("rpRepairCost"), t("rpReceivable"), t("rpDepositUnpaid")]);
   const depositCurrencies = [...new Set([...deposits.totals.paid, ...deposits.totals.repair, ...deposits.totals.unpaid].map((item) => item.currency))].sort(compareCurrency);
   for (const currency of depositCurrencies) {
     push([t("rpGrandTotal"), currency, amountIn(deposits.totals.paid, currency) || 0, amountIn(deposits.totals.repair, currency) || 0,
@@ -116,8 +79,6 @@ export async function exportCostOverviewExcel({ overview, t, usdRate = null, rat
     costs.some((cost) => cost.currencyInferred) ? t("rpInferredNote") : "",
     overview.deposits.truncated ? t("rpDepositTruncatedNote") : "",
     t("rpDepositNote"),
-    t("rpOrderCostHint"),
-    rateText ? t("rpExcelRate", { rate: rateText }) : "",
   ].filter(Boolean);
   summaryRows.push([], [t("rpNotes")], ...notes.map((note) => [`• ${note}`]));
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
@@ -185,34 +146,11 @@ export async function exportCostOverviewExcel({ overview, t, usdRate = null, rat
     { label: t("rpShare"), value: (row) => row.share, width: 12 },
   ]);
 
-  // ---------- Giá vốn đơn hàng / theo container ----------
-  const orderSheet = table(orders, [
-    { label: t("rpOrder"), value: (row) => row.contract, width: 14 },
-    { label: t("supplier"), value: (row) => row.supplier, width: 30 },
-    { label: t("rpContainers"), value: (row) => row.containerCount || "", width: 10 },
-    { label: t("rpNetKgCol"), value: (row) => row.netKg || "", width: 14 },
-    ...moneyColumns(orders, t("rpGoodsIntl"), (row) => row.goods),
-    ...moneyColumns(orders, t("rpOrderFees"), (row) => row.orderFees),
-    ...moneyColumns(orders, t("rpContainerFees"), (row) => row.containerFees),
-    ...moneyColumns(orders, t("rpOrderTotal"), (row) => row.total),
-    { label: `${t("rpOrderTotal")} (VND, ${t("rpConverted")})`, value: (row) => toNumber(row.totalVnd), currency: "VND", width: 22 },
-    { label: `${t("rpAvgPerKg")} (VND/kg)`, value: (row) => toNumber(row.perKgVnd), currency: "VND", width: 18 },
-  ]);
-  const containerRows = orders.flatMap((order) => order.containers.map((item) => ({ ...item, contract: order.contract, supplier: order.supplier })));
-  const containerSheet = table(containerRows, [
-    { label: t("rpContainer"), value: (row) => row.container, width: 16 },
-    { label: t("rpOrder"), value: (row) => row.contract, width: 14 },
-    { label: t("supplier"), value: (row) => row.supplier, width: 30 },
-    ...moneyColumns(containerRows, t("rpContainerFees"), (row) => row.fees),
-  ]);
-
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, summarySheet, t("rpSheetSummary"));
   XLSX.utils.book_append_sheet(workbook, requestSheet, t("rpSheetRequests"));
   XLSX.utils.book_append_sheet(workbook, depositSheet, t("rpSheetDeposits"));
   XLSX.utils.book_append_sheet(workbook, feeSheet, t("rpSheetStructure"));
-  XLSX.utils.book_append_sheet(workbook, orderSheet, t("rpSheetOrders"));
-  XLSX.utils.book_append_sheet(workbook, containerSheet, t("rpSheetContainers"));
   const fileName = `Bao-cao-chi-phi-${month}.xlsx`;
   XLSX.writeFile(workbook, fileName);
   return fileName;

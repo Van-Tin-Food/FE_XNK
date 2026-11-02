@@ -11,31 +11,26 @@ import { recordActivity } from "@/services/activityLogApi";
 import { exportCostOverviewExcel } from "@/services/costStatisticsExcel";
 import { getCostOverview, type CostOverview } from "@/services/paymentCostApi";
 import {
-  COST_KINDS, currentMonth, daysBetween, groupByRequest, isMonth, isPurchaseCost, parseRate, shiftMonth, stageMoney, sumMoney, summarizeCosts,
-  summarizeDeposits, summarizeOrders, todayVn, withoutDeposits,
-  type CostKind, type CostState, type Money, type MonthlyCost, type OrderTotals, type RequestTotals,
+  COST_KINDS, currentMonth, daysBetween, groupByRequest, isMonth, shiftMonth, sumMoney, summarizeCosts, summarizeDeposits, todayVn,
+  withoutDeposits,
+  type CostKind, type CostState, type Money, type MonthlyCost, type RequestTotals,
 } from "@/utils/costStatistics";
 import { formatMoney } from "@/utils/paymentRequest";
 import { paginateItems } from "@/utils/pagination";
 
-// Báo cáo chi phí (chỉ admin: chức năng costReports chỉ admin có), 5 mục:
-// 1. Chỉ tiêu tổng hợp của kỳ: chi phí mua hàng (tiền hàng + vận chuyển & phí gắn đơn hàng), chi phí vận hành (khoản không
-//    gắn đơn hàng), đã thanh toán, cần thanh toán;
-// 2. Đề nghị thanh toán của kỳ — danh sách chọn bên trái, chi tiết khoản phí bên phải;
-// 3. Nợ phải thu: phí cược cont đã chi − phí sửa cont = nợ phải thu hãng tàu (tính đến hôm nay, hệ thống không quản lý thu
+// Báo cáo chi phí (quyền costReports: mặc định không role nào có, admin cấp riêng cho từng tài khoản), 3 mục:
+// 1. Đề nghị thanh toán của kỳ — danh sách chọn bên trái, chi tiết khoản phí bên phải;
+// 2. Nợ phải thu: phí cược cont đã chi − phí sửa cont = nợ phải thu hãng tàu (tính đến hôm nay, hệ thống không quản lý thu
 //    tiền);
-// 4. Cơ cấu chi phí theo khoản mục;
-// 5. Giá vốn đơn hàng (lũy kế): số cont, NET (kg), tiền hàng (thanh toán quốc tế), thuế & phí theo đơn, phí cont, giá vốn
-//    trung bình / kg — quy đổi VND theo tỷ giá USD/VND người xem nhập (trình duyệt nhớ).
-// Tiền cược container là khoản tạm ứng: không tính vào số liệu nào ngoài mục 3. Số liệu theo nguyên tệ (VND, USD riêng).
+// 3. Cơ cấu chi phí theo khoản mục.
+// Tiền cược container là khoản tạm ứng: không tính vào số liệu nào ngoài mục 2. Số liệu theo nguyên tệ (VND, USD riêng).
 // Một lần gọi BE (/payment-costs/overview); tổng hợp, lọc, xuất Excel làm ở trình duyệt.
 
 const DEFAULT_PAGE_SIZE = 10;
 const PREVIEW = 10;
-const RATE_STORAGE_KEY = "xnk.costReport.usdRate";
 const CARD = "rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]";
 const CONTROL = "h-10 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
-// Ô lọc trong các mục (tìm kiếm, trạng thái, tỷ giá): gọn hơn ô chọn kỳ ở đầu trang.
+// Ô lọc trong các mục (tìm kiếm, trạng thái): gọn hơn ô chọn kỳ ở đầu trang.
 const FILTER = "h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
 const BUTTON = "h-10 shrink-0 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800";
 const LINK_BUTTON = "text-sm font-medium text-brand-600 hover:underline dark:text-brand-400";
@@ -79,27 +74,7 @@ function Section({ index, title, hint, actions, children }: { index: number; tit
   );
 }
 
-/** Thẻ chỉ tiêu: dải màu bên trái, nhãn, số tiền, dòng phụ. */
-function KpiCard({ tone, icon, label, value, hint }: { tone: "brand" | "orange" | "success" | "warning"; icon: string; label: string; value: string; hint?: string }) {
-  const tones = {
-    brand: "border-l-brand-500 bg-brand-50/60 text-brand-600 dark:bg-brand-500/10 dark:text-brand-300",
-    orange: "border-l-orange-500 bg-orange-50/60 text-orange-600 dark:bg-orange-500/10 dark:text-orange-300",
-    success: "border-l-success-500 bg-success-50/60 text-success-600 dark:bg-success-500/10 dark:text-success-300",
-    warning: "border-l-warning-500 bg-warning-50/60 text-warning-600 dark:bg-warning-500/10 dark:text-warning-300",
-  }[tone];
-  return (
-    <div className={`${CARD} min-w-0 border-l-4 p-4 ${tones.split(" ")[0]}`}>
-      <div className="flex items-center gap-2">
-        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base ${tones.split(" ").slice(1).join(" ")}`} aria-hidden="true">{icon}</span>
-        <p className="min-w-0 text-[13px] font-medium text-gray-600 dark:text-gray-300">{label}</p>
-      </div>
-      <p className="mt-3 break-words text-base font-bold tabular-nums text-gray-900 dark:text-white sm:text-lg">{value}</p>
-      {hint && <p className="mt-1 break-words text-[11px] text-gray-500 dark:text-gray-400">{hint}</p>}
-    </div>
-  );
-}
-
-/** Ô số nhỏ (nhãn trên, giá trị dưới) trong thẻ đơn hàng / nợ phải thu. */
+/** Ô số nhỏ (nhãn trên, giá trị dưới) trong mục nợ phải thu. */
 function Stat({ label, value, strong = false, tone = "" }: { label: string; value: string; strong?: boolean; tone?: string }) {
   return (
     <div className="min-w-0">
@@ -127,24 +102,6 @@ export default function CostReportPage() {
   const [requestPageSize, setRequestPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [selectedRequest, setSelectedRequest] = useState<RequestTotals | null>(null);
   const [showAllDeposits, setShowAllDeposits] = useState(false);
-  const [orderQuery, setOrderQuery] = useState("");
-  const [orderPage, setOrderPage] = useState(1);
-  const [orderPageSize, setOrderPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [openOrders, setOpenOrders] = useState<Set<string>>(() => new Set());
-  // Tỷ giá USD/VND để quy đổi giá vốn: trình duyệt nhớ (chỉ là tiện ích của người xem, không lưu BE).
-  const [rateText, setRateText] = useState("");
-
-  // Đọc tỷ giá đã nhớ sau khi trang hiện (server không có localStorage — đọc lúc khởi tạo sẽ lệch HTML).
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      try {
-        setRateText(window.localStorage.getItem(RATE_STORAGE_KEY) || "");
-      } catch {
-        // Trình duyệt chặn localStorage: để trống, người xem nhập lại.
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   useEffect(() => {
     if (!canView || !isMonth(month)) return;
@@ -156,9 +113,7 @@ export default function CostReportPage() {
         .then((result) => {
           setData(result);
           setRequestPage(1);
-          setOrderPage(1);
           setSelectedRequest(null);
-          setOpenOrders(new Set());
           setShowAllDeposits(false);
         })
         .catch((loadError: unknown) => {
@@ -174,25 +129,11 @@ export default function CostReportPage() {
     };
   }, [canView, month, reloadKey, t]);
 
-  const changeRate = (value: string) => {
-    setRateText(value);
-    try {
-      window.localStorage.setItem(RATE_STORAGE_KEY, value);
-    } catch {
-      // Không lưu được (chế độ riêng tư...): vẫn dùng trong phiên này.
-    }
-  };
-
   // Tiền cược container không tính vào số liệu của kỳ (chỉ ở mục nợ phải thu).
   const costs = useMemo(() => withoutDeposits(data?.costs ?? []), [data]);
   const summary = useMemo(() => summarizeCosts(costs), [costs]);
-  // Chi phí mua hàng = tiền hàng + khoản gắn đơn hàng; chi phí vận hành = khoản không gắn đơn hàng.
-  const purchase = useMemo(() => summarizeCosts(costs.filter(isPurchaseCost)), [costs]);
-  const operating = useMemo(() => summarizeCosts(costs.filter((cost) => !isPurchaseCost(cost))), [costs]);
   const byRequest = useMemo(() => groupByRequest(costs), [costs]);
   const depositLedger = useMemo(() => summarizeDeposits(data?.deposits.rows ?? []), [data]);
-  const usdRate = useMemo(() => parseRate(rateText), [rateText]);
-  const orders = useMemo(() => summarizeOrders(data?.shipments ?? [], data?.shipmentCosts ?? [], usdRate), [data, usdRate]);
 
   if (!canView) {
     return <div className={`${CARD} p-8 text-center text-sm text-gray-600 dark:text-gray-300`}>{t("rpAdminOnly")}</div>;
@@ -203,22 +144,7 @@ export default function CostReportPage() {
   // Số âm (nợ phải thu khi phí sửa cont vượt tiền cược): formatMoney chỉ nhận số không âm, thêm dấu trừ ở đây.
   const moneyText = (total: string, currency: string) => (total.startsWith("-") ? `−${formatMoney(total.slice(1), currency, language)}` : formatMoney(total, currency, language));
   const money = (list: Money) => (list.length ? list.map((item) => moneyText(item.total, item.currency)).join(" + ") : "—");
-  const kg = (value: number) => new Intl.NumberFormat(language === "en" ? "en-US" : "vi-VN", { maximumFractionDigits: 3 }).format(value);
-  const pick = (items: typeof summary.costs, field: "total" | "base" | "tax") => sumMoney(items.map((item) => ({ currency: item.currency, total: item[field] })));
-  const both = (s: "settled" | "approved" | "pending" | "unsubmitted" | "unrequested") => {
-    const expense = stageMoney(summary.costs, s);
-    const purchases = stageMoney(summary.goods, s);
-    return { count: expense.count + purchases.count, total: sumMoney(expense.total, purchases.total) };
-  };
-  const settled = both("settled");
-  const outstandingParts = (["approved", "pending", "unsubmitted", "unrequested"] as const).map(both);
-  const outstanding = { count: outstandingParts.reduce((sum, item) => sum + item.count, 0), total: sumMoney(...outstandingParts.map((item) => item.total)) };
-  const countOf = (items: typeof summary.costs) => items.reduce((sum, item) => sum + item.count, 0);
-  const purchaseGoods = pick(purchase.goods, "total");
-  const purchaseFees = pick(purchase.costs, "total");
-  const purchaseTotal = sumMoney(purchaseGoods, purchaseFees);
-
-  // ---- Mục 2: đề nghị thanh toán (+ dòng "chưa lập đề nghị") ----
+  // ---- Mục 1: đề nghị thanh toán (+ dòng "chưa lập đề nghị") ----
   const looseRow: RequestTotals | null = byRequest.unrequested.count
     ? { requestId: "", content: t("rpUnrequestedRow"), requester: "", dueDate: "", state: "none", count: byRequest.unrequested.count, total: byRequest.unrequested.total, hiddenCount: 0, items: byRequest.unrequested.items }
     : null;
@@ -228,12 +154,6 @@ export default function CostReportPage() {
     .filter((item) => !requestTerm || [item.requestId, item.content, item.requester, ...item.items.map((cost) => `${cost.categoryName} ${cost.container} ${cost.contract} ${cost.note}`)]
       .join(" ").toLocaleLowerCase("vi").includes(requestTerm));
   const requestPageData = paginateItems<RequestTotals>(requestRows, requestPage, requestPageSize);
-  const toggle = (setter: typeof setOpenOrders, key: string) => setter((current) => {
-    const next = new Set(current);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    return next;
-  });
   const dueInfo = (item: RequestTotals) => {
     if (!item.dueDate || !["pending", "approved", "draft"].includes(item.state)) return null;
     const overdue = daysBetween(item.dueDate, today);
@@ -246,13 +166,6 @@ export default function CostReportPage() {
   const stateBadge = (state: CostState) => (
     <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${STATE_BADGE[state]}`}>{t(`rpState_${state}`)}</span>
   );
-  // ---- Mục 5: giá vốn đơn hàng ----
-  const orderTerm = orderQuery.trim().toLocaleLowerCase("vi");
-  const orderRows = orders.filter((item) => !orderTerm || `${item.contract} ${item.supplier} ${item.containers.map((c) => c.container).join(" ")}`.toLocaleLowerCase("vi").includes(orderTerm));
-  const orderPageData = paginateItems<OrderTotals>(orderRows, orderPage, orderPageSize);
-  const hasForeign = orders.some((item) => item.total.some((entry) => entry.currency !== "VND"));
-  const rateInvalid = rateText.trim() !== "" && usdRate === null;
-
   const depositItems = showAllDeposits ? depositLedger.items : depositLedger.items.slice(0, PREVIEW);
   const notes = [
     t("rpBasisNote"),
@@ -270,7 +183,6 @@ export default function CostReportPage() {
     setMonth(value);
     setRequestFilter("");
     setRequestQuery("");
-    setOrderQuery("");
   };
 
   const exportExcel = async () => {
@@ -278,7 +190,7 @@ export default function CostReportPage() {
     if (costs.length === 0 && depositLedger.items.length === 0) return notify(t("exportExcelEmpty"), "warning");
     setExporting(true);
     try {
-      const fileName = await exportCostOverviewExcel({ overview: data, t, usdRate, rateText: usdRate ? rateText.trim() : "" });
+      const fileName = await exportCostOverviewExcel({ overview: data, t });
       notify(t("rpExported", { file: fileName }), "success");
       recordActivity(user, { action: "EXPORT_EXCEL", location: "CostReport", detail: `Báo cáo chi phí tháng ${monthLabel(month)}; ${costs.length} khoản` });
     } catch (exportError) {
@@ -375,16 +287,7 @@ export default function CostReportPage() {
         <div className={`${CARD} flex justify-center py-16`}><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>
       ) : (
         <div className={`space-y-5 ${loading ? "opacity-60 transition-opacity" : ""}`} aria-busy={loading}>
-          {/* 1. Chỉ tiêu tổng hợp */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <KpiCard tone="brand" icon="📦" label={t("rpPurchases")} value={purchaseTotal.length ? money(purchaseTotal) : purchase.hiddenCount ? t("rpHidden") : "—"}
-              hint={t("rpPurchasesHint", { goods: purchase.goods.length ? money(purchaseGoods) : purchase.hiddenCount ? t("rpHidden") : "—", fees: money(purchaseFees), count: countOf(purchase.goods) + countOf(purchase.costs) })} />
-            <KpiCard tone="orange" icon="🏢" label={t("rpExpense")} value={money(pick(operating.costs, "total"))} hint={t("rpExpenseHint", { base: money(pick(operating.costs, "base")), tax: money(pick(operating.costs, "tax")), count: countOf(operating.costs) })} />
-            <KpiCard tone="success" icon="✅" label={t("rpSettled")} value={money(settled.total)} hint={t("rpCountLine", { count: settled.count })} />
-            <KpiCard tone="warning" icon="⏳" label={t("rpOutstanding")} value={money(outstanding.total)} hint={t("rpOutstandingHint", { count: outstanding.count })} />
-          </div>
-
-          {/* 2. Đề nghị thanh toán của kỳ, chi tiết khoản phí */}
+          {/* 1. Đề nghị thanh toán của kỳ, chi tiết khoản phí */}
           <Section index={1} title={`${t("rpRequests", { month: monthLabel(month) })} (${byRequest.requests.length})`} hint={t("rpRequestsHint")} actions={(
             <div className="flex flex-col gap-2 sm:flex-row">
               <input type="search" value={requestQuery} onChange={(event) => { setRequestQuery(event.target.value); setRequestPage(1); setSelectedRequest(null); }}
@@ -431,7 +334,7 @@ export default function CostReportPage() {
             )}
           </Section>
 
-          {/* 3. Nợ phải thu: phí cược cont − phí sửa cont */}
+          {/* 2. Nợ phải thu: phí cược cont − phí sửa cont */}
           <Section index={2} title={t("rpReceivableTitle", { date: formatDueDate(data.deposits.asOf || today) })} hint={t("rpReceivableSectionHint")}>
             <div className="p-4 sm:p-5">
               <div className="grid grid-cols-1 items-stretch gap-2 sm:grid-cols-[1fr_auto_1fr_auto_1fr]">
@@ -488,7 +391,7 @@ export default function CostReportPage() {
             )}
           </Section>
 
-          {/* 4. Cơ cấu chi phí theo khoản mục */}
+          {/* 3. Cơ cấu chi phí theo khoản mục */}
           <Section index={3} title={t("rpStructure")} hint={t("rpStructureHint")}>
             {summary.byFee.length === 0 ? empty : (
               <div className="grid grid-cols-1 divide-y divide-gray-100 dark:divide-gray-800 xl:grid-cols-2 xl:divide-x xl:divide-y-0">
@@ -525,88 +428,6 @@ export default function CostReportPage() {
                   );
                 })}
               </div>
-            )}
-          </Section>
-
-          {/* 5. Giá vốn đơn hàng */}
-          <Section index={4} title={t("rpOrderCost")} hint={t("rpOrderCostHint")} actions={(
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
-              <label className="block min-w-0 sm:w-36">
-                <span className="sr-only">{t("rpUsdRate")}</span>
-                <input type="text" inputMode="decimal" value={rateText} onChange={(event) => changeRate(event.target.value)} placeholder={t("rpUsdRatePlaceholder")} aria-label={t("rpUsdRate")}
-                  className={`${FILTER} ${rateInvalid ? "border-error-400" : ""}`} />
-                {rateInvalid && <span className="mt-1 block text-xs text-error-600">{t("rpUsdRateInvalid")}</span>}
-              </label>
-              <input type="search" value={orderQuery} onChange={(event) => { setOrderQuery(event.target.value); setOrderPage(1); }}
-                placeholder={t("rpOrderSearch")} aria-label={t("rpOrderSearch")} className={`${FILTER} sm:w-48`} />
-            </div>
-          )}>
-            {hasForeign && !usdRate && <p className="border-b border-warning-100 bg-warning-50 px-4 py-2.5 text-xs text-warning-700 dark:border-warning-500/20 dark:bg-warning-500/10 dark:text-warning-300 sm:px-5">{t("rpUsdRateMissing")}</p>}
-            {orderPageData.total === 0 ? empty : (
-              <>
-                <div className="grid grid-cols-1 gap-4 p-4 sm:p-5 2xl:grid-cols-2">
-                  {orderPageData.items.map((order) => {
-                    const open = openOrders.has(order.contract);
-                    return (
-                      <article key={order.contract} className="min-w-0 rounded-xl border border-gray-200 dark:border-gray-700">
-                        <div className="flex flex-col gap-2 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0">
-                            <p className="font-mono text-base font-bold text-gray-900 dark:text-white">{order.contract}</p>
-                            {order.supplier && <p className="truncate text-xs text-gray-500" title={order.supplier}>{order.supplier}</p>}
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">{t("rpContainerCount", { count: order.containerCount })}</span>
-                            <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">{order.netKg > 0 ? t("rpNetKg", { kg: kg(order.netKg) }) : t("rpNoNet")}</span>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 gap-3 p-4 xsm:grid-cols-3">
-                          <Stat label={t("rpGoodsIntl")} value={order.hidden && !order.goods.length ? t("rpHidden") : money(order.goods)} tone="text-brand-700 dark:text-brand-300" />
-                          <Stat label={t("rpOrderFees")} value={money(order.orderFees)} tone="text-orange-700 dark:text-orange-300" />
-                          <Stat label={t("rpContainerFees")} value={money(order.containerFees)} tone="text-theme-purple-500" />
-                        </div>
-                        <div className="mx-4 mb-4 grid grid-cols-1 gap-3 rounded-xl bg-gray-50 p-3 dark:bg-white/[0.03] sm:grid-cols-2">
-                          <div>
-                            <Stat label={t("rpOrderTotal")} value={order.totalVnd !== null ? formatMoney(order.totalVnd, "VND", language) : money(order.total)} strong />
-                            <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t("rpOrderFormula")}</p>
-                          </div>
-                          <div className="min-w-0 rounded-lg bg-success-50 p-2.5 dark:bg-success-500/10">
-                            <p className="text-xs font-medium text-success-700 dark:text-success-300">{t("rpAvgPerKg")}</p>
-                            <p className="mt-0.5 break-words text-lg font-bold tabular-nums text-success-700 dark:text-success-300">
-                              {order.perKgVnd !== null ? `${formatMoney(order.perKgVnd, "VND", language)}/kg` : "—"}
-                            </p>
-                            <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t("rpOrderTotal")} (VND) ÷ NET (kg)</p>
-                            {order.perKgVnd === null && <p className="mt-1 text-xs text-gray-500">{order.netKg <= 0 ? t("rpAvgNeedsNet") : t("rpAvgNeedsRate")}</p>}
-                          </div>
-                        </div>
-                        {order.containers.length > 0 && (
-                          <div className="border-t border-gray-100 dark:border-gray-800">
-                            <button type="button" onClick={() => toggle(setOpenOrders, order.contract)} aria-expanded={open}
-                              className="flex w-full items-center justify-between px-4 py-2.5 text-sm font-medium text-brand-600 hover:bg-gray-50 dark:text-brand-400 dark:hover:bg-white/[0.02]">
-                              <span>{t("rpContainerDetail", { count: order.containers.length })}</span>
-                              <span className={`transition-transform ${open ? "rotate-90" : ""}`} aria-hidden="true">›</span>
-                            </button>
-                            {open && (
-                              <>
-                                <p className="border-t border-gray-100 bg-gray-50 px-4 py-2 text-xs leading-relaxed text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">{t("rpContainerDetailHint")}</p>
-                                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                                  {order.containers.map((item) => (
-                                    <li key={item.container} className="flex items-baseline justify-between gap-3 px-4 py-2 text-sm">
-                                      <span className="min-w-0 break-all font-mono text-gray-700 dark:text-gray-300">{item.container}</span>
-                                      <span className="shrink-0 tabular-nums text-gray-900 dark:text-white">{money(item.fees)}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-                <PaginationControls page={orderPageData.safePage} totalPages={orderPageData.totalPages} pageSize={orderPageSize} totalItems={orderPageData.total} from={orderPageData.from} to={orderPageData.to}
-                  summaryKey="showingRecords" idPrefix="cost-orders" onPageChange={setOrderPage} onPageSizeChange={(value) => { setOrderPageSize(value); setOrderPage(1); }} />
-              </>
             )}
           </Section>
 
