@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  agePayables, agingBucket, costState, currentMonth, groupByRequest, isMonth, settlementStage, shiftMonth, stageMoney, summarizeCosts,
-  summarizeShipments, todayVn, vatCents,
+  costState, currentMonth, daysBetween, groupByRequest, isMonth, isPurchaseCost, parseRate, settlementStage, shiftMonth, stageMoney, summarizeCosts,
+  summarizeDeposits, summarizeOrders, todayVn, vatCents, fromCents, toCents, withoutDeposits,
 } from "../src/utils/costStatistics.ts";
 
 const cost = (overrides) => ({
   id: "c", createdAt: "2026-10-05T03:00:00Z", contract: "", container: "", amount: "100.00", vat: "", note: "",
   type: "van_hanh", code: "VH", categoryName: "Phí internet", flow: "xanh", userName: "A",
   account: "", requestId: "", requestStatus: null, requestSent: false, requestContent: "", requestDue: "", requestBy: "",
-  currency: "VND", currencyInferred: true, kind: "operating",
+  currency: "VND", currencyInferred: true, kind: "operating", special: "",
   ...overrides,
 });
 
@@ -83,59 +83,52 @@ test("theo đề nghị: gom các khoản của kỳ theo đề nghị (mới nh
     ["DNTT-9", "approved", 2, [{ currency: "VND", total: "150.50" }], 0],
   ]);
   assert.equal(requests[1].content, "Cước tháng 9");
-  assert.deepEqual(unrequested, { count: 2, total: [{ currency: "VND", total: "30.00" }, { currency: "USD", total: "2.00" }] });
+  assert.deepEqual(requests[1].items.map((item) => item.id), ["1", "2"], "chi tiết khoản phí bên trong đề nghị");
+  assert.deepEqual([unrequested.count, unrequested.total, unrequested.items.map((item) => item.id)],
+    [2, [{ currency: "VND", total: "30.00" }, { currency: "USD", total: "2.00" }], ["5", "6"]]);
 });
 
-test("giá vốn nhập khẩu theo lô / container: chi phí trực tiếp + chi phí chung phân bổ; hàng mua phân bổ đều; container lệch dữ liệu vẫn có", () => {
-  const { lots, containers } = summarizeShipments(
-    [{ contract: "26010", supplier: "NCC A", containers: ["C1", "C2"] }, { contract: "26011", supplier: "NCC B", containers: [] }],
-    [
-      { contract: "26010", container: "C1", kind: "operating", currency: "VND", count: 2, amount: "1000.00" },
-      { contract: "26010", container: "", kind: "incident", currency: "VND", count: 1, amount: "301.00" },
-      { contract: "26010", container: "C3", kind: "operating", currency: "VND", count: 1, amount: "50.00" },
-      { contract: "26010", container: "", kind: "goods", currency: "USD", count: 1, amount: "9000.00" },
-      { contract: "26011", container: "", kind: "operating", currency: "VND", count: 1, amount: "70.00" },
-      { contract: "26011", container: "", kind: "goods", currency: "USD", count: 1, amount: null },
-    ],
-  );
-  assert.deepEqual(lots.map((item) => [item.contract, item.containerCount, item.cost, item.costPerContainer, item.goods, item.goodsPerContainer, item.hidden]), [
-    ["26010", 3, [{ currency: "VND", total: "1351.00" }], [{ currency: "VND", total: "450.00" }], [{ currency: "USD", total: "9000.00" }], [{ currency: "USD", total: "3000.00" }], false],
-    ["26011", 0, [{ currency: "VND", total: "70.00" }], [], [], [], true],
+test("giá vốn đơn hàng: tiền hàng + thuế & phí theo đơn + phí cont; quy đổi VND theo tỷ giá, giá vốn trung bình / kg; không tính tiền cược", () => {
+  const shipments = [
+    { contract: "26010", supplier: "NCC A", containers: ["C1", "C2"], netWeight: "50000" },
+    { contract: "26011", supplier: "NCC B", containers: [], netWeight: "0" },
+  ];
+  const costs = [
+    { contract: "26010", container: "", kind: "goods", currency: "USD", count: 2, amount: "40000.00" },
+    { contract: "26010", container: "", kind: "operating", currency: "VND", count: 1, amount: "150000000.00" },
+    { contract: "26010", container: "C1", kind: "operating", currency: "VND", count: 2, amount: "3000000.00" },
+    { contract: "26010", container: "C3", kind: "incident", currency: "VND", count: 1, amount: "500000.00" },
+    { contract: "26010", container: "C2", kind: "deposit", currency: "VND", count: 1, amount: "2000000.00" },
+    { contract: "26011", container: "", kind: "operating", currency: "VND", count: 1, amount: "70000.00" },
+    { contract: "26011", container: "", kind: "goods", currency: "USD", count: 1, amount: null },
+  ];
+  const noRate = summarizeOrders(shipments, costs, null);
+  const order = noRate.find((item) => item.contract === "26010");
+  assert.deepEqual([order.containerCount, order.netKg, order.goods, order.orderFees, order.containerFees], [
+    3, 50000, [{ currency: "USD", total: "40000.00" }], [{ currency: "VND", total: "150000000.00" }], [{ currency: "VND", total: "3500000.00" }],
+  ], "container lệch dữ liệu (C3) vẫn tính; tiền cược (C2) không tính");
+  assert.deepEqual(order.total, [{ currency: "VND", total: "153500000.00" }, { currency: "USD", total: "40000.00" }]);
+  assert.deepEqual(order.containers, [
+    { container: "C1", fees: [{ currency: "VND", total: "3000000.00" }] },
+    { container: "C2", fees: [] },
+    { container: "C3", fees: [{ currency: "VND", total: "500000.00" }] },
   ]);
-  assert.deepEqual(containers.map((item) => [item.container, item.direct, item.shared, item.total]), [
-    ["C1", [{ currency: "VND", total: "1000.00" }], [{ currency: "VND", total: "100.00" }], [{ currency: "VND", total: "1100.00" }]],
-    ["C2", [], [{ currency: "VND", total: "100.00" }], [{ currency: "VND", total: "100.00" }]],
-    ["C3", [{ currency: "VND", total: "50.00" }], [{ currency: "VND", total: "100.00" }], [{ currency: "VND", total: "150.00" }]],
-  ].sort((a, b) => Number(b[3][0].total) - Number(a[3][0].total)));
-  assert.deepEqual(containers.find((item) => item.container === "C2").goodsShare, [{ currency: "USD", total: "3000.00" }]);
-  assert.deepEqual(lots[0].landed, [{ currency: "VND", total: "1351.00" }, { currency: "USD", total: "9000.00" }], "giá vốn = hàng mua + chi phí, theo nguyên tệ");
-  assert.deepEqual(lots[0].landedPerContainer, [{ currency: "VND", total: "450.00" }, { currency: "USD", total: "3000.00" }]);
-  assert.deepEqual(lots[1].landedPerContainer, [], "lô chưa có container: không tính bình quân");
-  assert.deepEqual(containers.find((item) => item.container === "C2").landed, [{ currency: "VND", total: "100.00" }, { currency: "USD", total: "3000.00" }]);
+  assert.deepEqual([order.totalVnd, order.perKgVnd], [null, null], "có USD mà chưa nhập tỷ giá: chưa quy đổi");
+
+  const withRate = summarizeOrders(shipments, costs, parseRate("25.400"));
+  const converted = withRate.find((item) => item.contract === "26010");
+  assert.equal(converted.totalVnd, "1169500000.00", "40.000 USD × 25.400 + 153.500.000 VND");
+  assert.equal(converted.perKgVnd, "23390", "1.169.500.000 ÷ 50.000 kg");
+  const hidden = withRate.find((item) => item.contract === "26011");
+  assert.deepEqual([hidden.hidden, hidden.totalVnd, hidden.perKgVnd, hidden.containerCount], [true, null, null, 0], "tiền hàng bị ẩn: không quy đổi");
+  assert.deepEqual(withRate.map((item) => item.contract), ["26010", "26011"], "sắp xếp tổng giá vốn giảm dần");
 });
 
-test("tuổi nợ phải trả: nhóm theo hạn thanh toán so với ngày báo cáo; danh sách cần ưu tiên quá hạn lâu nhất trước", () => {
-  const today = "2026-10-31";
-  assert.deepEqual(["2026-11-08", "2026-11-07", "2026-10-31", "2026-10-30", "2026-10-01", "2026-09-30", "2026-08-02", "2026-08-01", ""].map((due) => agingBucket(due, today)),
-    ["notDue", "dueSoon", "dueSoon", "overdue30", "overdue30", "overdue60", "overdue90", "overdueOver90", "noDue"]);
-  const payable = (requestId, dueDate, amount, currency = "VND") => ({ requestId, content: "", requester: "A", state: "approved", currency, amount, dueDate, requestDate: "2026-09-01" });
-  const result = agePayables([
-    payable("DNTT-1", "2026-10-20", "100.00"),
-    payable("DNTT-2", "2026-07-01", "200.00"),
-    payable("DNTT-3", "2026-11-03", "5.00", "USD"),
-    payable("DNTT-4", "", null),
-    payable("DNTT-5", "2026-12-31", "1.00"),
-  ], today);
-  assert.deepEqual(result.rows.filter((row) => row.count).map((row) => [row.bucket, row.count, row.total, row.hiddenCount]), [
-    ["notDue", 1, [{ currency: "VND", total: "1.00" }], 0],
-    ["dueSoon", 1, [{ currency: "USD", total: "5.00" }], 0],
-    ["overdue30", 1, [{ currency: "VND", total: "100.00" }], 0],
-    ["overdueOver90", 1, [{ currency: "VND", total: "200.00" }], 0],
-    ["noDue", 1, [], 1],
-  ]);
-  assert.equal(result.rows.length, 7, "đủ mọi nhóm, kể cả nhóm rỗng");
-  assert.deepEqual(result.total, [{ currency: "VND", total: "301.00" }, { currency: "USD", total: "5.00" }]);
-  assert.deepEqual(result.attention.map((item) => [item.requestId, item.daysOverdue]), [["DNTT-2", 122], ["DNTT-1", 11], ["DNTT-3", -3]]);
+test("tỷ giá USD/VND nhập tay: phân tách nghìn hoặc thập phân; không hợp lệ thì null", () => {
+  assert.deepEqual(["25.400", "25,400", "25400", "25400,5", "25400.25", " 25 400 "].map((value) => String(parseRate(value))),
+    ["2540000", "2540000", "2540000", "2540050", "2540025", "2540000"]);
+  assert.deepEqual(["", "0", "abc", "-1", "25.4.0"].map(parseRate), [null, null, null, null, null]);
+  assert.equal(daysBetween("2026-10-01", "2026-10-31"), 30);
 });
 
 test("ngày tháng theo giờ Việt Nam, lùi / tiến qua năm", () => {
@@ -145,4 +138,51 @@ test("ngày tháng theo giờ Việt Nam, lùi / tiến qua năm", () => {
   assert.equal(shiftMonth("2026-12", 1), "2027-01");
   assert.equal(isMonth("2026-10"), true);
   assert.equal(isMonth("2026-13"), false);
+});
+
+test("tiền cược container: tách khỏi chi phí / hàng mua, không vào giá vốn; phí sửa cont chưa lập đề nghị = đã cấn trừ", () => {
+  const summary = summarizeCosts([
+    cost({ id: "1", amount: "1000.00", requestId: "DNTT-1", requestStatus: 3 }),
+    cost({ id: "2", amount: "2000000.00", kind: "deposit", special: "cuoc_cont", code: "CONT", categoryName: "Phí cược cont", requestId: "DNTT-2", requestStatus: 3 }),
+    cost({ id: "3", amount: "350000.00", special: "sua_cont", code: "CONT", categoryName: "Phí sửa cont" }),
+  ]);
+  assert.deepEqual(summary.costs.map((item) => [item.currency, item.count, item.total]), [["VND", 2, "351000.00"]], "phí sửa cont là chi phí; tiền cược không");
+  assert.deepEqual(summary.deposits.map((item) => [item.currency, item.count, item.total, item.stages.settled.total]), [["VND", 1, "2000000.00", "2000000.00"]]);
+  assert.equal(summary.costs[0].stages.settled.total, "351000.00", "phí sửa cont chưa lập đề nghị tính là đã thanh toán (trừ vào cược)");
+  assert.equal(summary.costs[0].stages.unrequested.count, 0);
+  assert.deepEqual(withoutDeposits([cost({ id: "a" }), cost({ id: "b", kind: "deposit" }), cost({ id: "c", special: "sua_cont" })]).map((item) => item.id), ["a", "c"],
+    "báo cáo bỏ tiền cược khỏi mọi số liệu của kỳ, giữ phí sửa cont");
+  const depositFee = summary.byFee.find((fee) => fee.kind === "deposit");
+  assert.deepEqual([depositFee.name, depositFee.share], ["Phí cược cont", 100], "tỷ trọng tính trong nhóm tiền cược");
+
+});
+
+test("công nợ tiền cược theo container: phải thu = cược đã chi − phí sửa cont; cược chưa chi tách riêng; âm khi phí sửa vượt cược", () => {
+  const row = (overrides) => ({ contract: "26010", container: "TCLU1", special: "cuoc_cont", currency: "VND", paid: true, count: 1, amount: "2000000.00", firstDate: "2026-09-02", ...overrides });
+  const { items, totals } = summarizeDeposits([
+    row({}),
+    row({ special: "sua_cont", paid: false, amount: "350000.00", firstDate: "2026-10-01" }),
+    row({ container: "TCLU2", amount: "1000000.00", paid: false, firstDate: "2026-10-03" }),
+    row({ container: "TCLU3", amount: "500000.00" }),
+    row({ container: "TCLU3", special: "sua_cont", paid: false, amount: "800000.00" }),
+    row({ container: "MSKU9", currency: "USD", amount: "150.00" }),
+  ]);
+  assert.deepEqual(items.map((item) => [item.container, item.currency, item.paid, item.unpaid, item.repair, item.receivable, item.since]), [
+    ["TCLU1", "VND", "2000000.00", "0.00", "350000.00", "1650000.00", "2026-09-02"],
+    ["TCLU2", "VND", "0.00", "1000000.00", "0.00", "0.00", "2026-10-03"],
+    ["TCLU3", "VND", "500000.00", "0.00", "800000.00", "-300000.00", "2026-09-02"],
+    ["MSKU9", "USD", "150.00", "0.00", "0.00", "150.00", "2026-09-02"],
+  ]);
+  assert.deepEqual(totals.receivable, [{ currency: "VND", total: "1350000.00" }, { currency: "USD", total: "150.00" }]);
+  assert.deepEqual(totals.unpaid, [{ currency: "VND", total: "1000000.00" }]);
+  assert.deepEqual([fromCents(-30050n), toCents("-300.50"), toCents("12.3")], ["-300.50", -30050n, 1230n], "số âm");
+});
+
+test("chi phí mua hàng = tiền hàng + khoản gắn đơn hàng (hợp đồng / container); chi phí vận hành = khoản không gắn đơn", () => {
+  assert.deepEqual([
+    cost({ kind: "goods", contract: "26010", code: "HD" }),
+    cost({ contract: "26010", categoryName: "Thuế nhập khẩu" }),
+    cost({ container: "TCLU1", categoryName: "Phí nâng hạ" }),
+    cost({ categoryName: "Tiền điện" }),
+  ].map(isPurchaseCost), [true, true, true, false]);
 });

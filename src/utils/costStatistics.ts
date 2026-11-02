@@ -1,13 +1,13 @@
-// Số liệu Báo cáo chi phí & công nợ phải trả + file Excel: cộng tiền theo xu (BigInt, không sai số), không bao giờ cộng
-// VND với USD (báo cáo theo nguyên tệ, không quy đổi tỷ giá).
-// - Chỉ tiêu tổng hợp của kỳ: chi phí hoạt động (vận hành + phát sinh, tách giá trị chưa thuế / thuế GTGT) tách khỏi giá
-//   trị hàng mua (cọc / còn lại = tiền hàng).
-// - Tình hình thanh toán các khoản phát sinh trong kỳ theo giai đoạn: đã thanh toán / đã phê duyệt chờ chi / chờ phê duyệt /
-//   chưa trình duyệt / chưa lập đề nghị.
-// - Cơ cấu chi phí theo khoản mục (tài khoản hạch toán, tỷ trọng); bảng kê đề nghị thanh toán.
-// - Giá vốn nhập khẩu (landed cost) theo lô hàng / container: chi phí lũy kế của lô; chi phí chung của lô (không gắn
-//   container) và trị giá hàng mua phân bổ đều cho số container.
-// - Tuổi nợ phải trả theo hạn thanh toán của đề nghị chưa chi (tính đến hôm nay).
+// Số liệu Báo cáo chi phí + file Excel: cộng tiền theo xu (BigInt, không sai số), không cộng VND với USD (theo nguyên tệ);
+// chỉ giá vốn đơn hàng quy đổi VND khi người xem nhập tỷ giá USD/VND.
+// - Chỉ tiêu tổng hợp của kỳ: chi phí mua hàng (cọc / còn lại = tiền hàng), chi phí vận hành (vận hành + phát sinh, tách giá
+//   trị chưa thuế / thuế GTGT), đã thanh toán, cần thanh toán.
+// - Đề nghị thanh toán của kỳ kèm từng khoản phí bên trong; cơ cấu chi phí theo khoản mục (tài khoản hạch toán, tỷ trọng).
+// - Giá vốn đơn hàng (lũy kế): tiền hàng + thuế & phí theo đơn + phí cont, giá vốn trung bình / kg (NET).
+// - Tiền cược container (BE nhận theo tên khoản phí — be/src/config/containerDepositFees.js): khoản ký cược / tạm ứng, hãng
+//   tàu hoàn lại khi trả cont — tách khỏi chi phí và giá vốn; công nợ tiền cược (phải thu hãng tàu) theo container = cược đã
+//   chi − phí sửa cont (phí sửa cont: chi phí thật, tính vào giá vốn; chưa vào đề nghị = đã cấn trừ vào tiền cược). Hệ thống
+//   không quản lý thu tiền nên công nợ này không tự giảm khi hãng tàu hoàn tiền.
 // Hàm thuần, không import (test chạy thẳng).
 
 export type CostState = "none" | "draft" | "pending" | "rejected" | "approved" | "paid" | "completed" | "cancelled";
@@ -16,12 +16,17 @@ export type CostState = "none" | "draft" | "pending" | "rejected" | "approved" |
  * chi; pending = chờ phê duyệt; unsubmitted = chưa trình duyệt (nháp / không duyệt); unrequested = chưa lập đề nghị.
  */
 export type SettlementStage = "settled" | "approved" | "pending" | "unsubmitted" | "unrequested";
-/** operating = chi phí vận hành / logistics; incident = phát sinh; goods = tiền hàng (cọc / còn lại). */
-export type CostKind = "operating" | "incident" | "goods";
+/**
+ * operating = chi phí vận hành / logistics; incident = phát sinh; goods = tiền hàng (cọc / còn lại); deposit = tiền cược
+ * container (ký cược / tạm ứng, không phải chi phí).
+ */
+export type CostKind = "operating" | "incident" | "goods" | "deposit";
+/** Khoản đặc biệt (BE nhận theo tên khoản phí): cuoc_cont = tiền cược container; sua_cont = phí sửa cont trừ vào cược. */
+export type CostSpecial = "" | "cuoc_cont" | "sua_cont";
 
 export const COST_STATES: readonly CostState[] = ["none", "draft", "pending", "rejected", "approved", "paid", "completed", "cancelled"];
 export const SETTLEMENT_STAGES: readonly SettlementStage[] = ["settled", "approved", "pending", "unsubmitted", "unrequested"];
-export const COST_KINDS: readonly CostKind[] = ["operating", "incident", "goods"];
+export const COST_KINDS: readonly CostKind[] = ["operating", "incident", "goods", "deposit"];
 const CURRENCY_ORDER = ["VND", "USD"];
 
 export interface MonthlyCost {
@@ -49,13 +54,16 @@ export interface MonthlyCost {
   currency: string;
   currencyInferred: boolean;
   kind: CostKind;
+  special: CostSpecial;
 }
 
-/** Lô hàng (hợp đồng) có chi phí trong kỳ. */
+/** Đơn hàng (hợp đồng) có chi phí trong kỳ. */
 export interface ShipmentInfo {
   contract: string;
   supplier: string;
   containers: string[];
+  /** Tổng NET (kg) trong chi tiết hợp đồng (chuỗi số, "0" = chưa có). */
+  netWeight: string;
 }
 
 /** Chi phí lũy kế của lô theo container × nhóm × loại tiền; container rỗng = chi phí chung của lô. */
@@ -108,6 +116,8 @@ export interface CostSummary {
   costs: Totals[];
   /** Giá trị hàng mua (tiền hàng) theo loại tiền. */
   goods: Totals[];
+  /** Tiền cược container (ký cược / tạm ứng) theo loại tiền — không phải chi phí. */
+  deposits: Totals[];
   byFee: FeeTotals[];
   /** Khoản thuộc đề nghị đã hủy (không tính). */
   cancelledCount: number;
@@ -119,19 +129,16 @@ const HUNDRED = BigInt(100);
 const ZERO = BigInt(0);
 
 export function toCents(value: string | null | undefined): bigint {
-  const match = /^(\d+)(?:\.(\d{1,2})\d*)?$/.exec(String(value ?? "").trim());
-  return match ? BigInt(match[1]) * HUNDRED + BigInt((match[2] || "").padEnd(2, "0")) : ZERO;
+  // Nhận cả số âm (công nợ tiền cược âm khi phí sửa cont vượt tiền cược).
+  const match = /^(-?)(\d+)(?:\.(\d{1,2})\d*)?$/.exec(String(value ?? "").trim());
+  if (!match) return ZERO;
+  const cents = BigInt(match[2]) * HUNDRED + BigInt((match[3] || "").padEnd(2, "0"));
+  return match[1] ? -cents : cents;
 }
 
 export function fromCents(cents: bigint): string {
-  return `${cents / HUNDRED}.${(cents % HUNDRED).toString().padStart(2, "0")}`;
-}
-
-/** Chia làm tròn: VND tới đồng, loại tiền khác tới xu. */
-function divideRound(cents: bigint, by: number, currency: string): bigint {
-  const unit = currency === "VND" ? HUNDRED : BigInt(1);
-  const divisor = BigInt(by) * unit;
-  return ((cents * BigInt(2) + divisor) / (divisor * BigInt(2))) * unit;
+  const abs = cents < ZERO ? -cents : cents;
+  return `${cents < ZERO ? "-" : ""}${abs / HUNDRED}.${(abs % HUNDRED).toString().padStart(2, "0")}`;
 }
 
 /** Thuế GTGT trong số tiền đã gồm VAT (cùng cách làm tròn với splitVat ở utils/paymentRequest: VND tròn đồng). */
@@ -153,6 +160,15 @@ export function costState(cost: Pick<MonthlyCost, "requestId" | "requestStatus" 
   if (cost.requestStatus === 3) return "paid";
   if (cost.requestStatus === 1) return "approved";
   return cost.requestSent ? "pending" : "draft";
+}
+
+/**
+ * Giai đoạn thanh toán của một khoản: như settlementStage, riêng phí sửa cont chưa vào đề nghị = đã thanh toán (hãng tàu đã
+ * trừ vào tiền cược, không chi tiền).
+ */
+export function costStage(cost: Pick<MonthlyCost, "requestId" | "requestStatus" | "requestSent" | "special">): SettlementStage | null {
+  const state = costState(cost);
+  return cost.special === "sua_cont" && state === "none" ? "settled" : settlementStage(state);
 }
 
 /** Giai đoạn thanh toán; đề nghị đã hủy = null (không tính). */
@@ -204,11 +220,13 @@ function percent(part: bigint, whole: bigint): number {
 export function summarizeCosts(costs: MonthlyCost[]): CostSummary {
   const costTotals = new Map<string, Bucket>();
   const goodsTotals = new Map<string, Bucket>();
+  const depositTotals = new Map<string, Bucket>();
+  const totalsOf = (kind: CostKind) => (kind === "goods" ? goodsTotals : kind === "deposit" ? depositTotals : costTotals);
   const fees = new Map<string, Omit<FeeTotals, "total" | "share"> & { cents: bigint }>();
   let cancelledCount = 0;
   let hiddenCount = 0;
   for (const cost of costs) {
-    const stage = settlementStage(costState(cost));
+    const stage = costStage(cost);
     if (!stage) {
       cancelledCount += 1;
       continue;
@@ -218,7 +236,7 @@ export function summarizeCosts(costs: MonthlyCost[]): CostSummary {
       continue;
     }
     const cents = toCents(cost.amount);
-    const target = cost.kind === "goods" ? goodsTotals : costTotals;
+    const target = totalsOf(cost.kind);
     const bucket = target.get(cost.currency) || emptyBucket();
     bucket.count += 1;
     bucket.total += cents;
@@ -233,10 +251,11 @@ export function summarizeCosts(costs: MonthlyCost[]): CostSummary {
     if (!fee.account && cost.account) fee.account = cost.account;
     fees.set(key, fee);
   }
-  const groupTotal = (fee: { kind: CostKind; currency: string }) => (fee.kind === "goods" ? goodsTotals : costTotals).get(fee.currency)?.total ?? ZERO;
+  const groupTotal = (fee: { kind: CostKind; currency: string }) => totalsOf(fee.kind).get(fee.currency)?.total ?? ZERO;
   return {
     costs: bucketList(costTotals),
     goods: bucketList(goodsTotals),
+    deposits: bucketList(depositTotals),
     byFee: [...fees.values()]
       .sort((a, b) => compareKind(a.kind, b.kind) || compareCurrency(a.currency, b.currency) || descCents(a.cents, b.cents) || a.name.localeCompare(b.name, "vi"))
       .map(({ cents, ...fee }) => ({ ...fee, total: fromCents(cents), share: percent(cents, groupTotal(fee)) })),
@@ -263,27 +282,30 @@ export interface RequestTotals {
   /** Tổng các khoản của đề nghị phát sinh trong kỳ (bỏ khoản bị ẩn). */
   total: Money;
   hiddenCount: number;
+  /** Các khoản phí của đề nghị phát sinh trong kỳ (thứ tự nhập). */
+  items: MonthlyCost[];
 }
 
 /**
  * Các khoản của kỳ gom theo đề nghị (mới nhất trước) + phần chưa lập đề nghị (unrequested).
  * Đề nghị đã hủy vẫn liệt kê (để biết) nhưng gắn state cancelled.
  */
-export function groupByRequest(costs: MonthlyCost[]): { requests: RequestTotals[]; unrequested: { count: number; total: Money } } {
+export function groupByRequest(costs: MonthlyCost[]): { requests: RequestTotals[]; unrequested: { count: number; total: Money; items: MonthlyCost[] } } {
   const requests = new Map<string, RequestTotals & { cents: Map<string, bigint> }>();
   const loose = new Map<string, bigint>();
-  let looseCount = 0;
+  const looseItems: MonthlyCost[] = [];
   for (const cost of costs) {
     if (!cost.requestId) {
-      looseCount += 1;
+      looseItems.push(cost);
       if (cost.amount !== null) addMoney(loose, cost.currency, toCents(cost.amount));
       continue;
     }
     const current = requests.get(cost.requestId) || {
       requestId: cost.requestId, content: cost.requestContent, requester: cost.requestBy, dueDate: cost.requestDue,
-      state: costState(cost), count: 0, total: [], hiddenCount: 0, cents: new Map<string, bigint>(),
+      state: costState(cost), count: 0, total: [], hiddenCount: 0, items: [], cents: new Map<string, bigint>(),
     };
     current.count += 1;
+    current.items.push(cost);
     if (cost.amount === null) current.hiddenCount += 1;
     else addMoney(current.cents, cost.currency, toCents(cost.amount));
     requests.set(cost.requestId, current);
@@ -293,59 +315,83 @@ export function groupByRequest(costs: MonthlyCost[]): { requests: RequestTotals[
     requests: [...requests.values()]
       .sort((a, b) => number(b.requestId) - number(a.requestId))
       .map(({ cents, ...item }) => ({ ...item, total: moneyOf(cents) })),
-    unrequested: { count: looseCount, total: moneyOf(loose) },
+    unrequested: { count: looseItems.length, total: moneyOf(loose), items: looseItems },
   };
 }
 
-export interface ShipmentTotals {
+// ---------- Giá vốn đơn hàng ----------
+
+/** Phí trực tiếp của một container trong đơn. */
+export interface OrderContainer {
+  container: string;
+  fees: Money;
+}
+
+/** Giá vốn một đơn hàng (hợp đồng), lũy kế mọi kỳ. */
+export interface OrderTotals {
   contract: string;
   supplier: string;
   containerCount: number;
-  /** Chi phí nhập khẩu & logistics (vận hành + phát sinh) lũy kế của lô. */
-  cost: Money;
-  /** Bình quân mỗi container (không có container thì rỗng). */
-  costPerContainer: Money;
-  /** Trị giá hàng mua. */
+  /** Tổng NET (kg) trong chi tiết hợp đồng; 0 = chưa có. */
+  netKg: number;
+  /** Tiền hàng (thanh toán quốc tế: cọc + thanh toán còn lại). */
   goods: Money;
-  goodsPerContainer: Money;
-  /** Giá vốn nhập khẩu (landed cost) = trị giá hàng mua + chi phí, theo nguyên tệ. */
-  landed: Money;
-  landedPerContainer: Money;
-  hidden: boolean;
-}
-
-export interface ContainerTotals {
-  container: string;
-  contract: string;
-  supplier: string;
-  /** Chi phí trực tiếp (gắn riêng container này). */
-  direct: Money;
-  /** Chi phí chung của lô phân bổ đều. */
-  shared: Money;
-  /** direct + shared. */
+  /** Thuế & phí theo đơn (không gắn container: thuế nhập khẩu, lệ phí, phí chung của lô...). */
+  orderFees: Money;
+  /** Phí theo container (cộng mọi container của đơn). */
+  containerFees: Money;
+  /** Tổng giá vốn theo nguyên tệ = tiền hàng + thuế & phí đơn + phí cont. */
   total: Money;
-  goodsShare: Money;
-  /** Giá vốn nhập khẩu của container = total + goodsShare. */
-  landed: Money;
+  containers: OrderContainer[];
+  /** Tiền hàng bị ẩn (không có quyền xem). */
+  hidden: boolean;
+  /** Tổng giá vốn quy đổi VND theo tỷ giá; null = có ngoại tệ mà chưa nhập tỷ giá (hoặc tiền hàng bị ẩn). */
+  totalVnd: string | null;
+  /** Giá vốn trung bình mỗi kg (VND, làm tròn đồng); null = chưa quy đổi được hoặc chưa có NET. */
+  perKgVnd: string | null;
 }
 
 /**
- * Giá vốn nhập khẩu theo lô hàng và theo container (lũy kế). Container của lô = danh sách từ lô hàng ∪ container có chi
- * phí (dữ liệu lệch vẫn không mất tiền). Chi phí chung (không gắn container) và trị giá hàng mua phân bổ đều cho số container.
+ * Tỷ giá USD/VND nhập trên báo cáo ("25.400", "25400", "25400,5") -> số xu VND cho 1 USD (BigInt), không hợp lệ / ≤ 0 thì
+ * null.
  */
-export function summarizeShipments(shipments: ShipmentInfo[], costs: ShipmentCost[]): { lots: ShipmentTotals[]; containers: ContainerTotals[] } {
+export function parseRate(value: string): bigint | null {
+  const raw = String(value ?? "").trim().replace(/\s/g, "");
+  if (!raw) return null;
+  // "25.400" / "25,400" (phân tách nghìn) hoặc "25400,5" / "25400.5" (thập phân, tối đa 2 số).
+  const normalized = /^\d{1,3}([.,]\d{3})+$/.test(raw) ? raw.replace(/[.,]/g, "") : raw.replace(",", ".");
+  const cents = toCents(normalized);
+  return /^\d+(\.\d{1,2})?$/.test(normalized) && cents > ZERO ? cents : null;
+}
+
+/** Quy đổi tiền nhiều loại sang xu VND (USD × tỷ giá); có loại tiền khác hoặc USD mà chưa có tỷ giá thì null. */
+function toVndCents(money: Money, usdRate: bigint | null): bigint | null {
+  let total = ZERO;
+  for (const item of money) {
+    const cents = toCents(item.total);
+    if (item.currency === "VND") total += cents;
+    else if (item.currency === "USD" && usdRate !== null) total += (cents * usdRate + HUNDRED / BigInt(2)) / HUNDRED;
+    else return null;
+  }
+  return total;
+}
+
+/**
+ * Giá vốn theo đơn hàng (hợp đồng có chi phí trong kỳ, lũy kế mọi kỳ): số cont, NET (kg), tiền hàng (thanh toán quốc tế),
+ * thuế & phí theo đơn (không gắn container), phí theo container; tổng giá vốn theo nguyên tệ và quy đổi VND theo tỷ giá
+ * USD/VND (usdRate = xu VND cho 1 USD, null = chưa nhập); giá vốn trung bình / kg = tổng VND ÷ NET. Tiền cược container
+ * không tính (tạm ứng). Container của đơn = danh sách từ lô hàng ∪ container có chi phí. Sắp xếp tổng giá vốn giảm dần.
+ */
+export function summarizeOrders(shipments: ShipmentInfo[], costs: ShipmentCost[], usdRate: bigint | null): OrderTotals[] {
   const info = new Map(shipments.map((item) => [item.contract, item]));
   const contracts = [...new Set([...shipments.map((item) => item.contract), ...costs.map((item) => item.contract)])];
-  // Sắp xếp theo chi phí VND giảm dần (sortCents giữ riêng, không lẫn vào dữ liệu trả về).
-  const lots: Array<{ item: ShipmentTotals; sortCents: bigint }> = [];
-  const containers: Array<{ item: ContainerTotals; sortCents: bigint }> = [];
-  for (const contract of contracts) {
-    const rows = costs.filter((item) => item.contract === contract);
+  const orders = contracts.map((contract) => {
+    const rows = costs.filter((item) => item.contract === contract && item.kind !== "deposit");
     const names = [...new Set([...(info.get(contract)?.containers || []), ...rows.map((item) => item.container).filter(Boolean)])].sort();
-    const cost = new Map<string, bigint>();
-    const shared = new Map<string, bigint>();
     const goods = new Map<string, bigint>();
-    const direct = new Map<string, Map<string, bigint>>();
+    const orderFees = new Map<string, bigint>();
+    const containerFees = new Map<string, bigint>();
+    const byContainer = new Map<string, Map<string, bigint>>(names.map((name) => [name, new Map<string, bigint>()]));
     let hidden = false;
     for (const row of rows) {
       if (row.amount === null) {
@@ -353,138 +399,123 @@ export function summarizeShipments(shipments: ShipmentInfo[], costs: ShipmentCos
         continue;
       }
       const cents = toCents(row.amount);
-      if (row.kind === "goods") {
-        addMoney(goods, row.currency, cents);
-        continue;
-      }
-      addMoney(cost, row.currency, cents);
-      if (!row.container) addMoney(shared, row.currency, cents);
+      if (row.kind === "goods") addMoney(goods, row.currency, cents);
+      else if (!row.container) addMoney(orderFees, row.currency, cents);
       else {
-        const own = direct.get(row.container) || new Map<string, bigint>();
-        addMoney(own, row.currency, cents);
-        direct.set(row.container, own);
+        addMoney(containerFees, row.currency, cents);
+        addMoney(byContainer.get(row.container) as Map<string, bigint>, row.currency, cents);
       }
     }
-    const perContainer = (map: Map<string, bigint>) => new Map([...map.entries()].map(([currency, cents]) => [currency, names.length ? divideRound(cents, names.length, currency) : ZERO]));
-    const sharedEach = perContainer(shared);
-    const goodsEach = perContainer(goods);
-    const supplier = info.get(contract)?.supplier || "";
-    const lotCost = moneyOf(cost);
-    const lotGoods = moneyOf(goods);
-    const costEach = names.length ? moneyOf(perContainer(cost)) : [];
-    const goodsEachMoney = names.length ? moneyOf(goodsEach) : [];
-    lots.push({
-      item: {
-        contract, supplier, containerCount: names.length, hidden,
-        cost: lotCost, costPerContainer: costEach, goods: lotGoods, goodsPerContainer: goodsEachMoney,
-        landed: sumMoney(lotCost, lotGoods), landedPerContainer: names.length ? sumMoney(costEach, goodsEachMoney) : [],
-      },
-      sortCents: cost.get("VND") || ZERO,
-    });
-    for (const name of names) {
-      const own = direct.get(name) || new Map<string, bigint>();
-      const total = new Map(own);
-      sharedEach.forEach((cents, currency) => addMoney(total, currency, cents));
-      const totalMoney = moneyOf(total);
-      const goodsShare = moneyOf(goodsEach);
-      containers.push({
-        item: { container: name, contract, supplier, direct: moneyOf(own), shared: moneyOf(sharedEach), total: totalMoney, goodsShare, landed: sumMoney(totalMoney, goodsShare) },
-        sortCents: total.get("VND") || ZERO,
-      });
-    }
-  }
-  return {
-    lots: lots.sort((a, b) => descCents(a.sortCents, b.sortCents) || a.item.contract.localeCompare(b.item.contract)).map((entry) => entry.item),
-    containers: containers.sort((a, b) => descCents(a.sortCents, b.sortCents) || a.item.container.localeCompare(b.item.container)).map((entry) => entry.item),
-  };
-}
-
-// ---------- Tuổi nợ phải trả ----------
-
-/** Đề nghị đã trình chưa chi tiền (công nợ phải trả). */
-export interface Payable {
-  requestId: string;
-  content: string;
-  requester: string;
-  /** pending = chờ phê duyệt; approved = đã phê duyệt, chờ chi. */
-  state: "pending" | "approved";
-  currency: string;
-  /** Tổng thanh toán (gồm VAT); null = bị ẩn. */
-  amount: string | null;
-  /** Hạn thanh toán YYYY-MM-DD, rỗng = chưa xác định. */
-  dueDate: string;
-  requestDate: string;
+    const total = sumMoney(moneyOf(goods), moneyOf(orderFees), moneyOf(containerFees));
+    const netKg = Number(info.get(contract)?.netWeight || 0) || 0;
+    const vnd = hidden ? null : toVndCents(total, usdRate);
+    const item: OrderTotals = {
+      contract,
+      supplier: info.get(contract)?.supplier || "",
+      containerCount: names.length,
+      netKg,
+      goods: moneyOf(goods),
+      orderFees: moneyOf(orderFees),
+      containerFees: moneyOf(containerFees),
+      total,
+      containers: names.map((container) => ({ container, fees: moneyOf(byContainer.get(container) as Map<string, bigint>) })),
+      hidden,
+      totalVnd: vnd === null ? null : fromCents(vnd),
+      perKgVnd: vnd === null || netKg <= 0 ? null : String(Math.round(Number(vnd) / 100 / netKg)),
+    };
+    // Sắp xếp theo tổng giá vốn VND (chưa quy đổi được thì theo phần VND) — khóa giữ riêng, không lẫn vào dữ liệu trả về.
+    return { item, sortCents: vnd ?? toCents(total.find((entry) => entry.currency === "VND")?.total) };
+  });
+  return orders
+    .sort((a, b) => descCents(a.sortCents, b.sortCents) || a.item.contract.localeCompare(b.item.contract))
+    .map((entry) => entry.item);
 }
 
 /**
- * Nhóm tuổi nợ theo hạn thanh toán so với ngày báo cáo: notDue = trong hạn, còn trên 7 ngày; dueSoon = đến hạn trong 7
- * ngày tới (gồm hôm nay); overdue30 / 60 / 90 = quá hạn 1–30 / 31–60 / 61–90 ngày; overdueOver90 = quá hạn trên 90 ngày;
- * noDue = chưa xác định hạn.
+ * Khoản thuộc chi phí mua hàng: tiền hàng hoặc khoản gắn đơn hàng (hợp đồng / container — vận chuyển, thông quan, thuế, phí
+ * liên quan). Khoản không gắn đơn nào (văn phòng, lương...) là chi phí vận hành.
  */
-export type AgingBucket = "notDue" | "dueSoon" | "overdue30" | "overdue60" | "overdue90" | "overdueOver90" | "noDue";
-export const AGING_BUCKETS: readonly AgingBucket[] = ["notDue", "dueSoon", "overdue30", "overdue60", "overdue90", "overdueOver90", "noDue"];
-const DUE_SOON_DAYS = 7;
+export const isPurchaseCost = (cost: Pick<MonthlyCost, "kind" | "contract" | "container">) => cost.kind === "goods" || Boolean(cost.contract || cost.container);
+
+// ---------- Công nợ tiền cược container ----------
+
+/**
+ * Khoản dùng cho số liệu báo cáo: bỏ tiền cược container (tạm ứng — không tính vào bất kỳ chỉ tiêu nào: chi phí, tình hình
+ * thanh toán, cơ cấu, bảng kê, chi tiết), chỉ theo dõi riêng ở công nợ tiền cược (summarizeDeposits).
+ */
+export function withoutDeposits<T extends { kind: CostKind }>(costs: T[]): T[] {
+  return costs.filter((cost) => cost.kind !== "deposit");
+}
+
+/** Khoản cược cont / sửa cont gộp theo lô × container × loại × loại tiền (BE, tính đến hôm nay, mọi kỳ). */
+export interface DepositRow {
+  contract: string;
+  container: string;
+  special: "cuoc_cont" | "sua_cont";
+  currency: string;
+  /** Tiền cược đã chi (đề nghị đã chi tiền); phí sửa cont luôn false. */
+  paid: boolean;
+  count: number;
+  amount: string;
+  /** Ngày nhập khoản đầu tiên (YYYY-MM-DD). */
+  firstDate: string;
+}
+
+export interface ContainerDeposit {
+  container: string;
+  contract: string;
+  currency: string;
+  /** Tiền cược đã chi cho hãng tàu. */
+  paid: string;
+  /** Tiền cược chưa chi (nháp, chờ duyệt, chờ chi, chưa lập đề nghị). */
+  unpaid: string;
+  /** Phí sửa cont hãng tàu trừ vào tiền cược. */
+  repair: string;
+  /** Phải thu hãng tàu = cược đã chi − phí sửa cont (âm = phí sửa vượt tiền cược, phải trả thêm). */
+  receivable: string;
+  /** Ngày nhập khoản cược / sửa đầu tiên của container. */
+  since: string;
+}
+
+/**
+ * Công nợ tiền cược theo container (mỗi loại tiền một dòng): phải thu = cược đã chi − phí sửa cont. Sắp xếp phải thu giảm
+ * dần. totals: tổng theo loại tiền.
+ */
+export function summarizeDeposits(rows: DepositRow[]): { items: ContainerDeposit[]; totals: { paid: Money; unpaid: Money; repair: Money; receivable: Money } } {
+  const groups = new Map<string, { container: string; contract: string; currency: string; paid: bigint; unpaid: bigint; repair: bigint; since: string }>();
+  for (const row of rows) {
+    const key = [row.contract, row.container, row.currency].join("|");
+    const group = groups.get(key) || { container: row.container, contract: row.contract, currency: row.currency, paid: ZERO, unpaid: ZERO, repair: ZERO, since: row.firstDate };
+    const cents = toCents(row.amount);
+    if (row.special === "sua_cont") group.repair += cents;
+    else if (row.paid) group.paid += cents;
+    else group.unpaid += cents;
+    if (row.firstDate && (!group.since || row.firstDate < group.since)) group.since = row.firstDate;
+    groups.set(key, group);
+  }
+  const paid = new Map<string, bigint>();
+  const unpaid = new Map<string, bigint>();
+  const repair = new Map<string, bigint>();
+  const receivable = new Map<string, bigint>();
+  const sorted = [...groups.values()].sort((a, b) => compareCurrency(a.currency, b.currency)
+    || descCents(a.paid - a.repair, b.paid - b.repair) || a.container.localeCompare(b.container));
+  const items = sorted.map((group) => {
+    addMoney(paid, group.currency, group.paid);
+    addMoney(unpaid, group.currency, group.unpaid);
+    addMoney(repair, group.currency, group.repair);
+    addMoney(receivable, group.currency, group.paid - group.repair);
+    return {
+      container: group.container, contract: group.contract, currency: group.currency, since: group.since,
+      paid: fromCents(group.paid), unpaid: fromCents(group.unpaid), repair: fromCents(group.repair), receivable: fromCents(group.paid - group.repair),
+    };
+  });
+  return { items, totals: { paid: moneyOf(paid), unpaid: moneyOf(unpaid), repair: moneyOf(repair), receivable: moneyOf(receivable) } };
+}
 
 /** Số ngày từ a tới b (YYYY-MM-DD), b sau a thì dương. */
 export function daysBetween(a: string, b: string): number {
   const utc = (value: string) => Date.UTC(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10)));
   return Math.round((utc(b) - utc(a)) / 86_400_000);
-}
-
-export function agingBucket(dueDate: string, today: string): AgingBucket {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return "noDue";
-  const overdue = daysBetween(dueDate, today);
-  if (overdue <= 0) return -overdue <= DUE_SOON_DAYS ? "dueSoon" : "notDue";
-  if (overdue <= 30) return "overdue30";
-  if (overdue <= 60) return "overdue60";
-  if (overdue <= 90) return "overdue90";
-  return "overdueOver90";
-}
-
-export interface AgingRow {
-  bucket: AgingBucket;
-  count: number;
-  total: Money;
-  hiddenCount: number;
-}
-
-export interface AgedPayable extends Payable {
-  bucket: AgingBucket;
-  /** Số ngày quá hạn (âm = còn bao nhiêu ngày tới hạn); null = chưa có hạn. */
-  daysOverdue: number | null;
-}
-
-/**
- * Phân tích tuổi nợ phải trả: tổng theo nhóm tuổi nợ (đủ mọi nhóm, kể cả rỗng) + tổng cộng + danh sách đề nghị cần chú ý
- * (quá hạn / đến hạn trong 7 ngày, hạn sớm nhất trước).
- */
-export function agePayables(payables: Payable[], today: string): { rows: AgingRow[]; total: Money; count: number; attention: AgedPayable[]; items: AgedPayable[] } {
-  const buckets = new Map(AGING_BUCKETS.map((bucket) => [bucket, { count: 0, hiddenCount: 0, cents: new Map<string, bigint>() }]));
-  const total = new Map<string, bigint>();
-  const items = payables.map((item): AgedPayable => {
-    const bucket = agingBucket(item.dueDate, today);
-    const entry = buckets.get(bucket)!;
-    entry.count += 1;
-    if (item.amount === null) entry.hiddenCount += 1;
-    else {
-      addMoney(entry.cents, item.currency, toCents(item.amount));
-      addMoney(total, item.currency, toCents(item.amount));
-    }
-    return { ...item, bucket, daysOverdue: bucket === "noDue" ? null : daysBetween(item.dueDate, today) };
-  });
-  const attention = items
-    .filter((item) => item.bucket !== "notDue" && item.bucket !== "noDue")
-    .sort((a, b) => (b.daysOverdue ?? 0) - (a.daysOverdue ?? 0) || a.requestId.localeCompare(b.requestId));
-  return {
-    rows: AGING_BUCKETS.map((bucket) => {
-      const entry = buckets.get(bucket)!;
-      return { bucket, count: entry.count, total: moneyOf(entry.cents), hiddenCount: entry.hiddenCount };
-    }),
-    total: moneyOf(total),
-    count: payables.length,
-    attention,
-    items,
-  };
 }
 
 /** Tháng hiện tại theo giờ Việt Nam, dạng YYYY-MM. */

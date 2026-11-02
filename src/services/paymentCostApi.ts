@@ -1,4 +1,4 @@
-import type { CostKind, MonthlyCost, Payable, ShipmentCost, ShipmentInfo } from "@/utils/costStatistics";
+import type { CostKind, CostSpecial, DepositRow, MonthlyCost, ShipmentCost, ShipmentInfo } from "@/utils/costStatistics";
 import { getStoredUser } from "@/services/authApi";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
@@ -287,26 +287,27 @@ export interface CostOverview {
   costs: MonthlyCost[];
   shipments: ShipmentInfo[];
   shipmentCosts: ShipmentCost[];
-  /** Công nợ phải trả tính đến asOf (YYYY-MM-DD, giờ Việt Nam): đề nghị đã trình chưa chi tiền, mọi kỳ. */
-  payables: { asOf: string; rows: Payable[]; truncated: boolean };
+  /** Công nợ tiền cược container tính đến asOf: khoản cược cont / sửa cont theo container, mọi kỳ. */
+  deposits: { asOf: string; rows: DepositRow[]; truncated: boolean };
   /** Không có quyền xem tiền hàng: số tiền cọc / còn lại bị ẩn (null). */
   amountsHidden: boolean;
   /** Tháng có quá nhiều khoản, BE chỉ trả 10.000 khoản mới nhất. */
   truncated: boolean;
 }
 
-const kindOf = (value: unknown): CostKind => (value === "goods" || value === "incident" ? value : "operating");
+const kindOf = (value: unknown): CostKind => (value === "goods" || value === "incident" || value === "deposit" ? value : "operating");
+const specialOf = (value: unknown): CostSpecial => (value === "cuoc_cont" || value === "sua_cont" ? value : "");
 const nullableAmount = (value: unknown) => (value === null || value === undefined ? null : str(value));
 
 /**
- * Báo cáo chi phí & công nợ phải trả (chỉ admin): các khoản chi phí phát sinh trong kỳ (YYYY-MM) kèm đề nghị chứa khoản +
- * chi phí lũy kế của các lô hàng có chi phí trong kỳ (theo container) + công nợ phải trả tính đến hôm nay — một lần gọi.
+ * Báo cáo chi phí (chỉ admin): các khoản chi phí phát sinh trong kỳ (YYYY-MM) kèm đề nghị chứa khoản + chi phí lũy kế của
+ * các đơn hàng có chi phí trong kỳ (theo container, kèm NET kg) + nợ phải thu tiền cược tính đến hôm nay — một lần gọi.
  */
 export async function getCostOverview(month: string, signal?: AbortSignal): Promise<CostOverview> {
   const payload = await request("GET", `/overview?month=${encodeURIComponent(month)}`, undefined, signal);
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   const list = (value: unknown) => (Array.isArray(value) ? value.filter(isRecord) : []);
-  const payables = isRecord(data.payables) ? data.payables : {};
+  const deposits = isRecord(data.deposits) ? data.deposits : {};
   return {
     month: str(data.month) || month,
     amountsHidden: data.amountsHidden === true,
@@ -334,11 +335,13 @@ export async function getCostOverview(month: string, signal?: AbortSignal): Prom
       currency: str(row.currency) || "VND",
       currencyInferred: row.currency_inferred === true,
       kind: kindOf(row.nhom),
+      special: specialOf(row.loai_dac_biet),
     })).filter((cost) => cost.id),
     shipments: list(data.shipments).map((row): ShipmentInfo => ({
       contract: str(row.ma_hop_dong),
       supplier: str(row.ten_ncc),
       containers: Array.isArray(row.containers) ? row.containers.map(str).filter(Boolean) : [],
+      netWeight: str(row.net_weight) || "0",
     })).filter((item) => item.contract),
     shipmentCosts: list(data.shipmentCosts).map((row): ShipmentCost => ({
       contract: str(row.ma_hop_dong),
@@ -348,19 +351,19 @@ export async function getCostOverview(month: string, signal?: AbortSignal): Prom
       count: Number(row.so_khoan) || 0,
       amount: nullableAmount(row.so_tien),
     })).filter((item) => item.contract),
-    payables: {
-      asOf: str(payables.asOf),
-      truncated: payables.truncated === true,
-      rows: list(payables.rows).map((row): Payable => ({
-        requestId: str(row.id_payment_request),
-        content: str(row.noi_dung),
-        requester: str(row.nguoi_de_nghi),
-        state: Number(row.status) === 1 ? "approved" : "pending",
-        currency: str(row.loai_tien) || "VND",
-        amount: nullableAmount(row.tong_tien),
-        dueDate: str(row.han_thanh_toan),
-        requestDate: str(row.ngay_de_nghi),
-      })).filter((item) => item.requestId),
+    deposits: {
+      asOf: str(deposits.asOf),
+      truncated: deposits.truncated === true,
+      rows: list(deposits.rows).map((row): DepositRow => ({
+        contract: str(row.id_mua_hang),
+        container: str(row.id_container),
+        special: row.loai_dac_biet === "sua_cont" ? "sua_cont" : "cuoc_cont",
+        currency: str(row.currency) || "VND",
+        paid: row.da_chi === true,
+        count: Number(row.so_khoan) || 0,
+        amount: str(row.so_tien),
+        firstDate: str(row.ngay_dau),
+      })),
     },
   };
 }
