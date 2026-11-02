@@ -33,8 +33,8 @@ import BankPicker, { matchBank } from "./BankPicker";
 import { PaymentFlowBadge, formatDueDate } from "./PaymentRequestParts";
 
 // Bước 1 "Tạo đề nghị" dạng hỏi lần lượt: trả lời xong câu nào thì câu tiếp theo mới hiện ra, câu đã trả lời thu lại
-// thành phần tóm tắt chi tiết (bấm "Đổi" để sửa). Thứ tự: chi phí → nội dung → thanh toán (hạn thanh toán + loại tiền +
-// hình thức, + thông tin chuyển khoản nếu chuyển khoản, chung một bước) → kiểm tra và lưu (hiện đầy đủ như bản nháp).
+// thành phần tóm tắt chi tiết (bấm "Đổi" để sửa). Thứ tự: chi phí → nội dung + thanh toán (hạn thanh toán + loại tiền +
+// hình thức và thông tin chuyển khoản nếu có) → kiểm tra và lưu (hiện đầy đủ như bản nháp).
 // Chi phí: MỘT đề nghị chỉ thanh toán một loại chi phí (loai_phi) và trong đó một mã phí (ma_phi) — chọn loại → chọn mã:
 // - mã chi phí đơn hàng (HD theo hợp đồng / CONT theo container): tick các khoản nhập sẵn ở tab Chi phí của đơn hàng
 //   (của mọi người, nhiều đơn, nhiều cont) — không nhập lại số tiền;
@@ -68,7 +68,7 @@ interface Props {
   onCancel?: () => void;
 }
 
-const STEP_COUNT = 3;
+const STEP_COUNT = 2;
 /** Mức VAT hay dùng (bấm nhanh); mức khác gõ tay vào ô %. */
 const VAT_PRESETS = ["5", "8"];
 const SAVE_STEP = STEP_COUNT;
@@ -329,7 +329,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const recipientValid = missingTransfer.length === 0;
   const money = (value: string | null | undefined) => (currency ? formatMoney(value, currency, language) : formatAmount(value, language));
   const paymentDone = /^\d{4}-\d{2}-\d{2}$/.test(dueDate) && Boolean(currency && paymentMethod && recipientValid);
-  const complete = [costCount > 0 && otherValid && preparedVatValid, Boolean(content.trim()), paymentDone];
+  const complete = [costCount > 0 && otherValid && preparedVatValid, Boolean(content.trim()) && paymentDone];
 
   // Gợi ý người thụ hưởng: chờ ngừng gõ rồi mới gọi BE, huỷ lần gọi cũ để kết quả cũ không đè kết quả mới.
   useEffect(() => {
@@ -480,7 +480,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     // Còn bước thiếu / sai (ví dụ sửa lại chi phí sau khi đã tới bước lưu): mở bước đó, tô đỏ và báo.
     const firstIncomplete = complete.findIndex((done) => !done);
     if (firstIncomplete !== -1 || !currency || !paymentMethod) {
-      const step = firstIncomplete === -1 ? 2 : firstIncomplete;
+      const step = firstIncomplete === -1 ? 1 : firstIncomplete;
       setActive(step);
       notify(t("prErrToast"), "error");
       return;
@@ -553,7 +553,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   };
 
   const stepState = (index: number) => (active === index ? "active" : "done");
-  const titles = [t("prStepCosts"), t("prStepContent"), t("prStepPayment")];
+  const titles = [t("prStepCosts"), t("prStepContentPayment")];
   /** Hạn thanh toán · loại tiền · hình thức (một dòng). */
   const paymentLine = [dueDate && formatDueDate(dueDate), currency, paymentMethod && t(PAYMENT_METHOD_LABEL_KEYS[paymentMethod])].filter(Boolean).join(" · ");
 
@@ -883,10 +883,16 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         </div>
       </StepCard>
 
-      {/* 2. Nội dung */}
+      {/* 2. Nội dung và thông tin thanh toán */}
       {reached >= 1 && (
         <StepCard index={1} title={titles[1]} state={stepState(1)} onChange={() => setActive(1)}
-          summary={<p className="whitespace-pre-line">{content}</p>}>
+          summary={(
+            <div>
+              <p className="whitespace-pre-line">{content}</p>
+              <p className="mt-1 font-medium">{paymentLine || "—"}</p>
+              {transferText && <p className="whitespace-pre-line text-gray-600 dark:text-gray-300">{transferText}</p>}
+            </div>
+          )}>
           <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={3} autoFocus placeholder={t("prContentPlaceholder")}
             aria-invalid={contentTouched && contentIssues.length > 0} aria-label={titles[1]}
             className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-400 dark:bg-gray-900 dark:text-white ${contentTouched && contentIssues.length ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
@@ -894,21 +900,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
             <FieldError message={contentTouched ? contentIssues[0] || "" : ""} />
             <span className="ml-auto mt-1 shrink-0 tabular-nums text-gray-400">{content.length}/2000</span>
           </div>
-          <div className="mt-3 flex justify-end">
-            <button type="button" className={`${PRIMARY} w-full sm:w-auto`} onClick={() => continueFrom(1)}>{t("prContinue")}</button>
-          </div>
-        </StepCard>
-      )}
-
-      {/* 3. Thanh toán: hạn thanh toán + loại tiền + hình thức (+ thông tin chuyển khoản nếu chuyển khoản) */}
-      {reached >= 2 && (
-        <StepCard index={2} title={titles[2]} state={stepState(2)} onChange={() => setActive(2)}
-          summary={(
-            <div>
-              <p className="font-medium">{paymentLine}</p>
-              {transferText && <p className="whitespace-pre-line text-gray-600 dark:text-gray-300">{transferText}</p>}
-            </div>
-          )}>
+          <div className="mt-5 border-t border-gray-100 pt-4 dark:border-gray-800">
+            <h3 className="mb-3 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prStepPayment")}</h3>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)_minmax(0,1.1fr)]">
             <div className="min-w-0">
               <p className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prDueDate")}</p>
@@ -1008,7 +1001,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
           )}
           {paymentTouched && <IssueList issues={paymentIssues} />}
           <div className="mt-4 flex justify-end">
-            <button type="button" className={`${PRIMARY} w-full sm:w-auto`} onClick={() => continueFrom(2)}>{t("prContinue")}</button>
+            <button type="button" className={`${PRIMARY} w-full sm:w-auto`} onClick={() => continueFrom(1)}>{t("prContinue")}</button>
+          </div>
           </div>
         </StepCard>
       )}

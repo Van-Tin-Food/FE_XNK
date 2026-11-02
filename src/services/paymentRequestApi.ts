@@ -85,7 +85,7 @@ export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
     { label: "Số tài khoản", key: "prTf_accountNumber", jsonKey: "so_tai_khoan", required: false },
     { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: false },
     { label: "Tên ngân hàng", key: "prTf_bankName", jsonKey: "ten_ngan_hang", required: false },
-    { label: "Nội dung thanh toán", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
+    { label: "Nội dung chuyển khoản", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
   ],
   international: [
     { label: "Số IBAN người thụ hưởng", key: "prTf_iban", jsonKey: "so_tai_khoan", required: false },
@@ -95,7 +95,7 @@ export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
     { label: "Địa chỉ người thụ hưởng", key: "prTf_beneficiaryAddress", jsonKey: "dia_chi_nguoi_thu_huong", required: false },
     { label: "Địa chỉ ngân hàng thụ hưởng", key: "prTf_beneficiaryBankAddress", jsonKey: "dia_chi_ngan_hang", required: false },
     { label: "Ngân hàng trung gian", key: "prTf_intermediaryBank", jsonKey: "ngan_hang_trung_gian", required: false, multiline: true },
-    { label: "Nội dung thanh toán", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
+    { label: "Nội dung chuyển khoản", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
   ],
 };
 
@@ -104,7 +104,10 @@ export function parseTransferInfo(text: string): Record<string, string> {
   const values: Record<string, string> = {};
   for (const line of String(text || "").split(/\r?\n/)) {
     const match = /^([^:]{1,60}):\s*(.*)$/.exec(line.trim());
-    if (match) values[match[1].trim()] = match[2].trim();
+    if (match) {
+      const label = match[1].trim();
+      values[label === "Nội dung thanh toán" ? "Nội dung chuyển khoản" : label] = match[2].trim();
+    }
     else if (line.trim()) values[""] = [values[""], line.trim()].filter(Boolean).join(" ");
   }
   return values;
