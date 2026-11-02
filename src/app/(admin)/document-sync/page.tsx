@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import {
   acceptDocumentSync,
+  autoRunDocumentSync,
   renameDocumentSync,
   restoreDocumentSync,
   scanDocumentSync,
@@ -26,6 +27,8 @@ export default function DocumentSyncPage() {
   const [renameCandidate, setRenameCandidate] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [error, setError] = useState("");
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoRunMessage, setAutoRunMessage] = useState("");
 
   useEffect(() => {
     if (!canViewSync) router.replace("/");
@@ -47,6 +50,30 @@ export default function DocumentSyncPage() {
       setError(scanError instanceof Error ? scanError.message : t("documentSyncErrorScan"));
     } finally {
       setScanning(false);
+    }
+  };
+
+  // Chạy ngay lượt tiếp nhận tự động (như job 8h sáng). BE tự ghi nhật ký từng file; xong thì quét lại để cập nhật danh sách.
+  const runAutoSync = async () => {
+    if (!canSync || autoRunning || scanning) return;
+    setAutoRunning(true);
+    setError("");
+    setAutoRunMessage("");
+    try {
+      const summary = await autoRunDocumentSync();
+      setAutoRunMessage(t("documentSyncAutoRunResult", {
+        scanned: summary.scannedFiles,
+        newFiles: summary.newFiles,
+        accepted: summary.accepted,
+        renamed: summary.renamed,
+        skipped: summary.skipped,
+        failed: summary.failed,
+      }));
+      if (result) await runScan();
+    } catch (autoError) {
+      setError(autoError instanceof Error ? autoError.message : t("documentSyncErrorScan"));
+    } finally {
+      setAutoRunning(false);
     }
   };
 
@@ -156,12 +183,20 @@ export default function DocumentSyncPage() {
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">{t("documentSync")}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("documentSyncDescription")}</p>
         </div>
-        {canSync && <button type="button" onClick={runScan} disabled={scanning} aria-busy={scanning} className="inline-flex min-w-36 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-wait disabled:opacity-60">
-          {scanning && <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />}
-          {scanning ? t("documentSyncScanning") : t("documentSyncScan")}
-        </button>}
+        {canSync && <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <button type="button" onClick={() => void runAutoSync()} disabled={autoRunning || scanning} aria-busy={autoRunning} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 transition hover:bg-brand-100 disabled:cursor-wait disabled:opacity-60 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+            {autoRunning && <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-brand-300 border-t-brand-600" />}
+            {autoRunning ? t("documentSyncAutoRunning") : t("documentSyncAutoRun")}
+          </button>
+          <button type="button" onClick={runScan} disabled={scanning || autoRunning} aria-busy={scanning} className="inline-flex min-h-10 min-w-36 items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-wait disabled:opacity-60">
+            {scanning && <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />}
+            {scanning ? t("documentSyncScanning") : t("documentSyncScan")}
+          </button>
+        </div>}
       </div>
 
+      {canSync && <p className="text-xs text-gray-500 dark:text-gray-400">{t("documentSyncAutoRunHint")}</p>}
+      {autoRunMessage && <div className="rounded-lg border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300">{autoRunMessage}</div>}
       {error && <div className="rounded-lg border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700">{error}</div>}
 
       {result && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

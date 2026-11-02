@@ -62,6 +62,10 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Loại chứng từ không hợp lệ. Vui lòng chọn lại chứng từ.";
     case "MISSING_UPLOAD_FIELDS":
       return "Thông tin upload chưa đầy đủ. Vui lòng chọn lại file và thử lại.";
+    case "AUTO_SYNC_NOT_CONFIGURED":
+      return "Chưa cấu hình tài khoản chạy đồng bộ tự động (khoá AUTO_DOCUMENT_SYNC_USER_ID trong bảng public.env). Vui lòng liên hệ quản trị viên.";
+    case "AUTO_SYNC_RUNNING":
+      return "Đang có một lượt đồng bộ tự động chạy, vui lòng đợi rồi thử lại.";
     case "SYNC_CANDIDATE_NOT_FOUND":
       return "File không còn trong phiên quét hiện tại. Vui lòng quét lại danh sách.";
     case "INVALID_DOCUMENT_FILE_NAME":
@@ -201,7 +205,7 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
     case "PAYMENT_CATEGORY_NOT_FOUND":
       return "Không tìm thấy khoản phí (có thể đã bị đổi). Vui lòng tải lại danh mục.";
     case "GOODS_PAYMENT_MISMATCH":
-      return backendMessage || "Cọc hàng + thanh toán tiền còn lại phải bằng tiền hàng của hợp đồng.";
+      return backendMessage || "Thanh toán tiền còn lại phải nhỏ hơn tiền hàng của hợp đồng.";
     case "GOOGLE_CHAT_NOT_CONFIGURED":
       return "Google Chat chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
     case "GOOGLE_CHAT_REQUEST_FAILED":

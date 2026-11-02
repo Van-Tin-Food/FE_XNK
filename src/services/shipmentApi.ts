@@ -632,6 +632,24 @@ export function restoreDocumentSync(fileId: string, documentCode: string): Promi
   });
 }
 
+export interface AutoDocumentSyncResult {
+  success: boolean;
+  trigger: "schedule" | "manual";
+  day: string;
+  scannedFiles: number;
+  newFiles: number;
+  accepted: number;
+  renamed: number;
+  skipped: number;
+  failed: number;
+  durationMs: number;
+}
+
+/** Chạy ngay lượt tiếp nhận tự động (bình thường hệ thống tự chạy 8h sáng hằng ngày). */
+export function autoRunDocumentSync(): Promise<AutoDocumentSyncResult> {
+  return requestJson<AutoDocumentSyncResult>("document-sync/auto-run", { method: "POST" });
+}
+
 export function renameDocumentSync(candidateId: string, fileName: string, documentCode: string): Promise<{
   success: boolean;
   candidateId: string;

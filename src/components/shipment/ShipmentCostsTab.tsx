@@ -5,15 +5,14 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { getOrderCosts, goodsPaymentKind, saveOrderCosts, type CostCategory, type OrderCost, type OrderCosts } from "@/services/paymentCostApi";
-import { amountToCents, formatAmount, parseAmountLoose, subtractAmounts, sumAmounts } from "@/utils/paymentRequest";
+import { amountToCents, formatAmount, parseAmountLoose, sumAmounts } from "@/utils/paymentRequest";
 
 // Tab "Chi phí" của đơn hàng: nhập trước chi phí để khi tạo đề nghị thanh toán chỉ tick chọn, không nhập lại số tiền.
 // Hai phần nằm cạnh nhau (desktop): phí theo hợp đồng (mã HD: cọc hàng, thanh toán tiền còn lại, thuế nhập khẩu...) bên
 // trái, phí theo container (mỗi cont một thẻ) bên phải; màn hình hẹp thì xếp dọc.
 // Mỗi khoản một khối: tên khoản, số tiền, nội dung (diễn giải). Chỉ nhập số (loại tiền chọn khi tạo đề nghị); số tiền là
 // số đã gồm VAT (% VAT nhập khi tạo đề nghị). Khoản đã đưa vào đề nghị hiện mã đề nghị, khoá.
-// Thanh toán tiền hàng: Cọc hàng + Thanh toán tiền còn lại = tiền hàng — còn lại tự tính = tiền hàng - cọc (khi được xem
-// tiền hàng), sửa cọc thì còn lại tự tính lại; BE kiểm tra lại khi lưu. Đơn đã qua vận chuyển biển (đã giao) không nhập
+// Thanh toán tiền hàng: tiền cọc và tiền còn lại nhập độc lập; khoản còn lại phải nhỏ hơn tiền hàng. Đơn đã qua vận chuyển biển (đã giao) không nhập
 // thêm cọc / còn lại.
 
 interface Props {
@@ -107,7 +106,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
   const depositCategory = contractCategories.find((category) => goodsPaymentKind(category) === "deposit");
   const balanceCategory = contractCategories.find((category) => goodsPaymentKind(category) === "balance");
 
-  // ---------- Cọc + còn lại = tiền hàng ----------
+  // ---------- Kiểm tra khoản còn lại theo tiền hàng ----------
   const goodsTotal = amountToCents(data?.goodsTotal) > BigInt(0) ? data?.goodsTotal || "" : "";
   /** Số tiền hiện tại của một khoản theo hợp đồng (đang sửa / đã lưu / đã vào đề nghị); không có → null. */
   const contractAmount = (category: CostCategory | undefined, overrides: Record<string, string> = {}): string | null => {
@@ -117,21 +116,9 @@ export default function ShipmentCostsTab({ contract }: Props) {
     if (isShown(key)) return parseAmountLoose(valueOf(key));
     return (lockedByTarget.get(CONTRACT_TARGET) || []).find((cost) => cost.categoryId === category.id)?.amount || null;
   };
-  /** Thanh toán còn lại đúng = tiền hàng - cọc (chưa biết tiền hàng / cọc vượt tiền hàng → null). */
-  const expectedBalance = (overrides: Record<string, string> = {}) => (goodsTotal ? subtractAmounts(goodsTotal, contractAmount(depositCategory, overrides) || "0") : null);
-  const balanceKey = balanceCategory ? cellKey(CONTRACT_TARGET, balanceCategory.id) : "";
-  const balanceEditable = Boolean(balanceKey && isShown(balanceKey));
-
-  /** Sửa số tiền một ô; sửa cọc thì tự tính lại khoản còn lại đang nhập (chưa vào đề nghị). */
+  /** Sửa số tiền một ô. */
   const setAmount = (key: string, value: string) => {
-    setDrafts((current) => {
-      const next = { ...current, [key]: value };
-      if (depositCategory && key === cellKey(CONTRACT_TARGET, depositCategory.id) && balanceEditable) {
-        const balance = expectedBalance(next);
-        if (balance && amountToCents(balance) > BigInt(0)) next[balanceKey] = formatAmount(balance, language);
-      }
-      return next;
-    });
+    setDrafts((current) => ({ ...current, [key]: value }));
   };
 
   /** Danh sách sổ xuống: nhóm theo mã chi phí, bỏ khoản đã nhập ở hợp đồng / cont này. */
@@ -215,15 +202,14 @@ export default function ShipmentCostsTab({ contract }: Props) {
   const canEditContainer = data.access.container.edit && !data.cancelled;
   const money = (value: string | null | undefined) => formatAmount(value, language);
 
-  /** Dòng nhắc dưới khoản "Thanh toán tiền còn lại": = tiền hàng - cọc; lệch thì báo đỏ. */
+  /** Khoản còn lại phải nhỏ hơn tiền hàng; tiền cọc không ảnh hưởng kiểm tra này. */
   const balanceHint = (amount: string | null) => {
-    const expected = expectedBalance();
-    if (!goodsTotal || expected === null) return null;
-    const matched = amount !== null && amountToCents(amount) === amountToCents(expected);
+    if (!goodsTotal) return null;
+    const valid = amount !== null && amountToCents(amount) < amountToCents(goodsTotal);
     return (
-      <p className={`mt-1 text-xs ${matched ? "text-gray-500" : "text-error-600 dark:text-error-400"}`}>
-        {t("pcBalanceFormula", { goods: money(goodsTotal), deposit: money(contractAmount(depositCategory) || "0"), balance: money(expected) })}
-        {!matched && ` · ${t("pcBalanceMismatch")}`}
+      <p className={`mt-1 text-xs ${valid ? "text-gray-500" : "text-error-600 dark:text-error-400"}`}>
+        {t("pcBalanceFormula", { goods: money(goodsTotal) })}
+        {!valid && amount !== null && ` · ${t("pcBalanceMismatch")}`}
       </p>
     );
   };
@@ -240,7 +226,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
     const showGoodsSplit = isContract && goodsTotal && (depositCategory || balanceCategory);
     return (
       <div key={target} className={`@container rounded-xl border border-gray-200 bg-white p-3 sm:p-4 dark:border-gray-700 dark:bg-white/[0.02] ${fill ? "lg:flex-1" : ""}`}>
-        {/* Hàng tiêu đề: hợp đồng / cont | (hợp đồng) tiền hàng = cọc + còn lại | tổng — cùng một hàng, hẹp thì xuống dòng */}
+        {/* Hàng tiêu đề: hợp đồng / cont | (hợp đồng) tiền hàng, cọc, còn lại | tổng — cùng một hàng, hẹp thì xuống dòng */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-100 pb-2 dark:border-gray-800">
           <p className={`min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-white ${isContract ? "" : "font-mono"}`}>{title}</p>
           {showGoodsSplit && (
@@ -322,9 +308,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
                 <select value={entry.categoryId}
                   onChange={(event) => {
                     const categoryId = event.target.value;
-                    // Thanh toán tiền còn lại: điền sẵn = tiền hàng - cọc.
-                    const fill = !entry.amount.trim() && goodsPaymentKind(categoriesById.get(categoryId)) === "balance" ? expectedBalance() : null;
-                    setNewEntry((current) => ({ ...current, [target]: { ...entry, categoryId, amount: fill && amountToCents(fill) > BigInt(0) ? formatAmount(fill, language) : entry.amount } }));
+                    setNewEntry((current) => ({ ...current, [target]: { ...entry, categoryId } }));
                   }}
                   className={`${INPUT} w-full border-gray-200 dark:border-gray-700`}>
                   <option value="">{t("pcSelectFee")}</option>

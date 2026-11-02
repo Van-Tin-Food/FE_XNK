@@ -37,7 +37,7 @@ export interface OrderCosts {
   cancelled: boolean;
   /** Đơn đã qua vận chuyển biển (đã giao): không nhập thêm cọc / thanh toán còn lại. */
   seaPassed: boolean;
-  /** Tổng tiền hàng (chỉ có khi được xem tiền hàng) để tính sẵn thanh toán còn lại = tiền hàng - cọc. */
+  /** Tổng tiền hàng (chỉ có khi được xem tiền hàng), dùng để kiểm tra khoản còn lại nhỏ hơn tổng này. */
   goodsTotal: string;
   containers: string[];
   categories: CostCategory[];
