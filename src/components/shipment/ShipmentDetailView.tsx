@@ -2379,7 +2379,46 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     }
     setIsArchiveLoading(true);
     try {
+      // For a single-container order, fill missing package counts as if entered manually in section 4.
+      const containers = shipment.database?.bills.flatMap((bill) => bill.containers) || [];
+      const existingContainerDetails = flattenContainerDetails(shipment.database);
+      if (containers.length === 1) {
+        const onlyContainer = containers[0];
+        const allocations = (shipment.database?.details || []).flatMap((detail) => {
+          const itemCode = detail.itemCodes.find((item) => !item.id_item_code.startsWith("new-item-"));
+          const packages = packageAmount(detail.so_kien);
+          if (!itemCode || packages <= 0) return [];
+          const itemAllocations = existingContainerDetails.filter((allocation) => allocation.id_item_code === itemCode.id_item_code);
+          const allocated = itemAllocations.reduce((total, allocation) => total + packageAmount(allocation.so_kien), 0);
+          return allocated > 0
+            ? []
+            : [{ itemCodeId: itemCode.id_item_code, packages: databasePackageCountOrNull(detail.so_kien), existing: itemAllocations[0] }];
+        });
+        const updatedRows: ContainerDetailRecord[] = [];
+        for (const allocation of allocations) {
+          let row: ContainerDetailRecord;
+          if (allocation.existing) {
+            await updateDatabaseRow<ContainerDetailRecord>(databaseEndpoints.containerDetails, allocation.existing.id_chi_tiet_container, { so_kien: allocation.packages });
+            row = { ...allocation.existing, so_kien: allocation.packages };
+          } else {
+            row = await createDatabaseRow<ContainerDetailRecord>(databaseEndpoints.containerDetails, {
+                id_bl_container: onlyContainer.id_bl_container,
+                id_item_code: allocation.itemCodeId,
+                so_kien: allocation.packages,
+              });
+          }
+          updatedRows.push(row);
+        }
+        if (updatedRows.length > 0) {
+          setContainerDetailForms((current) => {
+            const updatedIds = new Set(updatedRows.map((row) => row.id_chi_tiet_container));
+            const retained = current.filter((row) => !updatedIds.has(row.id_chi_tiet_container));
+            return [...retained, ...updatedRows];
+          });
+        }
+      }
       await moveCompletedOrder(shipment.orderCode);
+      await onRefresh?.();
       recordActivity(user, {
         action: "ARCHIVE_DOCUMENTS",
         location: "ShipmentDetailModal/Documents",
