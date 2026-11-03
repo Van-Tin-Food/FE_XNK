@@ -10,6 +10,7 @@ import { uploadFileToDriveSession, type UploadProgress } from "@/utils/driveResu
 
 /** -2 đã hủy, -1 không duyệt, 0 chưa duyệt (nháp nếu chưa gửi), 1 đã duyệt (chờ chi tiền), 3 đã chi tiền, 2 đã lưu trữ. */
 export type PaymentRequestStatus = -2 | -1 | 0 | 1 | 2 | 3;
+export type PaymentRequestState = "draft" | "pending" | "approved" | "paid" | "completed" | "rejected" | "cancelled";
 export type PaymentFlow = "xanh" | "vang" | "do";
 export const PAYMENT_STATUSES: readonly PaymentRequestStatus[] = [0, 1, 3, -1, 2, -2];
 export const PAYMENT_STATUS_LABEL_KEYS: Record<PaymentRequestStatus, string> = {
@@ -205,6 +206,7 @@ export interface PaymentFeeSuggestion {
 export interface PaymentRequester {
   id: string;
   name: string;
+  username?: string;
 }
 
 export interface PaymentBeneficiarySuggestion {
@@ -273,10 +275,12 @@ export interface PaymentRequestQuery {
   limit: number;
   offset: number;
   status?: PaymentRequestStatus;
+  state?: PaymentRequestState;
+  flow?: PaymentFlow;
+  requesterId?: string;
+  createdFrom?: string;
+  createdTo?: string;
   q?: string;
-  mine?: boolean;
-  /** Lọc đề nghị có ít nhất một chi phí thuộc mã phí này (vd CONT). */
-  costCode?: string;
   sort?: PaymentRequestSortKey;
   dir?: "asc" | "desc";
 }
@@ -404,12 +408,21 @@ const toBody = (input: PaymentRequestInput) => ({
   })),
 });
 
-export async function listPaymentRequests(query: PaymentRequestQuery, signal?: AbortSignal): Promise<{ requests: PaymentRequest[]; total: number; viewAll: boolean; costCodes: string[] }> {
+export interface PaymentRequestStateTotal {
+  currency: string;
+  count: number;
+  total: string;
+}
+
+export async function listPaymentRequests(query: PaymentRequestQuery, signal?: AbortSignal): Promise<{ requests: PaymentRequest[]; total: number; stateTotals: Partial<Record<PaymentRequestState, PaymentRequestStateTotal[]>>; flowCounts: Partial<Record<PaymentFlow, number>>; requesters: PaymentRequester[] }> {
   const params = new URLSearchParams({ limit: String(query.limit), offset: String(query.offset) });
   if (query.status !== undefined) params.set("status", String(query.status));
+  if (query.state) params.set("state", query.state);
+  if (query.flow) params.set("flow", query.flow);
+  if (query.requesterId) params.set("requester", query.requesterId);
+  if (query.createdFrom) params.set("created_from", query.createdFrom);
+  if (query.createdTo) params.set("created_to", query.createdTo);
   if (query.q) params.set("q", query.q);
-  if (query.mine) params.set("mine", "1");
-  if (query.costCode) params.set("ma_phi", query.costCode);
   if (query.sort) {
     params.set("sort", query.sort);
     params.set("dir", query.dir === "asc" ? "asc" : "desc");
@@ -417,12 +430,19 @@ export async function listPaymentRequests(query: PaymentRequestQuery, signal?: A
   const payload = await request<unknown>("GET", `?${params.toString()}`, undefined, signal);
   const rows = isRecord(payload) && Array.isArray(payload.data) ? payload.data : [];
   const pagination = isRecord(payload) && isRecord(payload.pagination) ? payload.pagination : {};
+  const rawStateTotals = isRecord(payload) && isRecord(payload.stateTotals) ? payload.stateTotals : {};
+  const rawFlowCounts = isRecord(payload) && isRecord(payload.flowCounts) ? payload.flowCounts : {};
+  const rawRequesters = isRecord(payload) && Array.isArray(payload.requesters) ? payload.requesters.filter(isRecord) : [];
   const requests = rows.map(normalizeRequest).filter((row): row is PaymentRequest => row !== null);
   return {
     requests,
     total: Number.isFinite(Number(pagination.total)) ? Number(pagination.total) : requests.length,
-    viewAll: isRecord(payload) && payload.viewAll === true,
-    costCodes: isRecord(payload) && Array.isArray(payload.costCodes) ? payload.costCodes.map(str).filter(Boolean) : [],
+    stateTotals: Object.fromEntries(Object.entries(rawStateTotals).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? value.filter(isRecord).map((row) => ({ currency: str(row.currency) || "VND", count: Number(row.count) || 0, total: str(row.total) || "0" })) : [],
+    ])) as Partial<Record<PaymentRequestState, PaymentRequestStateTotal[]>>,
+    flowCounts: Object.fromEntries(Object.entries(rawFlowCounts).map(([key, value]) => [key, Number(value) || 0])) as Partial<Record<PaymentFlow, number>>,
+    requesters: rawRequesters.map((row) => ({ id: str(row.id), name: str(row.name), username: str(row.username) || undefined })).filter((row) => row.id),
   };
 }
 

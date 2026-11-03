@@ -177,6 +177,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   // Đang tạo + lưu giấy đề nghị đã ký (PDF) sau khi upload ủy nhiệm chi.
   const [savingSignedForm, setSavingSignedForm] = useState(false);
   const [fileCount, setFileCount] = useState(0);
+  const [documentsRevision, setDocumentsRevision] = useState(0);
   // Số file hóa đơn (mục "Hóa đơn"): đề nghị luồng đỏ phải có mới lưu trữ được.
   const [invoiceCount, setInvoiceCount] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -491,7 +492,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
         {/* 1. Tạo đề nghị */}
         <NodeCard index={0} title={editing ? t("prEditTitle", { id: request.id }) : titles[0]} state={states[0]}>
           {editing ? (
-            <PaymentRequestWizard editing={request} onCancel={() => setEditing(false)} onSaved={(saved) => { setRequest(saved); setEditing(false); }} />
+            <PaymentRequestWizard editing={request} onCancel={() => setEditing(false)} onSaved={(saved) => { setRequest(saved); setDocumentsRevision((version) => version + 1); setEditing(false); }} />
           ) : (
             <div className="space-y-3">
               <p className="text-xs text-gray-500">{t("prCreatedBy", { name: request.creatorName || "—", time: formatDateTime(request.createdAt, language) })}</p>
@@ -545,7 +546,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                       {/* Đính kèm hóa đơn nháp / chứng từ trước khi gửi: thẻ Google Chat hiện link từng file. */}
                       <div className="rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
                         <p className="mb-2 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prAttachBeforeSend")}</p>
-                        <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
+                        <PaymentDocumentsPanel key={`draft-${documentsRevision}`} requestId={request.id} canUpload={canUploadDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
                       </div>
                       <p className="text-sm text-gray-600 dark:text-gray-300">{t("prReviewHint")}</p>
                       <button type="button" onClick={() => void send()} disabled={busy !== ""} className={`${BUTTON_PRIMARY} w-full sm:w-auto`}>
@@ -603,7 +604,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                   {canUploadDocs && (
                     <>
                       <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prDocsDuringApproval")}</p>
-                      <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
+                      <PaymentDocumentsPanel key={`payment-${documentsRevision}`} requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
                     </>
                   )}
                   {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
@@ -658,7 +659,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                 {canUploadDocs && (
                   <>
                     <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prDocsTitle")}</p>
-                    <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
+                    <PaymentDocumentsPanel key={`archive-details-${documentsRevision}`} requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
                   </>
                 )}
                 {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
@@ -675,9 +676,9 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
               {t("prInvoiceTitle")}
               {redNeedsInvoice && <span className="rounded-md bg-error-50 px-1.5 py-0.5 text-[11px] font-semibold text-error-700 dark:bg-error-500/10 dark:text-error-300">{t("prInvoiceRequired")}</span>}
             </p>
-            <PaymentDocumentsPanel requestId={request.id} kind={INVOICE} canUpload={canUploadDocs} canRemove={canRemoveDocs} onFilesChange={setInvoiceCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
+                <PaymentDocumentsPanel key={`invoice-${documentsRevision}`} requestId={request.id} kind={INVOICE} canUpload={canUploadDocs} canRemove={canRemoveDocs} onFilesChange={setInvoiceCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
           </div>
-          <PaymentDocumentsPanel requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
+          <PaymentDocumentsPanel key={`archive-${documentsRevision}`} requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
           {canUploadDocs && !canRemoveDocs && <p className="mt-2 text-xs text-gray-500">{t("prPaidAddOnlyHint")}</p>}
           {request.status === 3 && (
             <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">

@@ -510,7 +510,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         ...(!editing && requester ? { requesterId: requester.id } : {}),
       };
       const saved = editing ? await updatePaymentRequest(editing.id, input) : await createPaymentRequest(input);
-      if (!editing && attachments.length) {
+      if (attachments.length) {
         try {
           const invoiceFiles = attachments.filter((item) => item.isInvoice);
           const regularFiles = attachments.filter((item) => !item.isInvoice);
@@ -1043,8 +1043,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
             </div>
             {hasVat && <p className="text-right text-xs text-gray-500">{t("prVatTotalLine", { tax: money(taxTotal) })}</p>}
           </div>
-          {!editing && (
-            <div className="mt-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700 sm:p-4">
+          <div className="mt-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700 sm:p-4">
               <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prAttachBeforeSend")}</p>
               <p className="mt-1 text-xs text-gray-500">{t("prCreateAttachmentKindHint")}</p>
               <input
@@ -1053,7 +1052,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                 multiple
                 accept={DOCUMENT_FILE_ACCEPT}
                 className="hidden"
-                id="payment-request-create-attachments"
+                id="payment-request-attachments"
                 disabled={saving}
                 onChange={(event) => {
                   const chosen = Array.from(event.target.files || []);
@@ -1094,7 +1093,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                 className={`mt-3 rounded-xl border-2 border-dashed p-3 text-center transition-colors ${attachmentDragActive ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10" : "border-gray-300 dark:border-gray-700"}`}
               >
                 <p className="text-xs text-gray-500">{t("prDropFilesHint")}</p>
-                <label htmlFor="payment-request-create-attachments" className="mt-2 inline-flex h-10 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-500/10">{t("prChooseFiles")}</label>
+                <label htmlFor="payment-request-attachments" className="mt-2 inline-flex h-10 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-500/10">{t("prChooseFiles")}</label>
               </div>
               {attachments.length > 0 && (
                 <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
@@ -1123,8 +1122,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                   <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800"><div className="h-full bg-brand-500 transition-[width]" style={{ width: `${attachmentUploadProgress.percent}%` }} /></div>
                 </div>
               )}
-            </div>
-          )}
+          </div>
           <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">{t("prSaveHint")}</p>
           {error && <p role="alert" className="mt-3 break-words rounded-lg bg-error-50 px-3 py-2 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-300">{error}</p>}
           <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

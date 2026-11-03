@@ -8,21 +8,89 @@ import { PaymentStatusBadge, RedFlowBadge, formatDateTime, formatDueDate, isOver
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import {
-  PAYMENT_STATUSES,
-  PAYMENT_STATUS_LABEL_KEYS,
   listPaymentRequests,
+  type PaymentFlow,
+  type PaymentRequester,
   type PaymentRequest,
   type PaymentRequestSortKey,
-  type PaymentRequestStatus,
+  type PaymentRequestState,
+  type PaymentRequestStateTotal,
 } from "@/services/paymentRequestApi";
-import { canCreatePaymentRequests, canOpenPaymentRequests, costCodeName, formatMoney } from "@/utils/paymentRequest";
+import { canCreatePaymentRequests, canOpenPaymentRequests, costCodeName, formatMoney, sumAmounts } from "@/utils/paymentRequest";
 
 // Danh sách đề nghị thanh toán: lọc (trạng thái, mã phí, từ khoá) + sắp xếp + phân trang đều phía server. Bấm một đề nghị -> trang quy trình /payment-requests/<mã>;
 // link cũ ?id=DNTT-001 tự chuyển sang trang đó.
 
 const DEFAULT_PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 350;
-const SELECT_CLASS = "h-10 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 md:w-48 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200";
+// Ô lọc cùng kiểu thanh lọc đơn hàng XNK (components/shipment/ShipmentFilters): nhãn nhỏ phía trên, ô bo tròn.
+const INPUT_CLASS = "h-10 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500 dark:focus:ring-brand-500/20";
+const LABEL_CLASS = "mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400";
+
+/**
+ * Thẻ lọc trạng thái (cùng kiểu thẻ số liệu đơn hàng XNK — components/shipment/ShipmentMetrics): Tất cả / Chưa duyệt (chi
+ * phí chờ duyệt) / Đã duyệt (chi phí dự kiến chi) / Chưa hoàn thành chứng từ (đã chi tiền) / Hoàn thành chứng từ (hoàn tất
+ * quy trình). Mỗi thẻ: số đề nghị + tổng tiền của nhóm.
+ */
+const STATE_CARDS: ReadonlyArray<{
+  value: "" | PaymentRequestState;
+  labelKey: string;
+  hintKey: string;
+  amountKey: string;
+  color: string;
+  bg: string;
+  border: string;
+  icon: string;
+}> = [
+  { value: "", labelKey: "prAllStatuses", hintKey: "prStateAllHint", amountKey: "prEstimatedSpend", color: "text-brand-600 dark:text-brand-300", bg: "bg-brand-50 dark:bg-brand-500/10", border: "border-brand-300 dark:border-brand-500/40", icon: "M4 6h16M4 12h16M4 18h10" },
+  { value: "pending", labelKey: "prStatePendingCard", hintKey: "prStatePendingHint", amountKey: "prPendingSpend", color: "text-warning-600 dark:text-warning-300", bg: "bg-warning-50 dark:bg-warning-500/10", border: "border-warning-300 dark:border-warning-500/40", icon: "M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" },
+  { value: "approved", labelKey: "prStateApprovedCard", hintKey: "prStateApprovedHint", amountKey: "prExpectedSpend", color: "text-blue-light-600 dark:text-blue-light-300", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", border: "border-blue-light-300 dark:border-blue-light-500/40", icon: "M9 12l2 2 4-4M7 3h10a2 2 0 0 1 2 2v14l-3-2-2 2-2-2-2 2-2-2-3 2V5a2 2 0 0 1 2-2z" },
+  { value: "paid", labelKey: "prStatePaidCard", hintKey: "prStatePaidHint", amountKey: "prPaidSpend", color: "text-orange-600 dark:text-orange-300", bg: "bg-orange-50 dark:bg-orange-500/10", border: "border-orange-300 dark:border-orange-500/40", icon: "M3 7h18v10H3zM3 10h18M7 15h3" },
+  { value: "completed", labelKey: "prStateCompletedCard", hintKey: "prStateCompletedHint", amountKey: "prPaidSpend", color: "text-success-600 dark:text-success-300", bg: "bg-success-50 dark:bg-success-500/10", border: "border-success-300 dark:border-success-500/40", icon: "M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3" },
+];
+/**
+ * Thời gian tạo đề nghị: tháng này / tháng trước / quý này / năm nay / tất cả / tùy chọn (từ ngày – đến ngày). Mốc ngày theo giờ
+ * Việt Nam (BE so ngày tạo theo giờ Việt Nam), không phụ thuộc múi giờ máy người dùng.
+ */
+type PaymentRequestPeriod = "currentMonth" | "previousMonth" | "currentQuarter" | "currentYear" | "all" | "custom";
+const PERIODS: ReadonlyArray<{ value: PaymentRequestPeriod; labelKey: string }> = [
+  { value: "currentMonth", labelKey: "prPeriodCurrentMonth" },
+  { value: "previousMonth", labelKey: "prPeriodPreviousMonth" },
+  { value: "currentQuarter", labelKey: "prPeriodCurrentQuarter" },
+  { value: "currentYear", labelKey: "prPeriodCurrentYear" },
+  { value: "all", labelKey: "prPeriodAll" },
+  { value: "custom", labelKey: "prPeriodCustom" },
+];
+const DEFAULT_PERIOD: PaymentRequestPeriod = "currentMonth";
+
+/** Hôm nay theo giờ Việt Nam: { year, month (0-11), day }. */
+function todayVn(now = new Date()) {
+  const [year, month, day] = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(now).split("-").map(Number);
+  return { year, month: month - 1, day };
+}
+
+const isoDate = (year: number, month: number, day: number) => {
+  const date = new Date(Date.UTC(year, month, day));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+};
+
+/** Khoảng ngày tạo (YYYY-MM-DD, gồm cả 2 đầu) của kỳ; "all" = không giới hạn; "custom" = ngày người dùng chọn. */
+function getPeriodRange(period: PaymentRequestPeriod, custom: { from: string; to: string }): { createdFrom?: string; createdTo?: string } {
+  if (period === "all") return {};
+  if (period === "custom") return { createdFrom: custom.from || undefined, createdTo: custom.to || undefined };
+  const { year, month } = todayVn();
+  if (period === "previousMonth") return { createdFrom: isoDate(year, month - 1, 1), createdTo: isoDate(year, month, 0) };
+  if (period === "currentQuarter") {
+    const first = Math.floor(month / 3) * 3;
+    return { createdFrom: isoDate(year, first, 1), createdTo: isoDate(year, first + 3, 0) };
+  }
+  if (period === "currentYear") return { createdFrom: isoDate(year, 0, 1), createdTo: isoDate(year, 11, 31) };
+  return { createdFrom: isoDate(year, month, 1), createdTo: isoDate(year, month + 1, 0) };
+}
+
+/** "2026-11-01" -> "01/11". */
+const shortDate = (value?: string) => (value ? `${value.slice(8, 10)}/${value.slice(5, 7)}` : "");
 
 function SortIcon({ active, direction }: { active: boolean; direction: "asc" | "desc" }) {
   if (!active) return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300 dark:text-gray-600"><polyline points="7 15 12 20 17 15" /><polyline points="7 9 12 4 17 9" /></svg>;
@@ -41,17 +109,20 @@ function PaymentRequestsContent() {
 
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
   const [total, setTotal] = useState(0);
-  const [viewAll, setViewAll] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [status, setStatus] = useState<"" | `${PaymentRequestStatus}`>("");
-  const [costCodeFilter, setCostCodeFilter] = useState("");
-  const [costCodes, setCostCodes] = useState<string[]>([]);
+  const [requestState, setRequestState] = useState<"" | PaymentRequestState>("");
+  const [periodFilter, setPeriodFilter] = useState<PaymentRequestPeriod>(DEFAULT_PERIOD);
+  const [customRange, setCustomRange] = useState({ from: "", to: "" });
+  const [flowFilter, setFlowFilter] = useState<"" | PaymentFlow>("");
+  const [stateTotals, setStateTotals] = useState<Partial<Record<PaymentRequestState, PaymentRequestStateTotal[]>>>({});
+  const [flowCounts, setFlowCounts] = useState<Partial<Record<PaymentFlow, number>>>({});
+  const [requesterFilter, setRequesterFilter] = useState("");
+  const [requesters, setRequesters] = useState<PaymentRequester[]>([]);
   // null = mặc định của BE (mới tạo trước).
   const [sort, setSort] = useState<{ key: PaymentRequestSortKey; direction: "asc" | "desc" } | null>(null);
-  const [mine, setMine] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [reloadKey, setReloadKey] = useState(0);
@@ -74,21 +145,29 @@ function PaymentRequestsContent() {
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError("");
+      const periodRange = getPeriodRange(periodFilter, customRange);
       listPaymentRequests({
         limit: pageSize,
         offset: (page - 1) * pageSize,
-        status: status === "" ? undefined : Number(status) as PaymentRequestStatus,
+        state: requestState || undefined,
+        flow: flowFilter || undefined,
+        requesterId: requesterFilter || undefined,
+        ...periodRange,
         q: debouncedQuery || undefined,
-        mine,
-        costCode: costCodeFilter || undefined,
         sort: sort?.key,
         dir: sort?.direction,
       }, controller.signal)
         .then((result) => {
           setRequests(result.requests);
           setTotal(result.total);
-          setViewAll(result.viewAll);
-          setCostCodes(result.costCodes);
+          setStateTotals(result.stateTotals);
+          setFlowCounts(result.flowCounts);
+          setRequesters((current) => {
+            const selected = current.find((requester) => requester.id === requesterFilter);
+            return selected && !result.requesters.some((requester) => requester.id === selected.id)
+              ? [...result.requesters, selected]
+              : result.requesters;
+          });
           // Trang hiện tại vượt quá số trang (vừa đổi bộ lọc): quay về trang cuối còn dữ liệu.
           const lastPage = Math.max(1, Math.ceil(result.total / pageSize));
           if (page > lastPage) setPage(lastPage);
@@ -104,7 +183,7 @@ function PaymentRequestsContent() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [canView, costCodeFilter, debouncedQuery, mine, page, pageSize, reloadKey, sort, status, t]);
+  }, [canView, customRange, debouncedQuery, flowFilter, page, pageSize, periodFilter, reloadKey, requesterFilter, requestState, sort, t]);
 
   const reload = () => setReloadKey((key) => key + 1);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -122,13 +201,46 @@ function PaymentRequestsContent() {
 
   const money = (request: PaymentRequest) => formatMoney(request.total, request.currency, language);
   const dueClass = (request: PaymentRequest) => (isOverdue(request.dueDate, request.status) ? "text-error-600 dark:text-error-400" : "text-gray-700 dark:text-gray-300");
-  const costGroups = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => cost.code || "—"))];
+  const costCodeLabel = (code: string) => {
+    const normalized = code.toUpperCase();
+    if (normalized === "VH") return `${normalized} · ${t("prType_van_hanh")}`;
+    if (normalized === "MH") return `${normalized} · ${t("prType_mua_hang")}`;
+    return code;
+  };
+  const costGroups = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => cost.code || "—"))].map(costCodeLabel);
   const costTargets = (request: PaymentRequest) => ({
     contracts: [...new Set(request.costs.map((cost) => cost.contract).filter(Boolean))],
     containers: [...new Set(request.costs.map((cost) => cost.container).filter(Boolean))],
   });
   const costTargetText = (request: PaymentRequest) => [...costTargets(request).contracts, ...costTargets(request).containers].join(", ");
   const costNames = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => costCodeName(cost.code, cost.categoryName)).filter(Boolean))];
+  const flowCountTotal = Object.values(flowCounts).reduce((sum, count) => sum + (count || 0), 0);
+  const availableFlows = (["do", "xanh", "vang"] as const).filter((value) => (flowCounts[value] ?? 0) > 0 || flowFilter === value);
+  const summarizeStates = (states?: PaymentRequestState[]) => {
+    const rows = states ? states.flatMap((state) => stateTotals[state] ?? []) : Object.values(stateTotals).flat();
+    const byCurrency = new Map<string, string[]>();
+    for (const row of rows) byCurrency.set(row.currency, [...(byCurrency.get(row.currency) ?? []), row.total]);
+    return {
+      count: rows.reduce((sum, row) => sum + row.count, 0),
+      amount: [...byCurrency.entries()].map(([currency, amounts]) => formatMoney(sumAmounts(amounts), currency, language)).join(" + ") || formatMoney("0", "VND", language),
+    };
+  };
+  const hasActiveFilter = Boolean(query || requesterFilter || flowFilter || periodFilter !== DEFAULT_PERIOD || requestState);
+  // Ngày tùy chọn: "đến ngày" trước "từ ngày" thì BE báo lỗi — chặn sớm ở ô nhập (min / max).
+  const periodHint = (() => {
+    const range = getPeriodRange(periodFilter, customRange);
+    if (!range.createdFrom && !range.createdTo) return periodFilter === "all" ? "" : t("prPeriodPickDates");
+    return `${shortDate(range.createdFrom) || "…"} – ${shortDate(range.createdTo) || "…"}`;
+  })();
+  const clearFilters = () => {
+    setQuery("");
+    setRequesterFilter("");
+    setFlowFilter("");
+    setPeriodFilter(DEFAULT_PERIOD);
+    setCustomRange({ from: "", to: "" });
+    setRequestState("");
+    setPage(1);
+  };
   const toggleSort = (key: PaymentRequestSortKey) => {
     setSort((current) => (current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" }));
     setPage(1);
@@ -154,25 +266,98 @@ function PaymentRequestsContent() {
         )}
       </header>
 
-      <section className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 md:flex-row md:flex-wrap md:items-center">
-          <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("prSearch")} aria-label={t("prSearch")}
-            className="h-10 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 md:flex-1 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-          <select value={status} onChange={(event) => { setStatus(event.target.value as typeof status); setPage(1); }} aria-label={t("status")} className={SELECT_CLASS}>
-            <option value="">{t("prAllStatuses")}</option>
-            {PAYMENT_STATUSES.map((value) => <option key={value} value={value}>{t(PAYMENT_STATUS_LABEL_KEYS[value])}</option>)}
-          </select>
-          <select value={costCodeFilter} onChange={(event) => { setCostCodeFilter(event.target.value); setPage(1); }} aria-label={t("prCostCodeLabel")} className={SELECT_CLASS}>
-            <option value="">{t("prAllCostCodes")}</option>
-            {costCodes.map((code) => <option key={code} value={code}>{code}</option>)}
-          </select>
-          {viewAll && (
-            <label className="flex h-10 items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-              <input type="checkbox" className="h-4 w-4" checked={mine} onChange={(event) => { setMine(event.target.checked); setPage(1); }} />
-              {t("prOnlyMine")}
-            </label>
-          )}
+      {/* Thẻ lọc trạng thái (kiểu thẻ số liệu đơn hàng XNK) */}
+      <div role="group" aria-label={t("status")} className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+        {STATE_CARDS.map((card) => {
+          const summary = card.value ? summarizeStates([card.value]) : summarizeStates();
+          const selected = requestState === card.value;
+          return (
+            <button key={card.value || "all"} type="button" aria-pressed={selected} title={t(card.hintKey)} onClick={() => { setRequestState(card.value); setPage(1); }}
+              className={`relative flex w-full min-w-0 flex-col gap-2 rounded-xl border px-4 py-3 text-left transition-all duration-200 hover:shadow-md ${selected
+                ? `${card.border} ${card.bg} shadow-sm`
+                : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700"}`}>
+              {selected && <span className={`absolute right-3 top-3 h-2 w-2 animate-pulse rounded-full bg-current ${card.color}`} aria-hidden="true" />}
+              <span className="flex min-w-0 items-center gap-2 pr-3">
+                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${selected ? `${card.bg} ${card.color}` : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={card.icon} /></svg>
+                </span>
+                <span className={`min-w-0 truncate text-xs font-semibold uppercase tracking-wide ${selected ? card.color : "text-gray-600 dark:text-gray-300"}`}>{t(card.labelKey)}</span>
+              </span>
+              <span className="flex min-w-0 items-baseline justify-between gap-2">
+                <span className={`text-xl font-bold leading-none tabular-nums ${selected ? card.color : "text-gray-800 dark:text-white/90"}`}>{summary.count}</span>
+                <span className="min-w-0 truncate text-right text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-200" title={`${t(card.amountKey)}: ${summary.amount}`}>{summary.amount}</span>
+              </span>
+              <span className="truncate text-[11px] text-gray-400 dark:text-gray-500">{t(card.amountKey)} · {t(card.hintKey)}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Thanh lọc (kiểu thanh lọc đơn hàng XNK) */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3.5 dark:border-gray-800 dark:bg-gray-900 md:flex-row md:flex-wrap md:items-end">
+        <div className="min-w-0 flex-1 md:min-w-[220px]">
+          <label htmlFor="pr-filter-search" className={LABEL_CLASS}>{t("prSearchLabel")}</label>
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input id="pr-filter-search" type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("prSearch")}
+              className={`${INPUT_CLASS} pl-9`} />
+          </div>
         </div>
+        <div className="w-full md:w-52">
+          <label htmlFor="pr-filter-requester" className={LABEL_CLASS}>{t("prCreator")}</label>
+          <select id="pr-filter-requester" value={requesterFilter} onChange={(event) => { setRequesterFilter(event.target.value); setPage(1); }} className={INPUT_CLASS}>
+            <option value="">{t("prAllRequesters")}</option>
+            {requesters.map((requester) => <option key={requester.id} value={requester.id}>{requester.username ? `${requester.name} · @${requester.username}` : requester.name}</option>)}
+          </select>
+        </div>
+        <div className="w-full md:w-44">
+          <label htmlFor="pr-filter-flow" className={LABEL_CLASS}>{t("prFlowFilter")}</label>
+          <select id="pr-filter-flow" value={flowFilter} onChange={(event) => { setFlowFilter(event.target.value as "" | PaymentFlow); setPage(1); }} className={INPUT_CLASS}>
+            <option value="">{t("prAllFlows")} ({flowCountTotal})</option>
+            {availableFlows.map((flow) => <option key={flow} value={flow}>{t(`prFlow_${flow}`)} ({flowCounts[flow] ?? 0})</option>)}
+          </select>
+        </div>
+        <div className="w-full md:w-48">
+          <label htmlFor="pr-filter-period" className={LABEL_CLASS}>
+            {t("prPeriodFilter")}
+            {periodHint && <span className="ml-1 font-normal text-gray-400">· {periodHint}</span>}
+          </label>
+          <select id="pr-filter-period" value={periodFilter} onChange={(event) => { setPeriodFilter(event.target.value as PaymentRequestPeriod); setPage(1); }} className={INPUT_CLASS}>
+            {PERIODS.map((period) => <option key={period.value} value={period.value}>{t(period.labelKey)}</option>)}
+          </select>
+        </div>
+        {periodFilter === "custom" && (
+          <div className="grid w-full grid-cols-2 gap-2 md:w-auto">
+            <div className="min-w-0 md:w-40">
+              <label htmlFor="pr-filter-from" className={LABEL_CLASS}>{t("prPeriodFrom")}</label>
+              <input id="pr-filter-from" type="date" value={customRange.from} max={customRange.to || undefined}
+                onChange={(event) => { setCustomRange((range) => ({ ...range, from: event.target.value })); setPage(1); }} className={INPUT_CLASS} />
+            </div>
+            <div className="min-w-0 md:w-40">
+              <label htmlFor="pr-filter-to" className={LABEL_CLASS}>{t("prPeriodTo")}</label>
+              <input id="pr-filter-to" type="date" value={customRange.to} min={customRange.from || undefined}
+                onChange={(event) => { setCustomRange((range) => ({ ...range, to: event.target.value })); setPage(1); }} className={INPUT_CLASS} />
+            </div>
+          </div>
+        )}
+        {hasActiveFilter && (
+          <button type="button" onClick={clearFilters}
+            className="h-10 shrink-0 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.03]">
+            {t("prClearFilters")}
+          </button>
+        )}
+      </div>
+
+      <section className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+
+        {loading && requests.length > 0 && (
+          <div role="status" aria-live="polite" className="flex items-center gap-2 border-b border-gray-100 bg-brand-50/60 px-4 py-2 text-xs font-medium text-brand-700 dark:border-gray-800 dark:bg-brand-500/10 dark:text-brand-300">
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
+            {t("loading")}
+          </div>
+        )}
 
         {error ? (
           <div className="p-6 text-center">
@@ -184,7 +369,7 @@ function PaymentRequestsContent() {
         ) : requests.length === 0 ? (
           <p className="py-16 text-center text-sm text-gray-500">{t("prEmpty")}</p>
         ) : (
-          <div className={loading ? "opacity-60 transition-opacity" : ""}>
+          <div aria-busy={loading} className={loading ? "opacity-60 transition-opacity" : "transition-opacity"}>
             {/* Điện thoại / tablet: thẻ */}
             <ul className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 lg:hidden">
               {requests.map((request) => (
