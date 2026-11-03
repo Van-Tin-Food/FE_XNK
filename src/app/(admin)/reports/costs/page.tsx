@@ -86,9 +86,9 @@ function Stat({ label, value, strong = false, tone = "" }: { label: string; valu
 
 export default function CostReportPage() {
   const { t, language } = useLanguage();
-  const { can, user } = useAuth();
+  const { user } = useAuth();
   const { notify } = useSystemNotification();
-  const canView = can("costReports");
+  const canView = Number(user?.id) === 1;
 
   const [month, setMonth] = useState(() => currentMonth());
   const [data, setData] = useState<CostOverview | null>(null);

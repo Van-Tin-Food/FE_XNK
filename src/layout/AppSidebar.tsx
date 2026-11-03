@@ -18,7 +18,7 @@ const LEGACY_ETA_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfy
 const WAREHOUSE_SYNC_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/AKfycbxQU59_Qmdkq7h3OPjK4r2OQbbHIQXi4SWK5OZWyjOj3JH4HJPE4Jl6AHnI9vZi3PiGUQ/exec";
 
 const AppSidebar: React.FC = () => {
-  const { can, logout } = useAuth();
+  const { user, can, logout } = useAuth();
   const { isExpanded, isMobileOpen } = useSidebar();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -50,7 +50,7 @@ const AppSidebar: React.FC = () => {
   const canOpenPaymentRequestList = canOpenPaymentRequests(can);
   const canViewCostManagement = canViewPaymentCategories || canViewPaymentRequests;
   // Mục Báo cáo: báo cáo chi phí — quyền costReports (admin cấp riêng cho từng tài khoản).
-  const canViewCostReport = can("costReports");
+  const canViewCostReport = Number(user?.id) === 1;
   const { t } = useLanguage();
 
   return (
