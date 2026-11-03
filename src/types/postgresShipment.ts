@@ -109,6 +109,13 @@ export interface DriveDocumentFileRecord {
   /** Thư mục container chứa file (TRA_CONT, INSPECTION). */
   folderId?: string | null;
   folderName?: string | null;
+  /**
+   * Ảnh hiện trường (INSPECTION): server chạy nền tạo bản có logo (JPG, thư mục GOOGLE_DRIVE_ID_IMG). pending = đang tạo,
+   * done = có watermarkUrl (hiển thị bản này, không hiện file gốc), failed = không tạo được. Không có = file cũ, hiện như cũ.
+   */
+  watermarkStatus?: "pending" | "done" | "failed" | null;
+  watermarkFileId?: string | null;
+  watermarkUrl?: string | null;
 }
 
 export type DriveDocumentValue = string | Array<DriveDocumentFileRecord | string> | null;

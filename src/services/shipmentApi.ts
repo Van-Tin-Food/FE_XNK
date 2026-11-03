@@ -162,6 +162,9 @@ function parseDocumentFiles(value: DriveDocumentValue | undefined): DriveDocumen
       uploadedByEmail: typeof file.uploadedByEmail === "string" ? file.uploadedByEmail : undefined,
       folderId: typeof file.folderId === "string" ? file.folderId : undefined,
       folderName: typeof file.folderName === "string" ? file.folderName : undefined,
+      watermarkStatus: file.watermarkStatus === "pending" || file.watermarkStatus === "done" || file.watermarkStatus === "failed" ? file.watermarkStatus : undefined,
+      watermarkFileId: typeof file.watermarkFileId === "string" ? file.watermarkFileId : undefined,
+      watermarkUrl: typeof file.watermarkUrl === "string" && /^https?:\/\//i.test(file.watermarkUrl) ? file.watermarkUrl : undefined,
     }];
   });
   return files.filter((file, index) => files.findIndex((other) => (

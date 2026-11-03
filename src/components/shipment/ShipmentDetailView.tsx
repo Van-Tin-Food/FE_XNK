@@ -31,8 +31,6 @@ import {
 import { DOCUMENT_FILE_ACCEPT, formatFileSize, isSupportedDocumentFile } from "@/utils/documentFile";
 import UploadProgressToast from "@/components/common/UploadProgressToast";
 import { DOCUMENT_UPLOAD_EVENT, useDocumentUploadQueue, type DocumentUploadEventDetail } from "@/context/DocumentUploadQueueContext";
-import { shouldWatermark, watermarkImageFile } from "@/utils/imageWatermark";
-import logoChim from "@/icons/logo_chim.png";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import ShipmentCostsTab from "./ShipmentCostsTab";
 import OcrLoadingCard, { InlineSpinner } from "./OcrLoadingCard";
@@ -433,6 +431,9 @@ function formatUploadDateTime(value: string | null | undefined, language: string
 /** File đang gửi lên Google Drive: hiện thanh tiến độ trong modal. */
 type UploadProgressState = { fileName: string; index: number; total: number; loaded: number; size: number };
 type UploadTargetParams = { transportCode?: string; folderNote?: string; containerFolderName?: string };
+/** Ảnh hiện trường chờ server tạo bản có logo: hỏi lại tiến độ mỗi 10 giây, tối đa 10 phút. */
+const WATERMARK_POLL_MS = 10 * 1000;
+const WATERMARK_POLL_LIMIT_MS = 10 * 60 * 1000;
 
 /** Số file của một chứng từ trong kết quả tiến độ (để không ghi đè kết quả mới hơn bằng kết quả về muộn). */
 function progressFileCount(progress: DocumentProgressResponse | null | undefined, docId: string): number {
@@ -1724,8 +1725,12 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
       uploadedBy: undefined,
       uploadedByEmail: undefined,
       folderName: undefined,
+      watermarkStatus: undefined,
+      watermarkUrl: undefined,
     }))).map((file, index) => ({
-      url: file.fileUrl,
+      // Ảnh hiện trường có bản watermark: hiển thị bản đó, không hiện file gốc (fileId vẫn là file gốc để xoá đúng file).
+      url: file.watermarkStatus === "done" && file.watermarkUrl ? file.watermarkUrl : file.fileUrl,
+      watermarkStatus: file.watermarkStatus || null,
       // Dữ liệu cũ chỉ lưu link: lấy fileId từ link Drive.
       fileId: file.fileId || driveFileIdFromUrl(file.fileUrl || ""),
       fileName: file.fileName?.trim() || "",
@@ -1742,18 +1747,65 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     if (CONTAINER_FOLDER_DOCUMENT_CODES.has(document.id)) {
       databaseFiles.sort((a, b) => a.label.localeCompare(b.label, "vi", { numeric: true }));
     }
-    // chung_tu_drive là nguồn duy nhất để hiển thị file và metadata trên FE.
+    // Ảnh hiện trường đang tạo / không tạo được bản watermark: không hiện file gốc, chỉ đếm để báo trạng thái.
+    const isLive = (file: { fileId: string }) => !(file.fileId && deletedDocumentFileIds.includes(file.fileId));
+    const watermarkPending = databaseFiles.filter((file) => file.watermarkStatus === "pending" && isLive(file)).length;
+    const watermarkFailed = databaseFiles.filter((file) => file.watermarkStatus === "failed" && isLive(file)).length;
+    // chung_tu_drive là nguồn duy nhất để hiển thị file và metadata trên FE. Ảnh hiện trường không hiện bản xem nhanh của
+    // file vừa chọn (là ảnh gốc).
     const sourceFiles = [
-      ...databaseFiles,
-      ...(localUploads[document.id] && !document.url
-        ? [{ url: localUploads[document.id], fileId: "", fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
+      ...databaseFiles.filter((file) => file.watermarkStatus !== "pending" && file.watermarkStatus !== "failed"),
+      ...(localUploads[document.id] && !document.url && document.id !== "INSPECTION"
+        ? [{ url: localUploads[document.id], watermarkStatus: null, fileId: "", fileName: "", uploadedAt: "", uploadedBy: "", label: t("documentFileIndex", { index: 1 }) }]
         : []),
     ];
     const files = sourceFiles.filter((file, index, allFiles) => file.url
-      && !(file.fileId && deletedDocumentFileIds.includes(file.fileId))
+      && isLive(file)
       && allFiles.findIndex((other) => other.url === file.url) === index);
-    return { document, files };
+    return { document, files, watermarkPending, watermarkFailed };
   });
+  const watermarkPendingTotal = documentFileGroups.reduce((sum, group) => sum + group.watermarkPending, 0);
+  const hasPendingWatermark = watermarkPendingTotal > 0;
+  // Ảnh hiện trường đang tạo bản có logo (server chạy nền): hỏi lại tiến độ chứng từ mỗi WATERMARK_POLL_MS (tối đa
+  // WATERMARK_POLL_LIMIT_MS) để hiện ảnh ngay khi xong, người dùng không phải tải lại trang.
+  const orderCodeForPoll = shipment.orderCode;
+  useEffect(() => {
+    if (!hasPendingWatermark) return;
+    let stopped = false;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      if (Date.now() - startedAt > WATERMARK_POLL_LIMIT_MS) {
+        window.clearInterval(timer);
+        return;
+      }
+      const stamp = nextProgressStamp();
+      checkDocumentProgress(orderCodeForPoll)
+        .then((progress) => { if (!stopped) applyDocumentProgress(progress, stamp); })
+        .catch(() => {
+          // Lỗi mạng tạm thời: lần hỏi sau thử lại.
+        });
+    }, WATERMARK_POLL_MS);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [applyDocumentProgress, hasPendingWatermark, nextProgressStamp, orderCodeForPoll]);
+  /** Trạng thái ảnh có logo của một chứng từ (ảnh hiện trường): đang tạo / không tạo được. */
+  const watermarkNote = (documentId: string) => {
+    const group = documentFileGroups.find((item) => item.document.id === documentId);
+    if (!group || (!group.watermarkPending && !group.watermarkFailed)) return null;
+    return (
+      <span className="flex flex-col gap-0.5 text-[11px]">
+        {group.watermarkPending > 0 && (
+          <span className="inline-flex items-center gap-1.5 text-brand-600 dark:text-brand-400">
+            <span aria-hidden="true" className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            {t("watermarkPending", { count: group.watermarkPending })}
+          </span>
+        )}
+        {group.watermarkFailed > 0 && <span className="text-error-600 dark:text-error-400">{t("watermarkFailed", { count: group.watermarkFailed })}</span>}
+      </span>
+    );
+  };
   // Thư mục ảnh kiểm dịch đã tạo (lấy từ metadata DB) để hôm sau chọn lại, không phải nhập tay.
   const inspectionFolders = (() => {
     const folders = new Map<string, { folderName: string; containerCode: string; label: string }>();
@@ -1980,18 +2032,14 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
 
   /**
    * Upload nhiều file chứng từ (không OCR) chạy nền: hàng đợi ở layout mở phiên cho cả lượt, gửi file song song, một
-   * file lỗi không dừng file khác (Thử lại ở thẻ tiến độ). Ảnh hiện trường (INSPECTION) đưa ra thị trường được đóng dấu
-   * chìm logo trước khi upload, chỉ lưu bản có dấu; không đóng dấu được thì file đó lỗi. Gọi sau khi đã kiểm tra trùng tên.
+   * file lỗi không dừng file khác (Thử lại ở thẻ tiến độ). Ảnh hiện trường (INSPECTION) upload nguyên file gốc; server
+   * chạy nền tạo bản có logo (JPG) để hiển thị. Gọi sau khi đã kiểm tra trùng tên.
    */
   const uploadDocumentFiles = (docId: string, files: File[], uploadTarget: UploadTargetParams) => {
     const orderCode = shipment.orderCode;
     enqueueDocumentUpload({
       target: { orderCode, documentCode: docId, ...uploadTarget },
       files,
-      // Chỉ lượt có ảnh cần đóng dấu mới qua bước chuẩn bị (mở phiên theo nhóm nhỏ); lượt còn lại mở phiên cả lượt một lần.
-      ...(files.some((selectedFile) => shouldWatermark(docId, selectedFile)) ? {
-        prepareFile: (selectedFile: File) => (shouldWatermark(docId, selectedFile) ? watermarkImageFile(selectedFile, logoChim.src) : Promise.resolve(selectedFile)),
-      } : {}),
       onUploaded: ({ uploadedNames, containerFolderName }) => recordActivity(user, {
         action: "UPLOAD_DOCUMENT",
         location: "ShipmentDetailModal/Documents",
@@ -3333,6 +3381,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-800 dark:text-white/90 truncate" title={doc.name}>{language === "en" ? t("documentName", { code: doc.id }) : doc.name}</p>
                       <p className="text-xs text-gray-400">{doc.type.toUpperCase()}</p>
+                      {watermarkNote(doc.id)}
                       {documentFiles[0] && <p className="mt-1 truncate text-[10px] text-gray-400">{[CONTAINER_FOLDER_DOCUMENT_CODES.has(doc.id) ? documentFiles[0].label : (documentFiles[0].fileName || documentFiles[0].label), documentFiles[0].uploadedBy || "Chưa có người upload", formatUploadDateTime(documentFiles[0].uploadedAt, language)].join(" · ")}</p>}
                     </div>
 
@@ -3451,8 +3500,9 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
                       <div className="min-w-0 w-full">
                         <p className="truncate text-xs font-semibold text-gray-700 dark:text-gray-200">{option?.label.split(" - ").slice(1).join(" - ") || document.name}</p>
                         <p className={`mt-0.5 text-[11px] ${hasFile ? "text-success-600 dark:text-success-400" : "text-gray-400"}`}>
-                          {hasFile ? `${files.length} file` : "Chưa có file"}
+                          {hasFile ? `${files.length} file` : watermarkNote(document.id) ? "" : "Chưa có file"}
                         </p>
+                        {watermarkNote(document.id)}
                         {/* Chỉ hiện tên file, người upload và thời gian xem khi rê chuột. */}
                         {hasFile && files[0] && (
                           <p
