@@ -220,9 +220,11 @@ function PaymentRequestsContent() {
     const rows = states ? states.flatMap((state) => stateTotals[state] ?? []) : Object.values(stateTotals).flat();
     const byCurrency = new Map<string, string[]>();
     for (const row of rows) byCurrency.set(row.currency, [...(byCurrency.get(row.currency) ?? []), row.total]);
+    const amountLines = [...byCurrency.entries()].map(([currency, amounts]) => formatMoney(sumAmounts(amounts), currency, language));
     return {
       count: rows.reduce((sum, row) => sum + row.count, 0),
-      amount: [...byCurrency.entries()].map(([currency, amounts]) => formatMoney(sumAmounts(amounts), currency, language)).join(" + ") || formatMoney("0", "VND", language),
+      amountLines: amountLines.length ? amountLines : [formatMoney("0", "VND", language)],
+      amount: amountLines.join(" + ") || formatMoney("0", "VND", language),
     };
   };
   const hasActiveFilter = Boolean(query || requesterFilter || flowFilter || periodFilter !== DEFAULT_PERIOD || requestState);
@@ -267,25 +269,30 @@ function PaymentRequestsContent() {
       </header>
 
       {/* Thẻ lọc trạng thái (kiểu thẻ số liệu đơn hàng XNK) */}
-      <div role="group" aria-label={t("status")} className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+      <div role="group" aria-label={t("status")} className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5 xl:gap-4">
         {STATE_CARDS.map((card) => {
           const summary = card.value ? summarizeStates([card.value]) : summarizeStates();
           const selected = requestState === card.value;
+          const showAmount = card.value !== "paid" && card.value !== "completed";
           return (
             <button key={card.value || "all"} type="button" aria-pressed={selected} title={t(card.hintKey)} onClick={() => { setRequestState(card.value); setPage(1); }}
-              className={`relative flex w-full min-w-0 flex-col gap-2 rounded-xl border px-4 py-3 text-left transition-all duration-200 hover:shadow-md ${selected
+              className={`relative flex min-h-[126px] w-full min-w-0 flex-col gap-3 rounded-2xl border px-5 py-4 text-left transition-all duration-200 hover:shadow-md ${selected
                 ? `${card.border} ${card.bg} shadow-sm`
                 : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700"}`}>
-              {selected && <span className={`absolute right-3 top-3 h-2 w-2 animate-pulse rounded-full bg-current ${card.color}`} aria-hidden="true" />}
-              <span className="flex min-w-0 items-center gap-2 pr-3">
-                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${selected ? `${card.bg} ${card.color}` : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={card.icon} /></svg>
+              {selected && <span className={`absolute right-4 top-4 h-2.5 w-2.5 animate-pulse rounded-full bg-current ${card.color}`} aria-hidden="true" />}
+              <span className="flex min-w-0 items-center gap-2.5 pr-4">
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${selected ? `${card.bg} ${card.color}` : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={card.icon} /></svg>
                 </span>
-                <span className={`min-w-0 truncate text-xs font-semibold uppercase tracking-wide ${selected ? card.color : "text-gray-600 dark:text-gray-300"}`}>{t(card.labelKey)}</span>
+                <span className={`min-w-0 truncate text-sm font-semibold uppercase tracking-wide ${selected ? card.color : "text-gray-600 dark:text-gray-300"}`}>{t(card.labelKey)}</span>
               </span>
-              <span className="flex min-w-0 items-baseline justify-between gap-2">
-                <span className={`text-xl font-bold leading-none tabular-nums ${selected ? card.color : "text-gray-800 dark:text-white/90"}`}>{summary.count}</span>
-                <span className="min-w-0 truncate text-right text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-200" title={`${t(card.amountKey)}: ${summary.amount}`}>{summary.amount}</span>
+              <span className="flex min-w-0 items-start justify-between gap-2">
+                <span className={`text-2xl font-bold leading-none tabular-nums ${selected ? card.color : "text-gray-800 dark:text-white/90"}`}>{summary.count}</span>
+                {showAmount && (
+                  <span className="flex min-w-0 flex-col items-end gap-0.5 text-right text-sm font-semibold leading-tight tabular-nums text-gray-700 dark:text-gray-200" title={`${t(card.amountKey)}: ${summary.amount}`}>
+                    {summary.amountLines.map((amount) => <span key={amount} className="truncate">{amount}</span>)}
+                  </span>
+                )}
               </span>
               <span className="truncate text-[11px] text-gray-400 dark:text-gray-500">{t(card.amountKey)} · {t(card.hintKey)}</span>
             </button>
@@ -295,7 +302,7 @@ function PaymentRequestsContent() {
 
       {/* Thanh lọc (kiểu thanh lọc đơn hàng XNK) */}
       <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3.5 dark:border-gray-800 dark:bg-gray-900 md:flex-row md:flex-wrap md:items-end">
-        <div className="min-w-0 flex-1 md:min-w-[220px]">
+        <div className="min-w-0 md:w-72 md:flex-none">
           <label htmlFor="pr-filter-search" className={LABEL_CLASS}>{t("prSearchLabel")}</label>
           <div className="relative">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
