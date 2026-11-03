@@ -19,10 +19,10 @@ const WAREHOUSE_SYNC_HREF = "https://script.google.com/a/macros/vantinfood.vn/s/
 
 const AppSidebar: React.FC = () => {
   const { can, logout } = useAuth();
-  const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
+  const { isExpanded, isMobileOpen } = useSidebar();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const showText = isExpanded || isHovered || isMobileOpen;
+  const showText = isExpanded || isMobileOpen;
   // Danh sách đơn ở trang chủ; chi tiết / tạo đơn ở /shipments/...
   const isShipmentsActive = pathname === "/" || pathname.startsWith("/shipments/");
   const [supportOpen, setSupportOpen] = useState(pathname === "/email" || pathname === "/document-sync");
@@ -56,15 +56,13 @@ const AppSidebar: React.FC = () => {
   return (
     <aside
       className={`fixed left-0 top-0 z-50 mt-16 flex h-[calc(100vh-4rem)] flex-col border-r border-gray-200 bg-white px-5 text-gray-900 transition-all duration-300 ease-in-out dark:border-gray-800 dark:bg-gray-900 lg:mt-0 lg:h-screen
-        ${isExpanded || isMobileOpen || isHovered ? "w-[290px]" : "w-[90px]"}
+        ${isExpanded || isMobileOpen ? "w-[290px]" : "w-[90px]"}
         ${isMobileOpen ? "translate-x-0" : "-translate-x-full"}
         lg:translate-x-0`}
-      onMouseEnter={() => !isExpanded && setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
     >
       <div
         className={`flex py-8 ${
-          !isExpanded && !isHovered ? "lg:justify-center" : "justify-start"
+          !isExpanded ? "lg:justify-center" : "justify-start"
         }`}
       >
         {/* Bấm logo là tải lại trang: dữ liệu và phân quyền đều được đọc lại. */}
@@ -81,7 +79,7 @@ const AppSidebar: React.FC = () => {
       <nav className="mb-6 min-h-0 flex-1 overflow-y-auto">
         <h2
           className={`mb-4 flex text-xs uppercase leading-5 text-gray-400 ${
-            !isExpanded && !isHovered ? "lg:justify-center" : "justify-start"
+            !isExpanded ? "lg:justify-center" : "justify-start"
           }`}
         >
           {showText ? t("features") : <HorizontaLDots />}

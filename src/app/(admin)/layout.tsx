@@ -17,7 +17,7 @@ export default function AdminLayout({
 }) {
   const { user, isInitialized } = useAuth();
   const router = useRouter();
-  const { isExpanded, isHovered, isMobileOpen } = useSidebar();
+  const { isExpanded, isMobileOpen } = useSidebar();
 
   useEffect(() => {
     if (isInitialized && !user?.token) {
@@ -36,7 +36,7 @@ export default function AdminLayout({
   // Dynamic class for main content margin based on sidebar state
   const mainContentMargin = isMobileOpen
     ? "ml-0"
-    : isExpanded || isHovered
+    : isExpanded
     ? "lg:ml-[290px]"
     : "lg:ml-[90px]";
 
