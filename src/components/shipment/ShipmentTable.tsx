@@ -269,10 +269,9 @@ function DocBar({ total, received, missingList, missingLabel }: { total: number;
 }
 
 // Cột "Thanh toán QT": 2 đợt thanh toán tiền hàng (cọc hàng, thanh toán tiền còn lại) của hợp đồng, trạng thái lấy một
-// lần cho mọi đơn (getGoodsPaymentSummary). Màu: xanh = đã duyệt / đã giao, vàng = chờ duyệt, đỏ = bị từ chối, xám = chưa có.
+// lần cho mọi đơn (getGoodsPaymentSummary). Màu: xanh = đã duyệt, vàng = chờ duyệt, đỏ = bị từ chối, xám = chưa có.
 const GOODS_STATE_STYLE: Record<GoodsPaymentListState, string> = {
   approved: "bg-success-500",
-  delivered: "bg-success-300",
   pending: "bg-warning-500",
   rejected: "bg-error-500",
   none: "bg-gray-300 dark:bg-gray-600",

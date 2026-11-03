@@ -6,11 +6,10 @@ import { useLanguage } from "@/context/LanguageContext";
 import { getInternationalPaymentStatus, type GoodsPaymentState, type InternationalPaymentStatus as Status } from "@/services/paymentCostApi";
 
 // Tab Tổng quan: thanh toán tiền hàng (quốc tế) của hợp đồng theo 2 đợt — Cọc hàng và Thanh toán tiền còn lại — đã được
-// duyệt chưa, kèm link đề nghị. Đã duyệt = có đề nghị chứa khoản đó được duyệt; đơn đã qua vận chuyển biển mà chưa có
-// đề nghị = đã giao (coi như đã thanh toán). Bảng tổng hợp mọi đơn nằm ở cột "Thanh toán QT" của bảng trang chủ.
+// duyệt chưa, kèm link đề nghị. Đã duyệt = có đề nghị chứa khoản đó được duyệt. Bảng tổng hợp mọi đơn nằm ở cột
+// "Thanh toán QT" của bảng trang chủ.
 const LABEL_KEYS: Record<GoodsPaymentState, string> = {
   approved: "intlPaymentApproved",
-  delivered: "intlPaymentDelivered",
   not_approved: "intlPaymentNotApproved",
 };
 
@@ -32,7 +31,7 @@ export default function InternationalPaymentStatus({ contract }: { contract: str
       <span className="w-full flex-shrink-0 text-xs text-gray-400 sm:w-40 dark:text-gray-500">{t("intlPayment")}</span>
       <span className="flex min-w-0 flex-col gap-1">
         {status.items.map((item) => {
-          const done = item.status !== "not_approved";
+          const done = item.status === "approved";
           return (
             <span key={item.key} className="flex min-w-0 flex-wrap items-center gap-1.5">
               <span className="text-xs text-gray-600 dark:text-gray-300">{t(item.key === "deposit" ? "intlPaymentDeposit" : "intlPaymentBalance")}:</span>

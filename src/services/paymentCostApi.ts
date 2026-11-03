@@ -35,8 +35,6 @@ export interface OrderCost {
 export interface OrderCosts {
   contract: string;
   cancelled: boolean;
-  /** Đơn đã qua vận chuyển biển (đã giao): không nhập thêm cọc / thanh toán còn lại. */
-  seaPassed: boolean;
   /** Tổng tiền hàng (chỉ có khi được xem tiền hàng), dùng để kiểm tra khoản còn lại nhỏ hơn tổng này. */
   goodsTotal: string;
   containers: string[];
@@ -96,7 +94,6 @@ function normalize(payload: unknown): OrderCosts {
   return {
     contract: str(data.contract),
     cancelled: data.cancelled === true,
-    seaPassed: data.qua_van_chuyen_bien === true,
     goodsTotal: str(data.tong_tien_hang),
     containers: (Array.isArray(data.containers) ? data.containers : []).map(str).filter(Boolean),
     categories: list(data.categories).map((row): CostCategory => ({
@@ -150,8 +147,8 @@ export function goodsPaymentKind(category: { code: string; name: string } | null
   return (Object.keys(GOODS_PAYMENT_NAMES) as GoodsPaymentKind[]).find((kind) => GOODS_PAYMENT_NAMES[kind] === name) || null;
 }
 
-/** delivered: chưa có đề nghị duyệt nhưng đơn đã qua vận chuyển biển (đã giao) — coi như đã thanh toán. */
-export type GoodsPaymentState = "approved" | "delivered" | "not_approved";
+/** approved: có đề nghị chứa khoản đó đã duyệt / đã chi / hoàn thành. */
+export type GoodsPaymentState = "approved" | "not_approved";
 type RequestRef = { id: string; status: PaymentRequestStatus };
 
 export interface InternationalPaymentStatus {
@@ -165,10 +162,10 @@ export interface InternationalPaymentStatus {
   goodsTotal: string;
 }
 
-/** Trạng thái một đợt ở bảng danh sách đơn: đã duyệt / chờ duyệt / bị từ chối / đã giao (coi như đã trả) / chưa có đề nghị. */
-export type GoodsPaymentListState = "approved" | "pending" | "rejected" | "delivered" | "none";
+/** Trạng thái một đợt ở bảng danh sách đơn: đã duyệt / chờ duyệt / bị từ chối / chưa có đề nghị. */
+export type GoodsPaymentListState = "approved" | "pending" | "rejected" | "none";
 export type GoodsPaymentSummary = Record<string, Record<GoodsPaymentKind, GoodsPaymentListState>>;
-const LIST_STATES: GoodsPaymentListState[] = ["approved", "pending", "rejected", "delivered", "none"];
+const LIST_STATES: GoodsPaymentListState[] = ["approved", "pending", "rejected", "none"];
 
 /** Trang chủ: trạng thái cọc / còn lại của mọi đơn (theo mã hợp đồng) trong một request, cho cột "Thanh toán QT". */
 // Trang chủ gọi trước (song song với danh sách đơn) rồi bảng dùng lại: đang tải thì chờ chung, vừa tải trong
@@ -202,7 +199,7 @@ async function loadGoodsPaymentSummary(): Promise<GoodsPaymentSummary> {
 export async function getInternationalPaymentStatus(contract: string): Promise<InternationalPaymentStatus> {
   const payload = await request("GET", `/international-payment?contract=${encodeURIComponent(contract)}`);
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
-  const state = (value: unknown): GoodsPaymentState => (value === "approved" || value === "delivered" ? value : "not_approved");
+  const state = (value: unknown): GoodsPaymentState => (value === "approved" ? value : "not_approved");
   const refs = (value: unknown): RequestRef[] => (Array.isArray(value) ? value : []).filter(isRecord).map((row) => ({ id: str(row.id), status: Number(row.status) as PaymentRequestStatus }));
   return {
     status: state(data.status),

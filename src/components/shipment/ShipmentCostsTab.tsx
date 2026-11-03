@@ -12,8 +12,7 @@ import { amountToCents, formatAmount, parseAmountLoose, sumAmounts } from "@/uti
 // trái, phí theo container (mỗi cont một thẻ) bên phải; màn hình hẹp thì xếp dọc.
 // Mỗi khoản một khối: tên khoản, số tiền, nội dung (diễn giải). Chỉ nhập số (loại tiền chọn khi tạo đề nghị); số tiền là
 // số đã gồm VAT (% VAT nhập khi tạo đề nghị). Khoản đã đưa vào đề nghị hiện mã đề nghị, khoá.
-// Thanh toán tiền hàng: tiền cọc và tiền còn lại nhập độc lập; khoản còn lại phải nhỏ hơn tiền hàng. Đơn đã qua vận chuyển biển (đã giao) không nhập
-// thêm cọc / còn lại.
+// Thanh toán tiền hàng: tiền cọc và tiền còn lại nhập độc lập; khoản còn lại phải nhỏ hơn tiền hàng.
 
 interface Props {
   contract: string;
@@ -129,8 +128,6 @@ export default function ShipmentCostsTab({ contract }: Props) {
     const forContract = target === CONTRACT_TARGET;
     for (const category of forContract ? contractCategories : containerCategories) {
       if (isShown(cellKey(target, category.id)) || lockedCategories.has(category.id)) continue;
-      // Đơn đã giao coi như đã thanh toán tiền hàng.
-      if (forContract && data?.seaPassed && goodsPaymentKind(category)) continue;
       groups.set(category.code, [...(groups.get(category.code) || []), category]);
     }
     return [...groups.entries()];
@@ -366,9 +363,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
           {showContract && (
             <section className="flex min-w-0 flex-col">
               <h3 className={SECTION_TITLE}>{t("pcContractSection")}{readOnlyTag}</h3>
-              {costCard(CONTRACT_TARGET, `${t("prContract")} ${data.contract}`, canEditContainer, true)}
-              {data.seaPassed && <p className="mt-2 text-xs text-gray-500">{t("pcSeaPassedHint")}</p>}
-            </section>
+              {costCard(CONTRACT_TARGET, `${t("prContract")} ${data.contract}`, canEditContainer, true)}            </section>
           )}
           {showContainers && (
             <section className="min-w-0">
