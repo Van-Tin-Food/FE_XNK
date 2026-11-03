@@ -1225,7 +1225,7 @@ export const translations = {
     prInvoiceTitle: "Hóa đơn",
     prInvoiceBadge: "HĐ",
     prInvoiceRequired: "Bắt buộc (luồng đỏ có VAT)",
-    prInvoiceHint: "1. ",
+    prInvoiceHint: "Luồng đỏ vui lòng xem lại quy chế công ty khi tạo đề nghị thanh toán về luồng đỏ",
     prInvoiceEmpty: "Chưa có hóa đơn",
     prChooseInvoiceFiles: "Upload hóa đơn",
     prInvoiceUploaded: "Đã upload {count} file hóa đơn",
