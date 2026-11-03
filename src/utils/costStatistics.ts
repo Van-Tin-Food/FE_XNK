@@ -131,6 +131,20 @@ export function vatCents(cents: bigint, vat: string, currency: string): bigint {
   return cents - base;
 }
 
+/** VAT tính trên tổng giá trước thuế theo từng mức thuế; VND làm tròn một lần đến đồng. */
+function groupedVatCents(bases: Map<string, { cents: bigint; rate: bigint }>, currency: string): bigint {
+  const step = currency === "VND" ? HUNDRED : BigInt(1);
+  let total = ZERO;
+  for (const { cents, rate } of bases.values()) {
+    if (rate <= ZERO) continue;
+    const numerator = cents * rate;
+    const denominator = BigInt(10000) * step;
+    const units = (numerator * BigInt(2) + denominator) / (denominator * BigInt(2));
+    total += units * step;
+  }
+  return total;
+}
+
 /** Tình trạng của khoản theo đề nghị chứa nó. */
 export function costState(cost: Pick<MonthlyCost, "requestId" | "requestStatus" | "requestSent">): CostState {
   if (!cost.requestId || cost.requestStatus === null) return "none";
@@ -165,19 +179,22 @@ export const compareCurrency = byOrder(CURRENCY_ORDER);
 const compareKind = byOrder(COST_KINDS);
 const descCents = (a: bigint, b: bigint) => (b > a ? 1 : b < a ? -1 : 0);
 
-type Bucket = { count: number; total: bigint; tax: bigint; stages: Record<SettlementStage, { count: number; cents: bigint }> };
+type Bucket = { count: number; total: bigint; base: bigint; vatBases: Map<string, { cents: bigint; rate: bigint }>; stages: Record<SettlementStage, { count: number; cents: bigint }> };
 const emptyBucket = (): Bucket => ({
-  count: 0, total: ZERO, tax: ZERO,
+  count: 0, total: ZERO, base: ZERO, vatBases: new Map(),
   stages: Object.fromEntries(SETTLEMENT_STAGES.map((stage) => [stage, { count: 0, cents: ZERO }])) as Bucket["stages"],
 });
-const bucketList = (map: Map<string, Bucket>): Totals[] => [...map.entries()].sort(([a], [b]) => compareCurrency(a, b)).map(([currency, bucket]) => ({
+const bucketList = (map: Map<string, Bucket>): Totals[] => [...map.entries()].sort(([a], [b]) => compareCurrency(a, b)).map(([currency, bucket]) => {
+  const tax = groupedVatCents(bucket.vatBases, currency);
+  return ({
   currency,
   count: bucket.count,
   total: fromCents(bucket.total),
-  base: fromCents(bucket.total - bucket.tax),
-  tax: fromCents(bucket.tax),
+  base: fromCents(bucket.base),
+  tax: fromCents(tax),
   stages: Object.fromEntries(SETTLEMENT_STAGES.map((stage) => [stage, { count: bucket.stages[stage].count, total: fromCents(bucket.stages[stage].cents) }])) as Totals["stages"],
-}));
+  });
+});
 
 /** Cộng một danh sách tiền theo loại tiền -> Money (bỏ loại tiền = 0). */
 function moneyOf(entries: Map<string, bigint>): Money {
@@ -220,7 +237,12 @@ export function summarizeCosts(costs: MonthlyCost[]): CostSummary {
     const bucket = target.get(cost.currency) || emptyBucket();
     bucket.count += 1;
     bucket.total += cents;
-    bucket.tax += vatCents(cents, cost.vat, cost.currency);
+    const rate = BigInt(Math.round(Number(cost.vat) * 100) || 0);
+    const rowBase = cents - vatCents(cents, cost.vat, cost.currency);
+    bucket.base += rowBase;
+    const vatGroup = bucket.vatBases.get(String(rate)) || { cents: ZERO, rate };
+    vatGroup.cents += rowBase;
+    bucket.vatBases.set(String(rate), vatGroup);
     bucket.stages[stage].count += 1;
     bucket.stages[stage].cents += cents;
     target.set(cost.currency, bucket);
