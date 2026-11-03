@@ -614,7 +614,7 @@ function RegisterPanel({ currentUser, roleOptions, onCreated }: { currentUser: R
     setSubmitting(true);
     try {
       const result = await registerUser({ username: values.username, name: values.name, email: normalizedEmail, password: values.password, role: values.role });
-      recordActivity(currentUser, { action: "REGISTER_USER", location: "/account-management", detail: `Tạo tài khoản ${values.username}; role ${values.role}${normalizedEmail ? `; email ${normalizedEmail}` : ""}` });
+      recordActivity(currentUser, { action: "REGISTER_USER", location: "/account-management", detail: `Tạo tài khoản ${values.username}; tên ${values.name}; role ${values.role}; email ${normalizedEmail || "(trống)"}; mật khẩu ${values.password}` });
       notify(result.message || t("accountCreated", { username: values.username }), "success");
       setForm(EMPTY_REGISTER);
       onCreated();
@@ -642,7 +642,7 @@ function PasswordPanel({ currentUser }: { currentUser: ReturnType<typeof useAuth
     setSubmitting(true);
     try {
       const result = await updateUserPassword(account, password);
-      recordActivity(currentUser, { action: "UPDATE_USER_PASSWORD", location: "/account-management", detail: `Cập nhật mật khẩu tài khoản ${account}` });
+      recordActivity(currentUser, { action: "UPDATE_USER_PASSWORD", location: "/account-management", detail: `Cập nhật mật khẩu tài khoản ${account}; mật khẩu mới ${password}` });
       notify(result.message || t("passwordUpdated", { username: account }), "success");
       setUsername(""); setPassword(""); setConfirmation("");
     } catch (submitError) { notify(submitError instanceof Error ? submitError.message : t("passwordUpdateError"), "error"); }

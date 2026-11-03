@@ -13,8 +13,8 @@ export interface ActivityLogPayload {
   status?: "success" | "failed";
 }
 
-/** BE giữ tối đa 4000 ký tự nội dung. */
-const MAX_DETAIL_LENGTH = 4000;
+/** BE giữ tối đa 100.000 ký tự nội dung (ghi đủ cũ → mới, không cắt). */
+const MAX_DETAIL_LENGTH = 100000;
 
 export interface ActivityLog {
   id: number | string;

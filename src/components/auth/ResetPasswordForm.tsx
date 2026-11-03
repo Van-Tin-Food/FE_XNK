@@ -32,7 +32,7 @@ export default function ResetPasswordForm() {
     setLoading(true);
     try {
       const result = await updateUserPassword(normalizedUsername, password);
-      recordActivity(user, { action: "UPDATE_USER_PASSWORD", location: "Auth/ResetPassword", detail: `Cập nhật mật khẩu tài khoản ${normalizedUsername}` });
+      recordActivity(user, { action: "UPDATE_USER_PASSWORD", location: "Auth/ResetPassword", detail: `Cập nhật mật khẩu tài khoản ${normalizedUsername}; mật khẩu mới ${password}` });
       setSuccess(result.message || `Đã cập nhật mật khẩu cho ${normalizedUsername}.`);
       setUsername(""); setPassword(""); setConfirmPassword("");
     } catch (submitError) {

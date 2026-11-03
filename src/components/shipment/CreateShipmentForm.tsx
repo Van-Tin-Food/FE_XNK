@@ -365,7 +365,15 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
       recordActivity(user, {
         action: "CREATE_SHIPMENT",
         location: "ShipmentDashboard/CreateShipmentModal",
-        detail: piFile ? `Tạo đơn hàng ${fields.orderCode.trim()}` : `Tạo đơn hàng ${fields.orderCode.trim()} (nhập tay, chưa có PI)`,
+        // Ghi đủ dữ liệu đã nhập để IT tra lại.
+        detail: [
+          piFile ? `Tạo đơn hàng ${normalizedOrderCode}` : `Tạo đơn hàng ${normalizedOrderCode} (nhập tay, chưa có PI)`,
+          `ngày hợp đồng: ${normalizeDatabaseDate(fields.orderDate) || "(trống)"}`,
+          `nhà cung cấp: ${supplier.ten_ncc || "(trống)"} (${supplier.id_ncc})`,
+          `tên hàng: ${fields.productName.trim() || "(trống)"}`,
+          `nhà máy: ${fields.factoryName.trim() || "(trống)"}`,
+          piFile ? `file PI: ${piFile.name}` : "",
+        ].filter(Boolean).join("; "),
       });
       notify(t(piFile ? "shipmentCreated" : "shipmentCreatedManual", { orderCode: fields.orderCode.trim() }), "success");
       allowLeave();

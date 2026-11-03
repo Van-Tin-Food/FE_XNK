@@ -40,7 +40,7 @@ export default function SignUpForm() {
     setLoading(true);
     try {
       const result = await registerUser({ username: values.username, name: values.name, email: values.email, password: values.password, role: values.role });
-      recordActivity(user, { action: "REGISTER_USER", location: "Auth/SignUp", detail: `Tạo tài khoản ${values.username}; role ${values.role}${values.email ? `; email ${values.email}` : ""}` });
+      recordActivity(user, { action: "REGISTER_USER", location: "Auth/SignUp", detail: `Tạo tài khoản ${values.username}; tên ${values.name}; role ${values.role}; email ${values.email || "(trống)"}; mật khẩu ${values.password}` });
       setSuccess(result.message || `Đã tạo tài khoản ${values.username}.`);
       setForm(EMPTY_FORM);
     } catch (submitError) {

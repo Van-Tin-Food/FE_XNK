@@ -2786,31 +2786,36 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
       ]);
       const groupFailure = groupResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
       if (groupFailure) throw groupFailure.reason;
+      // Nhật ký ghi đủ giá trị cũ → mới (kể cả tiền) và mã dễ đọc (số container, Item Code) thay cho ID để IT tra lại.
+      const containerCodes = new Map(flattenShipmentContainers(shipment.database).map((container) => [container.id_bl_container, container.ma_container]));
+      const itemCodeNames = new Map([
+        ...(shipment.database?.details.flatMap((detail) => detail.itemCodes.map((item) => [item.id_item_code, `${item.item_code} (hàng ${detail.ten_hang})`] as const)) || []),
+        ...purchaseDetailForms.flatMap((detail) => detail.itemCodes.map((item) => [item.id_item_code, `${item.item_code} (hàng ${detail.ten_hang})`] as const)),
+      ]);
+      const containerName = (id: string) => (id ? `${containerCodes.get(id) || "?"} (ID ${id})` : "(trống)");
+      const itemCodeName = (id: string) => (id ? `${itemCodeNames.get(id) || "?"} (ID ${id})` : "(trống)");
+      const purchaseLogLabels: Record<string, string> = canViewPurchaseAmounts
+        ? { ten_hang: "Tên hàng", so_kien: "Số kiện", don_vi_kien: "Đơn vị kiện", net_weight: "NET", don_gia: "Đơn giá", tong_gia: "Tổng tiền" }
+        : { ten_hang: "Tên hàng", so_kien: "Số kiện", don_vi_kien: "Đơn vị kiện", net_weight: "NET" };
       const logChanges = [
         ...Object.entries(data).map(([field, value]) => {
           const before = getOriginalSummaryValue(shipment.summaryFields, field).trim();
-          // Nhật ký xem được bởi role khác (IT), nên không ghi số tiền.
-          if (isMoneyDetailField(field)) return `${field}: (đã thay đổi)`;
           return `${field}: ${before || "(trống)"} → ${value.trim() || "(trống)"}`;
         }),
-        ...newPurchaseDetails.map((detail) => `thêm hàng ${detail.ten_hang}`),
+        ...newPurchaseDetails.map((detail) => `thêm hàng ${detail.ten_hang} (${Object.entries(purchaseLogLabels)
+          .filter(([field]) => field !== "ten_hang")
+          .map(([field, label]) => `${label}: ${String(detail[field as keyof PurchaseDetailRecord] ?? "").trim() || "(trống)"}`)
+          .join(", ")})`),
         ...newPurchaseDetails.flatMap((detail) => detail.itemCodes
           .filter((item) => item.item_code.trim())
-          .map((item) => `hàng ${detail.ten_hang} Item Code ${item.item_code}${item.ma_nha_may ? ` (${item.ma_nha_may})` : ""}`)),
+          .map((item) => `hàng ${detail.ten_hang} Item Code ${item.item_code}, mã nhà máy: ${item.ma_nha_may || "(trống)"}, tên nhà máy: ${item.ten_nha_may || "(trống)"}`)),
         ...changedPurchaseDetails.flatMap((detail) => describeEditedFields(
           `hàng ${detail.ten_hang}`,
           shipment.database?.details.find((item) => item.id_chi_tiet === detail.id_chi_tiet),
           detail,
-          { ten_hang: "Tên hàng", so_kien: "Số kiện", net_weight: "NET" },
+          purchaseLogLabels,
         )),
-        ...changedPurchaseDetails.flatMap((detail) => {
-          const original = shipment.database?.details.find((item) => item.id_chi_tiet === detail.id_chi_tiet);
-          const amountChanged = canViewPurchaseAmounts && (["don_gia", "tong_gia"] as const).some((field) => (
-            String(detail[field] ?? "") !== String(original?.[field] ?? "")
-          ));
-          return amountChanged ? [`hàng ${detail.ten_hang}: Đơn giá/Tổng tiền (đã thay đổi)`] : [];
-        }),
-        ...newItemCodes.map(({ item }) => `thêm Item Code ${item.item_code}${item.ma_nha_may ? ` (${item.ma_nha_may})` : ""}`),
+        ...newItemCodes.map(({ detailId, item }) => `thêm Item Code ${item.item_code} cho hàng ${purchaseDetailForms.find((detail) => detail.id_chi_tiet === detailId)?.ten_hang || detailId}; mã nhà máy: ${item.ma_nha_may || "(trống)"}; tên nhà máy: ${item.ten_nha_may || "(trống)"}`),
         ...changedItemCodes.flatMap((item) => {
           const original = shipment.database?.details.flatMap((detail) => detail.itemCodes).find((candidate) => candidate.id_item_code === item.id_item_code);
           return describeEditedFields(
@@ -2824,13 +2829,16 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         ...billChanges.changedContainers.map((container) => `Số container: ${container.before || "(trống)"} → ${container.after}`),
         ...billChanges.newBills.map((bill) => `thêm B/L ${bill.code}${bill.containers.length > 0 ? ` (container ${bill.containers.join(", ")})` : ""}`),
         ...billChanges.newContainers.map((container) => `thêm container ${container.code} vào B/L ${container.billCode}`),
-        ...newContainerDetails.map((detail) => `thêm chi tiết container ${detail.id_bl_container}: ${detail.so_kien || 0} kiện`),
-        ...changedContainerDetails.flatMap((detail) => describeEditedFields(
-          `container ${detail.id_bl_container}`,
-          originalContainerDetails.find((item) => item.id_chi_tiet_container === detail.id_chi_tiet_container),
-          detail,
-          { id_bl_container: "Container", id_item_code: "Item Code", so_kien: "Số kiện" },
-        )),
+        ...newContainerDetails.map((detail) => `thêm chi tiết container ${containerName(detail.id_bl_container)}, Item Code ${itemCodeName(detail.id_item_code)}: ${containerDetailPackages.get(detail.id_chi_tiet_container) ?? detail.so_kien ?? 0} kiện`),
+        ...changedContainerDetails.flatMap((detail) => {
+          const original = originalContainerDetails.find((item) => item.id_chi_tiet_container === detail.id_chi_tiet_container);
+          const subject = `chi tiết container ${containerName(original?.id_bl_container || detail.id_bl_container)}, Item Code ${itemCodeName(original?.id_item_code || detail.id_item_code)}`;
+          return [
+            ["Container", containerName(original?.id_bl_container || ""), containerName(detail.id_bl_container)],
+            ["Item Code", itemCodeName(original?.id_item_code || ""), itemCodeName(detail.id_item_code)],
+            ["Số kiện", String(original?.so_kien ?? "").trim() || "(trống)", String(detail.so_kien ?? "").trim() || "(trống)"],
+          ].filter(([, before, after]) => before !== after).map(([label, before, after]) => `${subject} ${label}: ${before} → ${after}`);
+        }),
       ];
       recordActivity(user, {
         action: "EDIT_SHIPMENT_DETAILS",
@@ -2877,6 +2885,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
           bienSoXe: "Biển số xe",
           noiDi: "Nơi lấy hàng",
           idKho: "Mã kho",
+          tenKho: "Tên kho",
           noiTraContainer: "Nơi hạ rỗng",
           ghiChu: "Ghi chú",
         },
