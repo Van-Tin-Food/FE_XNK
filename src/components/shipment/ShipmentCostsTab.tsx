@@ -243,7 +243,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
             {/* Tiêu đề cột: Khoản phí | Số tiền | Nội dung (khi thẻ đủ rộng mới chia cột) */}
             <div className={`${ENTRY_GRID} mt-3 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400`}>
               <span>{t("pcFeeLabel")}</span>
-              <span className="text-right">{t("pcAmountLabel")}</span>
+              <span className="text-right">{t("pcAmountWithVatLabel")}</span>
               <span className="hidden @sm:block">{t("pcNoteLabel")}</span>
               <span className={editable ? "w-8" : ""} />
             </div>
@@ -257,7 +257,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
                     <div className={ENTRY_GRID}>
                       <span className="line-clamp-2 min-w-0 break-words text-sm font-medium text-gray-800 dark:text-gray-100" title={category.account ? `${category.account} · ${category.name}` : category.name}>{category.account ? `${category.account} · ${category.name}` : category.name}</span>
                       <span className="min-w-0">
-                        <input inputMode="decimal" aria-label={`${t("pcAmountLabel")} ${category.name}`} value={valueOf(key)} disabled={!editable}
+                        <input inputMode="decimal" aria-label={`${t("pcAmountWithVatLabel")} ${category.name}`} value={valueOf(key)} disabled={!editable}
                           onChange={(event) => setAmount(key, event.target.value)} aria-invalid={invalidKeys.has(key)}
                           className={`${INPUT} w-full text-right font-semibold tabular-nums ${invalidKeys.has(key) ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
                         {invalidKeys.has(key) && <span className="mt-0.5 block text-right text-[11px] text-error-600 dark:text-error-400">{t("prAmountInvalidShort")}</span>}
@@ -320,7 +320,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
                 </select>
               </label>
               <label className="min-w-0">
-                <span className={LABEL}>{t("pcAmountLabel")}</span>
+                <span className={LABEL}>{t("pcAmountWithVatLabel")}</span>
                 <input inputMode="decimal" value={entry.amount} placeholder="1.250.000"
                   onChange={(event) => setNewEntry((current) => ({ ...current, [target]: { ...entry, amount: event.target.value } }))}
                   onKeyDown={(event) => { if (event.key === "Enter") addEntry(target); }}

@@ -226,7 +226,10 @@ export interface PaymentCostInput {
   amount: string;
   container?: string;
   contract?: string;
-  /** Nội dung / diễn giải khoản (chi phí vận hành nhập tay). */
+  /**
+   * Nội dung / diễn giải khoản. Khoản nhập sẵn (tab Chi phí): có gửi thì BE cập nhật nội dung, không gửi (undefined) thì
+   * giữ nội dung đã lưu; số tiền khoản nhập sẵn không sửa ở đề nghị.
+   */
   note?: string;
   /** % VAT (khoản có thuế). */
   vat?: string;
@@ -396,7 +399,7 @@ const toBody = (input: PaymentRequestInput) => ({
     so_tien: cost.amount,
     id_container: cost.container || null,
     id_mua_hang: cost.contract || null,
-    noi_dung: cost.note || null,
+    ...(cost.note !== undefined ? { noi_dung: cost.note.trim() || null } : {}),
     phan_tram_vat: cost.vat || null,
   })),
 });

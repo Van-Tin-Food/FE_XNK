@@ -27,7 +27,7 @@ import {
   type TransferKind,
 } from "@/services/paymentRequestApi";
 import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
-import { addVat, costCodeName, formatAmount, formatMoney, parseAmountLoose, parseVatInput, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
+import { addVat, costCodeName, formatAmount, formatMoney, parseAmountLoose, parseVatInput, roundRequestTotal, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
 import { goodsPaymentKind } from "@/services/paymentCostApi";
 import BankPicker, { matchBank } from "./BankPicker";
 import { PaymentFlowBadge, formatDueDate } from "./PaymentRequestParts";
@@ -213,6 +213,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   })) : []));
   // % VAT đang nhập cho từng khoản nhập sẵn có thuế (theo id); chưa nhập thì lấy % đã lưu của khoản đó.
   const [vats, setVats] = useState<Record<string, string>>({});
+  // Nội dung đang sửa của khoản nhập sẵn (theo id); số tiền khoản nhập sẵn không sửa ở đây (giữ đúng tổng đề nghị).
+  const [preparedNotes, setPreparedNotes] = useState<Record<string, string>>({});
   // Loại chi phí + mã phí của đề nghị (sửa đề nghị: lấy theo khoản đầu tiên).
   const [costType, setCostType] = useState(editing?.costs[0]?.type || "");
   const [costCode, setCostCode] = useState(editing?.costs[0]?.code.toUpperCase() || "");
@@ -305,12 +307,15 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const preparedTaxed = (cost: PaymentCost) => isTaxed(cost.categoryId, cost.taxed);
   const vatTextOf = (cost: PaymentCost) => (cost.id in vats ? vats[cost.id] : cost.vat ? String(Number(cost.vat)) : "");
   const preparedVat = (cost: PaymentCost) => (preparedTaxed(cost) ? parseVatInput(vatTextOf(cost)) : null);
+  /** Nội dung khoản nhập sẵn: đang sửa, chưa sửa thì nội dung đã lưu. */
+  const preparedNoteOf = (cost: PaymentCost) => (cost.id in preparedNotes ? preparedNotes[cost.id] : cost.note);
   const otherAmounts = manualRows.map((row) => parseAmountLoose(row.amount));
   const otherVats = manualRows.map((row) => (isTaxed(row.categoryId) ? parseVatInput(row.vat) : null));
   const otherValid = manualRows.every((row, index) => row.categoryId && otherAmounts[index] !== null && (!isTaxed(row.categoryId) || otherVats[index] !== null)
     && rowContractValid(row) && rowContainerValid(row));
   const preparedVatValid = selectedCosts.every((cost) => !preparedTaxed(cost) || preparedVat(cost) !== null);
-  const total = sumAmounts([...selectedCosts.map((cost) => cost.amount), ...otherAmounts]);
+  // Từng khoản giữ 2 chữ số lẻ; tổng VND làm tròn đến đồng (nửa lên), khớp tong_tien BE lưu.
+  const total = roundRequestTotal(sumAmounts([...selectedCosts.map((cost) => cost.amount), ...otherAmounts]), currency);
   const costCount = selectedCosts.length + manualRows.length;
   const transfer = paymentMethod === "chuyen_khoan";
   // Có ít nhất một dòng đã điền (dòng chỉ có nhãn "Ngân hàng:" không tính, BE cũng bỏ các dòng đó).
@@ -356,7 +361,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     const { base, tax } = splitVat(amount, vat, currency);
     return t("prVatLine", { base: money(base), rate: vat, tax: money(tax) });
   };
-  /** Khoản nhập tay có thuế: gõ tiền trước thuế thì tổng = trước thuế × (1 + %VAT); làm tròn đồng khi gõ số nguyên. */
+  /** Khoản nhập tay có thuế: gõ tiền trước thuế thì tổng = trước thuế × (1 + %VAT), giữ 2 chữ số lẻ (không làm tròn đồng). */
   const totalFromBase = (base: string, vat: string) => {
     const baseAmount = parseAmountLoose(base);
     const rate = parseVatInput(vat);
@@ -445,7 +450,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
 
   // Các khoản đã chọn dạng dòng hiển thị (dùng cho tóm tắt bước chi phí và bản nháp ở bước lưu).
   const chosenLines = [
-    ...selectedCosts.map((cost) => ({ key: cost.id, name: costLabel(cost), note: cost.note, target: targetOf(cost), amount: cost.amount, vatLine: vatLineOf(cost.amount, preparedVat(cost)) })),
+    ...selectedCosts.map((cost) => ({ key: cost.id, name: costLabel(cost), note: preparedNoteOf(cost).trim(), target: targetOf(cost), amount: cost.amount, vatLine: vatLineOf(cost.amount, preparedVat(cost)) })),
     ...manualRows.map((row, index) => {
       const category = categoriesById.get(row.categoryId);
       const name = category?.code.toUpperCase() === "VH"
@@ -496,7 +501,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         bankBin: transfer ? effectiveBin || undefined : undefined,
         dueDate,
         costs: [
-          ...selectedCosts.map((cost) => ({ id: cost.id, categoryId: cost.categoryId, amount: cost.amount, container: cost.container, contract: cost.contract, vat: preparedVat(cost) ?? undefined })),
+          ...selectedCosts.map((cost) => ({ id: cost.id, categoryId: cost.categoryId, amount: cost.amount, container: cost.container, contract: cost.contract, note: preparedNoteOf(cost), vat: preparedVat(cost) ?? undefined })),
           ...manualRows.map((row, index) => ({
             id: row.id, categoryId: row.categoryId, amount: otherAmounts[index] as string, note: row.note.trim(), vat: otherVats[index] ?? undefined,
             ...(orderMode ? { contract: row.contract.trim(), container: needsContainer ? row.container : undefined } : {}),
@@ -709,18 +714,27 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                         const taxed = preparedTaxed(cost);
                                         const rate = preparedVat(cost);
                                         return (
-                                          <li key={cost.id} className={checked && taxed ? "rounded-lg bg-gray-50 pb-2 dark:bg-gray-800/50" : ""}>
+                                          <li key={cost.id} className={checked ? "rounded-lg bg-gray-50 pb-2 dark:bg-gray-800/50" : ""}>
                                             <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-lg px-1 py-1 hover:bg-gray-50 dark:hover:bg-gray-800">
                                               <input type="checkbox" className="h-4 w-4 shrink-0" checked={checked} onChange={(event) => toggle([cost.id], event.target.checked)} />
                                               <span className="min-w-0 flex-1">
                                                 <span className="block truncate text-sm text-gray-700 dark:text-gray-200" title={costLabel(cost)}>{costLabel(cost)}</span>
-                                                {cost.note && <span className="block truncate text-xs text-gray-500" title={cost.note}>{cost.note}</span>}
+                                                {!checked && cost.note && <span className="block truncate text-xs text-gray-500" title={cost.note}>{cost.note}</span>}
                                               </span>
                                               <span className="shrink-0 text-right">
                                                 <span className="block text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{money(cost.amount)}</span>
                                                 {taxed && <span className="block text-[11px] text-gray-400">{t("prVatIncluded")}</span>}
                                               </span>
                                             </label>
+                                            {/* Đã tick: sửa nội dung (diễn giải) của khoản; số tiền không sửa ở đây để giữ đúng tổng đề nghị */}
+                                            {checked && (
+                                              <div className="mb-1 ml-8 mr-1">
+                                                <input value={preparedNoteOf(cost)} maxLength={500} placeholder={t("prCostNotePlaceholder")}
+                                                  aria-label={`${t("prCostNote")} ${costLabel(cost)}`}
+                                                  onChange={(event) => setPreparedNotes((current) => ({ ...current, [cost.id]: event.target.value }))}
+                                                  className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                                              </div>
+                                            )}
                                             {/* Khoản có thuế đã tick: nhập % VAT, tự tách tiền trước thuế / VAT */}
                                             {checked && taxed && (
                                               <div className="ml-8 mr-1 flex flex-col gap-1">

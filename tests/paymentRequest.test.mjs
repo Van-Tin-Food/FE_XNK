@@ -45,9 +45,9 @@ test("hiển thị tiền theo loại tiền và ngôn ngữ", () => {
   assert.equal(formatMoney("18500.5", "USD"), "18.500,50 USD");
   assert.equal(formatMoney("18500.5", "USD", "en"), "18,500.50 USD");
   assert.equal(formatMoney("1250000", "VND", "en"), "1,250,000 VND");
-  assert.equal(amountForInput("1250000.00", "VND"), "1250000");
-  assert.equal(amountForInput("18500.50", "USD"), "18500.50");
-  assert.equal(amountForInput("100.00", "USD"), "100");
+  assert.equal(amountForInput("1250000.00"), "1250000");
+  assert.equal(amountForInput("18500.50"), "18500.50");
+  assert.equal(amountForInput("100.00"), "100");
 });
 
 test("VAT: số tiền đã gồm VAT tách ra trước thuế / VAT, tính ngược tổng từ trước thuế", () => {
@@ -56,6 +56,14 @@ test("VAT: số tiền đã gồm VAT tách ra trước thuế / VAT, tính ngư
   assert.deepEqual(splitVat("100", "10", "USD"), { base: "90.91", tax: "9.09" });
   assert.deepEqual(splitVat("500000", "", "VND"), { base: "500000.00", tax: "0.00" }, "không thuế");
   assert.equal(addVat("1000000", "8", "VND"), "1080000.00");
+  assert.equal(addVat("2721070", "8", "VND"), "2938755.60", "VND giữ phần lẻ, không làm tròn đồng");
+  assert.equal(
+    sumAmounts(Array.from({ length: 9 }, () => addVat("2721070", "8", "VND"))),
+    "26448800.40",
+    "9 khoản cộng lại khớp tổng trước thuế × 1,08",
+  );
+  assert.deepEqual(splitVat("2938755.60", "8", "VND"), { base: "2721070.00", tax: "217685.60" }, "tách lại đúng trước thuế");
+  assert.equal(amountForInput("2938755.60"), "2938755.60", "sửa lại không mất phần lẻ");
   assert.equal(addVat("90.91", "10", "USD"), "100.00");
   assert.equal(parseVatInput("8,5%"), "8.5");
   assert.equal(parseVatInput("0"), "0");
@@ -66,4 +74,13 @@ test("VAT: số tiền đã gồm VAT tách ra trước thuế / VAT, tính ngư
 test("cọc + còn lại: còn lại = tiền hàng - cọc, cọc vượt tiền hàng thì null", () => {
   assert.equal(subtractAmounts("40500.00", "12150"), "28350.00");
   assert.equal(subtractAmounts("100", "100.01"), null);
+});
+
+test("chỉ tổng đề nghị VND làm tròn đến đồng (nửa lên), từng khoản giữ phần lẻ", async () => {
+  const { roundRequestTotal } = await import("../src/utils/paymentRequest.ts");
+  assert.equal(roundRequestTotal(sumAmounts(Array.from({ length: 9 }, () => addVat("2721070", "8", "VND"))), "VND"), "26448800.00");
+  assert.equal(roundRequestTotal("26448800.40", "VND"), "26448800.00");
+  assert.equal(roundRequestTotal("26448800.50", "VND"), "26448801.00", "nửa lên");
+  assert.equal(roundRequestTotal("18500.55", "USD"), "18500.55", "USD giữ 2 chữ số lẻ");
+  assert.equal(roundRequestTotal("100.40", ""), "100.40", "chưa chọn loại tiền thì giữ nguyên");
 });

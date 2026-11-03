@@ -116,12 +116,13 @@ export function formatMoney(value: string | number | null | undefined, currency:
 }
 
 /** Số tiền đang gõ để hiển thị lại trong ô nhập khi sửa (BE trả "1250000.00"). */
-export function amountForInput(value: string | null | undefined, currency: PaymentCurrency): string {
+export function amountForInput(value: string | null | undefined): string {
   const cents = amountToCents(value);
   if (cents === BigInt(0)) return "";
   const integer = (cents / BigInt(100)).toString();
   const fraction = (cents % BigInt(100)).toString().padStart(2, "0");
-  if (currency === "VND" || fraction === "00") return integer;
+  // Giữ phần lẻ (cả VND, ví dụ tổng gồm VAT 2938755.60): cắt đi thì sửa xong lưu lại sẽ mất tiền lẻ.
+  if (fraction === "00") return integer;
   return `${integer}.${fraction}`;
 }
 
@@ -151,10 +152,21 @@ export function splitVat(amount: string, vat: string, currency?: PaymentCurrency
   return { base: centsToAmount(base), tax: centsToAmount(total - base) };
 }
 
-/** Tổng gồm VAT từ tiền trước thuế: trước thuế × (1 + %VAT). */
+/**
+ * Tổng gồm VAT từ tiền trước thuế: trước thuế × (1 + %VAT), làm tròn đến xu cho mọi loại tiền (VND giữ 2 chữ số lẻ:
+ * 2.721.070 + 8% = 2.938.755,60). Không làm tròn từng khoản đến đồng: nhiều khoản cộng lại sẽ lệch tổng hoá đơn
+ * (9 × 2.938.756 = 26.448.804 trong khi 9 × 2.721.070 × 1,08 = 26.448.800,40).
+ */
 export function addVat(base: string, vat: string, currency?: PaymentCurrency | ""): string {
-  const step = roundStep(currency);
-  return centsToAmount(roundDiv(amountToCents(base) * (BigInt(10000) + vatBasis(vat || "0")), BigInt(10000) * step) * step);
+  void currency;
+  return centsToAmount(roundDiv(amountToCents(base) * (BigInt(10000) + vatBasis(vat || "0")), BigInt(10000)));
+}
+
+/** Tổng tiền đề nghị: VND làm tròn đến đồng, nửa lên (như BE sumTotal; từng khoản vẫn giữ 2 chữ số lẻ). Loại tiền khác /
+ * chưa chọn giữ nguyên. */
+export function roundRequestTotal(amount: string, currency?: PaymentCurrency | ""): string {
+  if (currency !== "VND") return amount;
+  return centsToAmount(roundDiv(amountToCents(amount), BigInt(100)) * BigInt(100));
 }
 
 /** a - b (chuỗi số tiền), không sai số dấu phẩy động; âm → null. */
