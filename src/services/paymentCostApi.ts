@@ -147,25 +147,32 @@ export function goodsPaymentKind(category: { code: string; name: string } | null
   return (Object.keys(GOODS_PAYMENT_NAMES) as GoodsPaymentKind[]).find((kind) => GOODS_PAYMENT_NAMES[kind] === name) || null;
 }
 
-/** approved: có đề nghị chứa khoản đó đã duyệt / đã chi / hoàn thành. */
-export type GoodsPaymentState = "approved" | "not_approved";
+/**
+ * approved: có đề nghị chứa khoản đó đã duyệt / đã chi / hoàn thành. manual (tạm thời): chưa có đề nghị duyệt nhưng kế toán
+ * đã đánh dấu tay đã thanh toán.
+ */
+export type GoodsPaymentState = "approved" | "manual" | "not_approved";
 type RequestRef = { id: string; status: PaymentRequestStatus };
+/** Dấu tay "đã thanh toán" của một đợt: ai, lúc nào (ISO). */
+export type ManualPaymentMark = { byName: string; at: string };
 
 export interface InternationalPaymentStatus {
   /** Trạng thái chung = đợt thanh toán còn lại (đã trả đủ tiền hàng). */
   status: GoodsPaymentState;
   requests: RequestRef[];
   /** Từng đợt: cọc hàng, thanh toán tiền còn lại. amount: chỉ có khi được xem tiền hàng (null = chưa nhập / không được xem). */
-  items: Array<{ key: GoodsPaymentKind; status: GoodsPaymentState; requests: RequestRef[]; amount: string | null }>;
+  items: Array<{ key: GoodsPaymentKind; status: GoodsPaymentState; requests: RequestRef[]; amount: string | null; manual: ManualPaymentMark | null }>;
   /** Có khi được xem tiền hàng (quyền purchaseAmounts). */
   showAmounts: boolean;
   goodsTotal: string;
+  /** Được đánh dấu tay đã thanh toán (kế toán / admin). */
+  canMark: boolean;
 }
 
-/** Trạng thái một đợt ở bảng danh sách đơn: đã duyệt / chờ duyệt / bị từ chối / chưa có đề nghị. */
-export type GoodsPaymentListState = "approved" | "pending" | "rejected" | "none";
+/** Trạng thái một đợt ở bảng danh sách đơn: đã duyệt / chờ duyệt / bị từ chối / đánh dấu tay đã trả / chưa có đề nghị. */
+export type GoodsPaymentListState = "approved" | "pending" | "rejected" | "manual" | "none";
 export type GoodsPaymentSummary = Record<string, Record<GoodsPaymentKind, GoodsPaymentListState>>;
-const LIST_STATES: GoodsPaymentListState[] = ["approved", "pending", "rejected", "none"];
+const LIST_STATES: GoodsPaymentListState[] = ["approved", "pending", "rejected", "manual", "none"];
 
 /** Trang chủ: trạng thái cọc / còn lại của mọi đơn (theo mã hợp đồng) trong một request, cho cột "Thanh toán QT". */
 // Trang chủ gọi trước (song song với danh sách đơn) rồi bảng dùng lại: đang tải thì chờ chung, vừa tải trong
@@ -195,21 +202,39 @@ async function loadGoodsPaymentSummary(): Promise<GoodsPaymentSummary> {
   }));
 }
 
-/** Hợp đồng đã được duyệt thanh toán tiền hàng (cọc / còn lại) chưa (tab Tổng quan, không có số tiền). */
-export async function getInternationalPaymentStatus(contract: string): Promise<InternationalPaymentStatus> {
-  const payload = await request("GET", `/international-payment?contract=${encodeURIComponent(contract)}`);
+function normalizeInternationalPayment(payload: unknown): InternationalPaymentStatus {
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
-  const state = (value: unknown): GoodsPaymentState => (value === "approved" ? value : "not_approved");
+  const state = (value: unknown): GoodsPaymentState => (value === "approved" || value === "manual" ? value : "not_approved");
   const refs = (value: unknown): RequestRef[] => (Array.isArray(value) ? value : []).filter(isRecord).map((row) => ({ id: str(row.id), status: Number(row.status) as PaymentRequestStatus }));
+  const mark = (value: unknown): ManualPaymentMark | null => (isRecord(value) ? { byName: str(value.by_name), at: str(value.at) } : null);
   return {
     status: state(data.status),
     requests: refs(data.requests),
     items: (Array.isArray(data.items) ? data.items : []).filter(isRecord)
       .filter((row) => row.key === "deposit" || row.key === "balance")
-      .map((row) => ({ key: row.key as GoodsPaymentKind, status: state(row.status), requests: refs(row.requests), amount: row.so_tien === null || row.so_tien === undefined ? null : str(row.so_tien) })),
+      .map((row) => ({
+        key: row.key as GoodsPaymentKind,
+        status: state(row.status),
+        requests: refs(row.requests),
+        amount: row.so_tien === null || row.so_tien === undefined ? null : str(row.so_tien),
+        manual: mark(row.danh_dau_tay),
+      })),
     showAmounts: "tong_tien_hang" in data,
     goodsTotal: str(data.tong_tien_hang),
+    canMark: data.can_mark === true,
   };
+}
+
+/** Hợp đồng đã được duyệt thanh toán tiền hàng (cọc / còn lại) chưa (tab Tổng quan, không có số tiền). */
+export async function getInternationalPaymentStatus(contract: string): Promise<InternationalPaymentStatus> {
+  return normalizeInternationalPayment(await request("GET", `/international-payment?contract=${encodeURIComponent(contract)}`));
+}
+
+/** Tạm thời: kế toán / admin đánh dấu (paid = true) hoặc bỏ đánh dấu tay đã thanh toán một đợt. Trả trạng thái mới. */
+export async function setManualGoodsPayment(contract: string, kind: GoodsPaymentKind, paid: boolean): Promise<InternationalPaymentStatus> {
+  const result = normalizeInternationalPayment(await request("PUT", "/international-payment/manual", { contract, kind, paid }));
+  summaryCache = null; // cột "Thanh toán QT" ở trang chủ tải lại trạng thái mới
+  return result;
 }
 
 // ---------- Chi phí của tôi (GET/PUT/DELETE /api/payment-costs/mine) ----------
