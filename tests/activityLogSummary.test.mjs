@@ -37,3 +37,11 @@ test("auto document sync: run summary shows date + result, each file log shows o
     "Đơn 26021 · DON_KD",
   );
 });
+
+test("arrival reminder: main line shows date + number of B/L", () => {
+  const detail = "Hệ thống tự động xử lý: thông báo hàng sắp về ngày 05/11/2026 (ETA từ hôm nay đến 30 ngày tới, chưa báo lần nào) | 2 B/L: 26021 (B/L MEDU123) - 20/11/2026 cập cảng [B/L MEDU123, id_xnk 11] ; 26023 - 25/11/2026 cập cảng [B/L ONEY777, id_xnk 12] | Người nhận: User 2 (id 2): đã nhận";
+  assert.equal(
+    activityLogSummary("ETA_ARRIVAL_REMINDER", detail, "System/EtaArrivalReminder"),
+    "Hệ thống tự động xử lý: thông báo hàng sắp về ngày 05/11/2026 (ETA từ hôm nay đến 30 ngày tới, chưa báo lần nào) · 2 B/L",
+  );
+});

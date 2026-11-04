@@ -51,6 +51,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   DOCUMENT_SYNC_RESTORE: "logDocumentSyncRestore",
   AUTO_DOCUMENT_SYNC: "logAutoDocumentSync",
   AUTO_DOCUMENT_SYNC_RUN: "logAutoDocumentSyncRun",
+  ETA_ARRIVAL_REMINDER: "logEtaArrivalReminder",
   DELETE_DOCUMENT_FILE: "logDeleteDocumentFile",
   PAYMENT_REQUEST_CREATE: "logPaymentCreate",
   PAYMENT_REQUEST_UPDATE: "logPaymentUpdate",

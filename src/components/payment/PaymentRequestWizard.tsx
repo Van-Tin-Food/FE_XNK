@@ -16,7 +16,6 @@ import {
   parseTransferInfo,
   searchPaymentBeneficiaries,
   updatePaymentRequest,
-  type PaymentCategory,
   type PaymentCost,
   type PaymentMethod,
   type PaymentRequest,
@@ -29,6 +28,7 @@ import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } fr
 import { addVat, costCodeName, formatAmount, formatMoney, parseAmountLoose, parseVatInput, roundRequestTotal, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
 import { goodsPaymentKind } from "@/services/paymentCostApi";
 import BankPicker, { matchBank } from "./BankPicker";
+import PaymentCategoryPicker from "./PaymentCategoryPicker";
 import { PaymentFlowBadge, formatDueDate } from "./PaymentRequestParts";
 
 // Bước 1 "Tạo đề nghị" dạng hỏi lần lượt: trả lời xong câu nào thì câu tiếp theo mới hiện ra, câu đã trả lời thu lại
@@ -454,7 +454,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const applyBeneficiary = (row: PaymentBeneficiarySuggestion) => {
     const values: Record<string, string> = {};
     for (const field of transferFields) {
-      const value = field.jsonKey === "noi_dung_thanh_toan" ? "" : row[field.jsonKey];
+      const value = field.jsonKey === "noi_dung_thanh_toan" || field.jsonKey === "loai_phi_giao_dich" ? "" : row[field.jsonKey];
       if (value) values[field.label] = value;
     }
     setTransferValues((current) => ({ ...current, ...values }));
@@ -778,12 +778,14 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.3fr)_9.5rem_minmax(0,1fr)_auto] sm:items-end">
                             <label className="min-w-0">
                               <span className={label}>{t("pcFeeLabel")}</span>
-                              <select value={row.categoryId} onChange={(event) => updateVatRow(row, { categoryId: event.target.value })}
-                                aria-invalid={Boolean(categoryError)}
-                                className={`${INPUT} ${categoryError ? "border-error-400" : ""}`}>
-                                <option value="">{t("prSelectCategory")}</option>
-                                {manualCategories.map((item: PaymentCategory) => <option key={item.id} value={item.id}>{item.code.toUpperCase() === "VH" ? [item.account, item.name].filter(Boolean).join(" · ") : costCodeName(item.code, item.name)}{item.flow === "do" ? " ⚠" : ""}</option>)}
-                              </select>
+                              <PaymentCategoryPicker
+                                id={`payment-category-${row.key}`}
+                                categories={manualCategories}
+                                selectedId={row.categoryId}
+                                invalid={Boolean(categoryError)}
+                                className={`${INPUT} ${categoryError ? "border-error-400" : ""}`}
+                                onSelect={(category) => updateVatRow(row, { categoryId: category.id })}
+                              />
                               <FieldError message={categoryError} />
                             </label>
                             <label className="min-w-0">

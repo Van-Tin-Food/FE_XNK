@@ -80,12 +80,13 @@ export interface TransferField {
   required: boolean;
   multiline?: boolean;
 }
-export type TransferJsonKey = keyof PaymentBeneficiarySuggestion | "noi_dung_thanh_toan";
+export type TransferJsonKey = keyof PaymentBeneficiarySuggestion | "noi_dung_thanh_toan" | "loai_phi_giao_dich";
 export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
   domestic: [
     { label: "Số tài khoản", key: "prTf_accountNumber", jsonKey: "so_tai_khoan", required: false },
     { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: false },
     { label: "Tên ngân hàng", key: "prTf_bankName", jsonKey: "ten_ngan_hang", required: false },
+    { label: "Loại phí giao dịch", key: "prTfTransactionFee", jsonKey: "loai_phi_giao_dich", required: false },
     { label: "Nội dung chuyển khoản", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
   ],
   international: [
@@ -96,6 +97,7 @@ export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
     { label: "Địa chỉ người thụ hưởng", key: "prTf_beneficiaryAddress", jsonKey: "dia_chi_nguoi_thu_huong", required: false },
     { label: "Địa chỉ ngân hàng thụ hưởng", key: "prTf_beneficiaryBankAddress", jsonKey: "dia_chi_ngan_hang", required: false },
     { label: "Ngân hàng trung gian", key: "prTf_intermediaryBank", jsonKey: "ngan_hang_trung_gian", required: false, multiline: true },
+    { label: "Loại phí giao dịch", key: "prTfTransactionFee", jsonKey: "loai_phi_giao_dich", required: false },
     { label: "Nội dung chuyển khoản", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
   ],
 };

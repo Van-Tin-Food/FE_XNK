@@ -29,6 +29,12 @@ export function activityLogSummary(
     const head = result ? `${lines[0]} · ${result.replace(/^Kết quả:\s*/, "")}` : lines[0] || "";
     return head.length > 220 ? `${head.slice(0, 217)}…` : head;
   }
+  // Nhắc hàng sắp về: dòng chính là ngày + số B/L ("… · 2 B/L"), danh sách B/L xem ở chi tiết.
+  if (action.toUpperCase() === "ETA_ARRIVAL_REMINDER") {
+    const [head = "", bills = ""] = detail.split(" | ");
+    const count = bills.match(/^(\d+ B\/L)/)?.[1];
+    return count ? `${head} · ${count}` : head;
+  }
   const orderCode = detail.match(/(?:^|[\s;])(?:đơn(?:\s+hàng)?|order)\s+([^\s;,]+)/i)?.[1];
   const documentCode = location.match(/\/Documents\/([A-Z0-9_]+)/i)?.[1]
     || detail.match(/chứng từ\s+([A-Z0-9_]+)/i)?.[1];
