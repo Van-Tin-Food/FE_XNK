@@ -25,3 +25,15 @@ test("shipment edit logs retain the changed fields and values", () => {
   assert.equal(activityLogSummary("EDIT_SHIPMENT_DETAILS", detail, "ShipmentDetailModal/Details"), "Đơn VTF008 · Cảng đến: HCM → HP; Số kiện: 100 → 120");
   assert.equal(activityLogSummary("EDIT_SHIPMENT_DETAILS", detail, "ShipmentDetailModal/Details", "en"), "Order VTF008 · Cảng đến: HCM → HP; Số kiện: 100 → 120");
 });
+
+test("auto document sync: run summary shows date + result, each file log shows order + document", () => {
+  const run = "Hệ thống tự động xử lý đồng bộ chứng từ (chạy theo lịch 8h sáng) ngày 04/11/2026 | Quét 120 file trong các thư mục chứng từ trên Google Drive, trong đó 3 file chưa có trong hệ thống | Kết quả: tiếp nhận 2 file (có 1 file phải đổi tên cho đúng mẫu), bỏ qua 1 file, lỗi 0 file | Tiếp nhận 1/2: file \"a.pdf\" vào đơn 26021, chứng từ Đơn đăng kí kiểm dịch động vật (DON_KD)";
+  assert.equal(
+    activityLogSummary("AUTO_DOCUMENT_SYNC_RUN", run, "System/AutoDocumentSync"),
+    "Hệ thống tự động xử lý đồng bộ chứng từ (chạy theo lịch 8h sáng) ngày 04/11/2026 · tiếp nhận 2 file (có 1 file phải đổi tên cho đúng mẫu), bỏ qua 1 file, lỗi 0 file",
+  );
+  assert.equal(
+    activityLogSummary("AUTO_DOCUMENT_SYNC", "Hệ thống tự động xử lý: tiếp nhận file \"a.pdf\" vào đơn 26021, chứng từ Đơn đăng kí kiểm dịch động vật (DON_KD), tên file đã đúng mẫu, giữ nguyên", "System/AutoDocumentSync/DON_KD"),
+    "Đơn 26021 · DON_KD",
+  );
+});

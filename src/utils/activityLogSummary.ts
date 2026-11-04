@@ -22,6 +22,13 @@ export function activityLogSummary(
   location: string,
   language: "vi" | "en" = "vi",
 ): string {
+  // Tổng kết một lượt đồng bộ tự động liệt kê nhiều đơn: dòng chính là ngày + kết quả, không lấy đơn đầu tiên.
+  if (action.toUpperCase() === "AUTO_DOCUMENT_SYNC_RUN") {
+    const lines = detail.split(" | ");
+    const result = lines.find((line) => line.startsWith("Kết quả:"));
+    const head = result ? `${lines[0]} · ${result.replace(/^Kết quả:\s*/, "")}` : lines[0] || "";
+    return head.length > 220 ? `${head.slice(0, 217)}…` : head;
+  }
   const orderCode = detail.match(/(?:^|[\s;])(?:đơn(?:\s+hàng)?|order)\s+([^\s;,]+)/i)?.[1];
   const documentCode = location.match(/\/Documents\/([A-Z0-9_]+)/i)?.[1]
     || detail.match(/chứng từ\s+([A-Z0-9_]+)/i)?.[1];
@@ -36,6 +43,9 @@ export function activityLogSummary(
     if (documentCode && ["UPLOAD_DOCUMENT", "UPLOAD_OCR_DOCUMENT", "PASS_DOCUMENT"].includes(action.toUpperCase())) {
       return `${subject} · ${documentCode}`;
     }
+    // Tiếp nhận tự động: mã chứng từ ở cuối location "System/AutoDocumentSync/<mã>".
+    const syncDocument = location.match(/^System\/AutoDocumentSync\/([A-Z0-9_]+)$/i)?.[1];
+    if (syncDocument && action.toUpperCase() === "AUTO_DOCUMENT_SYNC") return `${subject} · ${syncDocument}`;
     if (containerCode && action === "EDIT_RETURN_ITEM") return `${subject} · ${containerCode}`;
     return subject;
   }
