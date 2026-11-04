@@ -118,6 +118,8 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
     case "AI_CHAT_QUESTION_REQUIRED":
     case "AI_CHAT_QUESTION_TOO_LONG":
       return backendMessage || "Câu hỏi chưa hợp lệ.";
+    case "INVALID_PRESENCE":
+      return backendMessage || "Không cập nhật được trạng thái online.";
     case "EMAIL_CONFIG_MISSING":
       return "Chức năng gửi email chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
     case "EMAIL_JOB_RUNNING":

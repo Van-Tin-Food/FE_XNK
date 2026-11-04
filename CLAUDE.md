@@ -101,6 +101,14 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
 - Bộ lọc và chọn người nhận là hàm thuần ở `utils/emailRecipients.ts` (test `tests/emailRecipients.test.mjs`). "Chọn tất cả"
   chỉ áp dụng cho email đang hiện ở trang hiện tại; tối đa `MAX_EMAIL_RECIPIENTS` (đồng bộ BE).
 
+## Người đang online
+
+- **Đang tắt** (`ONLINE_USERS_ENABLED = false` trong `OnlineUsers.tsx`): người dùng chốt chỉ bật khi FE có host riêng
+  (trên Vercel mỗi tab tốn ~2 lượt gọi gateway / phút). Không tự bật lại.
+- `components/header/OnlineUsers.tsx` (trên header): mỗi tab gửi nhịp `sendPresenceHeartbeat` (`services/presenceApi.ts`)
+  30 giây / lần, khi chuyển trang và khi quay lại tab; đóng tab / đăng xuất gọi `leavePresence` (keepalive). Chỉ hiện người
+  khác (không có ai thì ẩn), người cùng trang viền màu và đứng đầu; hàm thuần ở `utils/presence.ts` (test `tests/presence.test.mjs`).
+
 ## Chatbox AI
 
 - `src/components/ai/AiChatBox.tsx` (nút nổi trong layout admin, quyền `useAiChat`) gọi `src/services/aiChatApi.ts`.
