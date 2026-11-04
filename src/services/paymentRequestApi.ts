@@ -87,7 +87,7 @@ export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
     { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: false },
     { label: "Tên ngân hàng", key: "prTf_bankName", jsonKey: "ten_ngan_hang", required: false },
     { label: "Loại phí giao dịch", key: "prTfTransactionFee", jsonKey: "loai_phi_giao_dich", required: false },
-    { label: "Nội dung chuyển khoản", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
+    { label: "Nội dung chuyển khoản", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false, multiline: true },
   ],
   international: [
     { label: "Số IBAN người thụ hưởng", key: "prTf_iban", jsonKey: "so_tai_khoan", required: false },
@@ -96,9 +96,9 @@ export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
     { label: "Mã SWIFT", key: "prTf_swift", jsonKey: "ma_swift", required: false },
     { label: "Địa chỉ người thụ hưởng", key: "prTf_beneficiaryAddress", jsonKey: "dia_chi_nguoi_thu_huong", required: false },
     { label: "Địa chỉ ngân hàng thụ hưởng", key: "prTf_beneficiaryBankAddress", jsonKey: "dia_chi_ngan_hang", required: false },
-    { label: "Ngân hàng trung gian", key: "prTf_intermediaryBank", jsonKey: "ngan_hang_trung_gian", required: false, multiline: true },
+    { label: "Ngân hàng trung gian", key: "prTf_intermediaryBank", jsonKey: "ngan_hang_trung_gian", required: false },
     { label: "Loại phí giao dịch", key: "prTfTransactionFee", jsonKey: "loai_phi_giao_dich", required: false },
-    { label: "Nội dung chuyển khoản", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false },
+    { label: "Nội dung chuyển khoản", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false, multiline: true },
   ],
 };
 
