@@ -676,7 +676,8 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
               {t("prInvoiceTitle")}
               {redNeedsInvoice && <span className="rounded-md bg-error-50 px-1.5 py-0.5 text-[11px] font-semibold text-error-700 dark:bg-error-500/10 dark:text-error-300">{t("prInvoiceRequired")}</span>}
             </p>
-                <PaymentDocumentsPanel key={`invoice-${documentsRevision}`} requestId={request.id} kind={INVOICE} canUpload={canUploadDocs} canRemove={canRemoveDocs} onFilesChange={setInvoiceCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
+                <PaymentDocumentsPanel key={`invoice-${documentsRevision}`} requestId={request.id} kind={INVOICE} canUpload={canUploadDocs} canRemove={canRemoveDocs} onFilesChange={setInvoiceCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen}
+                  containerDeposits={request.status === 3 ? request.containerDeposits : []} currency={request.currency} />
           </div>
           <PaymentDocumentsPanel key={`archive-${documentsRevision}`} requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
           {canUploadDocs && !canRemoveDocs && <p className="mt-2 text-xs text-gray-500">{t("prPaidAddOnlyHint")}</p>}

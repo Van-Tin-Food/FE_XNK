@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { addVat, amountForInput, amountToCents, formatAmount, formatMoney, parseAmountInput, parseAmountLoose, parseVatInput, splitVat, subtractAmounts, sumAmounts } from "../src/utils/paymentRequest.ts";
+import { addVat, amountForInput, amountToCents, containerRepairOf, formatAmount, formatMoney, parseAmountInput, parseAmountLoose, parseSignedAmount, parseVatInput, splitVat, subtractAmounts, sumAmounts } from "../src/utils/paymentRequest.ts";
 
 test("đọc số tiền khi chưa biết loại tiền: phân biệt dấu nghìn và phần lẻ", () => {
   assert.equal(parseAmountLoose("1.250.000"), "1250000");
@@ -83,4 +83,19 @@ test("chỉ tổng đề nghị VND làm tròn đến đồng (nửa lên), từ
   assert.equal(roundRequestTotal("26448800.50", "VND"), "26448801.00", "nửa lên");
   assert.equal(roundRequestTotal("18500.55", "USD"), "18500.55", "USD giữ 2 chữ số lẻ");
   assert.equal(roundRequestTotal("100.40", ""), "100.40", "chưa chọn loại tiền thì giữ nguyên");
+});
+
+test("phí sửa cont: số hoàn được âm / 0; phí sửa = tiền cược − số hoàn; hoàn âm = vượt cược", () => {
+  assert.equal(parseSignedAmount("-5.000.000"), "-5000000");
+  assert.equal(parseSignedAmount("−1,5"), "-1.5");
+  assert.equal(parseSignedAmount("3.000.000"), "3000000");
+  assert.equal(parseSignedAmount("0"), "0");
+  assert.equal(parseSignedAmount("0,00"), "0");
+  assert.equal(parseSignedAmount("-"), null);
+  assert.equal(parseSignedAmount("abc"), null);
+  assert.deepEqual(containerRepairOf("10000000.00", "3000000"), { repair: "7000000.00", excess: "0.00", refundTooHigh: false });
+  assert.deepEqual(containerRepairOf("10000000.00", "-5000000"), { repair: "15000000.00", excess: "5000000.00", refundTooHigh: false });
+  assert.deepEqual(containerRepairOf("10000000.00", "10000000"), { repair: "0.00", excess: "0.00", refundTooHigh: false });
+  assert.deepEqual(containerRepairOf("10000000.00", "0"), { repair: "10000000.00", excess: "0.00", refundTooHigh: false });
+  assert.equal(containerRepairOf("10000000.00", "10000000.01").refundTooHigh, true);
 });

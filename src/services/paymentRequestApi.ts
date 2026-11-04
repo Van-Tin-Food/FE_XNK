@@ -165,6 +165,27 @@ export interface PaymentRequest {
   canConfirmDocuments: boolean | null;
   costCount: number;
   costs: PaymentCost[];
+  /** Cont có tiền cược trong đề nghị + phí sửa đã ghi (chỉ có ở chi tiết; [] = không có cược cont / BE không trả). */
+  containerDeposits: ContainerDeposit[];
+}
+
+/**
+ * Cont có tiền cược trong đề nghị: deposit = tổng tiền cược của cont (chuỗi số). repair = khoản "Phí sửa cont" đã ghi
+ * (amount gồm VAT, 0 = hoàn đủ cược); null = chưa nhập — upload hóa đơn phải nhập số hãng tàu hoàn cược của cont này.
+ */
+export interface ContainerDeposit {
+  contract: string;
+  container: string;
+  deposit: string;
+  repair: { amount: string; vat: string; requestId: string } | null;
+}
+
+/** Phí sửa cont nhập khi upload hóa đơn: số hãng tàu hoàn cược (âm = phải trả thêm), % VAT (trống = không thuế). */
+export interface ContainerRepairInput {
+  contract: string;
+  container: string;
+  refund: string;
+  vat: string;
 }
 
 /** Ngân hàng trong danh sách chọn (bảng payment_bank): bin = mã NAPAS 6 số dùng tạo mã VietQR. */
@@ -188,18 +209,6 @@ export interface PaymentRequestOptions {
   banks: PaymentBank[];
   /** Tài khoản chọn làm người đứng tên (chỉ người được ủy quyền tạo đề nghị thay); rỗng = không được tạo thay. */
   requesters: PaymentRequester[];
-  /** Gợi ý khoản phí theo giai đoạn đơn hàng (BE: config/paymentFeeSuggestions.js) — chỉ nhắc, không bắt buộc. */
-  suggestions: PaymentFeeSuggestion[];
-}
-
-/** Khoản phí nên thanh toán của một hợp đồng / container (chưa có dòng chi phí nào). */
-export interface PaymentFeeSuggestion {
-  contract: string;
-  /** Rỗng = khoản theo hợp đồng (mã HD). */
-  container: string;
-  categoryId: string;
-  /** Vì sao gợi ý, ví dụ "Đang khai báo hải quan". */
-  reason: string;
 }
 
 /** Người đứng tên đề nghị khi tạo thay. */
@@ -380,6 +389,14 @@ function normalizeRequest(row: unknown): PaymentRequest | null {
     canConfirmDocuments: row.can_confirm_documents === undefined || row.can_confirm_documents === null ? null : row.can_confirm_documents === true,
     costCount: Number(row.cost_count ?? costs.length) || 0,
     costs,
+    containerDeposits: (Array.isArray(row.container_deposits) ? row.container_deposits : []).filter(isRecord).map((item) => ({
+      contract: str(item.contract),
+      container: str(item.container),
+      deposit: str(item.deposit),
+      repair: isRecord(item.repair)
+        ? { amount: str(item.repair.amount), vat: str(item.repair.vat), requestId: str(item.repair.request) }
+        : null,
+    })).filter((item) => item.contract && item.container),
   };
 }
 
@@ -470,8 +487,6 @@ export async function getPaymentRequestOptions(signal?: AbortSignal): Promise<Pa
     banks: list(data.banks).map((row) => ({ bin: str(row.bin), code: str(row.ma_ngan_hang), shortName: str(row.ten_viet_tat), name: str(row.ten_ngan_hang) }))
       .filter((bank) => /^\d{6}$/.test(bank.bin)),
     requesters: list(data.requesters).map((row) => ({ id: str(row.id), name: str(row.name) || str(row.username) })).filter((row) => row.id),
-    suggestions: list(data.suggestions).map((row) => ({ contract: str(row.contract), container: str(row.container), categoryId: str(row.categoryId), reason: str(row.reason) }))
-      .filter((row) => row.contract && row.categoryId),
   };
 }
 
@@ -699,10 +714,13 @@ export async function startPaymentDocumentUploads(
   id: string,
   files: Array<{ file: File; mimeType: string }>,
   kind: PaymentDocumentKind = null,
+  // Hóa đơn của đề nghị cược cont: phí sửa các cont chưa nhập (BE kiểm tra trước khi mở phiên, ghi khi file đầu xong).
+  containerRepairs: ContainerRepairInput[] = [],
 ): Promise<{ duplicates: string[]; sessions: PaymentUploadSession[] }> {
   const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/documents/start-uploads`, {
     files: files.map(({ file, mimeType }) => ({ fileName: file.name, fileSize: file.size, mimeType })),
     ...(kind ? { kind } : {}),
+    ...(containerRepairs.length ? { containerRepairs } : {}),
   });
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   const duplicates = (Array.isArray(data.duplicates) ? data.duplicates : []).filter(isRecord).map((row) => str(row.fileName));
@@ -726,7 +744,7 @@ export async function sendPaymentDocument(
   session: PaymentUploadSession,
   file: File,
   options: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal; announce?: boolean } = {},
-): Promise<PaymentDocumentFile> {
+): Promise<PaymentDocumentFile & { containerRepairError: string }> {
   const uploaded = await uploadFileToDriveSession(session.uploadUrl, file, options);
   forgetPaymentDocuments(id);
   const payload = await request<unknown>("POST", `/${encodeURIComponent(id)}/documents/complete-upload`, {
@@ -738,7 +756,8 @@ export async function sendPaymentDocument(
   const data = isRecord(payload) && isRecord(payload.data) ? payload.data : {};
   const result = normalizeDocumentFile(data.file);
   if (!result) throw new Error("Phản hồi upload chứng từ không hợp lệ");
-  return result;
+  // File đã lên nhưng BE không ghi được phí sửa cont (hiếm): báo để người dùng biết, cont đó được hỏi lại lần sau.
+  return { ...result, containerRepairError: str(data.containerRepairError) };
 }
 
 /** Bản in Giấy đề nghị thanh toán (Mẫu 05-TT, layout công ty): trang HTML để xem trước rồi "In / Lưu PDF". */

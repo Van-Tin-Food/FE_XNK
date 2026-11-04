@@ -17,7 +17,6 @@ import {
   searchPaymentBeneficiaries,
   updatePaymentRequest,
   type PaymentCategory,
-  type PaymentFeeSuggestion,
   type PaymentCost,
   type PaymentMethod,
   type PaymentRequest,
@@ -91,8 +90,6 @@ const isPrepared = (cost: PaymentCost) => Boolean(cost.container || cost.contrac
 const ORDER_COST_CODES = ["HD", "CONT"];
 const isOrderCode = (code: string) => ORDER_COST_CODES.includes(code.toUpperCase());
 const MAX_COSTS = 100;
-/** Số gợi ý khoản phí hiện trước (còn lại bấm "Xem thêm"). */
-const SUGGESTION_LIMIT = 8;
 const BENEFICIARY_DEBOUNCE_MS = 250;
 const MAX_ATTACHMENT_SIZE = 1024 * 1024 * 1024;
 
@@ -199,7 +196,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const [optionsError, setOptionsError] = useState("");
   const [optionsKey, setOptionsKey] = useState(0);
   const [content, setContent] = useState(editing?.content || "");
-  const [showAllSuggestions, setShowAllSuggestions] = useState(false);
   // Tạo đề nghị thay (người được ủy quyền, chỉ khi tạo mới): id tài khoản đứng tên; "" = chính mình.
   const [requesterId, setRequesterId] = useState("");
   // BE chỉ trả danh sách người đứng tên cho người được ủy quyền tạo thay; không chọn = chính mình.
@@ -290,18 +286,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const needsContainer = costCode === "CONT";
   const rowContractValid = (row: OtherRow) => !orderMode || contractCodes.has(row.contract.trim());
   const rowContainerValid = (row: OtherRow) => !orderMode || !needsContainer || containersOf(row.contract.trim()).includes(row.container);
-  // Gợi ý khoản phí theo giai đoạn đơn hàng (BE) của mã phí đang chọn — chỉ nhắc, không bắt buộc. Bỏ khoản đã tick / đã thêm dòng.
-  const usedSlots = new Set([
-    ...selectedCosts.map((cost) => `${cost.contract}|${cost.container}|${cost.categoryId}`),
-    ...manualRows.map((row) => `${row.contract.trim()}|${needsContainer ? row.container : ""}|${row.categoryId}`),
-  ]);
-  const suggestions = orderMode ? (options?.suggestions || []).filter((item) => {
-    const category = categoriesById.get(item.categoryId);
-    return category?.type === costType && category.code.toUpperCase() === costCode && !usedSlots.has(`${item.contract}|${item.container}|${item.categoryId}`);
-  }) : [];
-  const shownSuggestions = showAllSuggestions ? suggestions : suggestions.slice(0, SUGGESTION_LIMIT);
-  /** Bấm "+ Thêm" ở gợi ý: thêm một dòng "Nhập khoản mới" điền sẵn hợp đồng / container / khoản phí, chỉ cần gõ số tiền. */
-  const addSuggestion = (item: PaymentFeeSuggestion) => setOthers((current) => [...current, { ...emptyRow(), contract: item.contract, container: item.container, categoryId: item.categoryId }]);
   const isTaxed = (categoryId: string, fallback = false) => categoriesById.get(categoryId)?.taxed ?? fallback;
   // VAT khoản nhập sẵn: % đang gõ, chưa gõ thì % đã lưu; khoản không thuế bỏ qua.
   const preparedTaxed = (cost: PaymentCost) => isTaxed(cost.categoryId, cost.taxed);
@@ -620,41 +604,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                   ))}
                 </div>
               </>
-            )}
-
-            {/* Gợi ý khoản phí theo giai đoạn đơn hàng (chỉ nhắc, không bắt buộc): bấm "+ Thêm" điền sẵn vào "Nhập khoản mới" */}
-            {costCode && orderMode && suggestions.length > 0 && (
-              <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50/50 p-3 dark:border-warning-500/30 dark:bg-warning-500/5">
-                <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{t("prSuggestTitle", { count: suggestions.length })}</p>
-                <p className="mt-0.5 text-xs text-gray-500">{t("prSuggestHint")}</p>
-                <ul className="mt-2 space-y-1.5">
-                  {shownSuggestions.map((item) => {
-                    const category = categoriesById.get(item.categoryId);
-                    const supplier = suppliers.get(item.contract);
-                    return (
-                      <li key={`${item.contract}|${item.container}|${item.categoryId}`}
-                        className="flex flex-col gap-2 rounded-lg bg-white px-3 py-2 sm:flex-row sm:items-center dark:bg-gray-900">
-                        <span className="min-w-0 flex-1">
-                          <span className="block break-words text-sm font-medium text-gray-800 dark:text-white/90">{costCodeName(category?.code, category?.name)}</span>
-                          <span className="block break-words text-xs text-gray-500">
-                            <span className="font-mono">{item.contract}</span>{item.container && <> · {t("prContainer")} <span className="font-mono">{item.container}</span></>}
-                            {supplier && ` · ${supplier}`} · {item.reason}
-                          </span>
-                        </span>
-                        <button type="button" onClick={() => addSuggestion(item)} disabled={costCount >= MAX_COSTS}
-                          className="h-10 shrink-0 rounded-lg border border-brand-300 px-3 text-sm font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-50 dark:border-brand-500/40 dark:text-brand-300 dark:hover:bg-brand-500/10">
-                          + {t("prSuggestAdd")}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {suggestions.length > SUGGESTION_LIMIT && (
-                  <button type="button" onClick={() => setShowAllSuggestions((value) => !value)} className="mt-2 text-sm font-medium text-brand-600 hover:underline dark:text-brand-400">
-                    {showAllSuggestions ? t("prSuggestLess") : t("prSuggestMore", { count: suggestions.length - SUGGESTION_LIMIT })}
-                  </button>
-                )}
-              </div>
             )}
 
             {/* Mã chi phí đơn hàng: tick khoản nhập sẵn */}

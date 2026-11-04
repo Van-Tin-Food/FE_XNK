@@ -202,6 +202,15 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return backendMessage || "Chi phí đã nằm trong đề nghị, không sửa / xóa được.";
     case "PAYMENT_COST_UNAVAILABLE":
       return backendMessage || "Chi phí đã được đưa vào đề nghị khác. Vui lòng tải lại danh sách chi phí.";
+    // Phí sửa cont nhập khi upload hóa đơn của đề nghị cược cont (BE paymentCostService.planContainerRepairs).
+    case "CONTAINER_REPAIR_REQUIRED":
+      return backendMessage || "Nhập số tiền hãng tàu hoàn cược của các cont trước khi upload hóa đơn.";
+    case "INVALID_CONTAINER_REPAIR":
+      return backendMessage || "Số tiền hoàn cược / % VAT của cont chưa hợp lệ.";
+    case "CONTAINER_REPAIR_CATEGORY_NOT_FOUND":
+      return backendMessage || "Danh mục chi phí chưa có khoản \"Phí sửa cont\" (mã CONT).";
+    case "CONTAINER_REPAIR_LOCKED":
+      return backendMessage || "Phí sửa cont của cont này đã nằm trong một đề nghị khác.";
     case "PAYMENT_CATEGORY_DUPLICATE":
     case "PAYMENT_CATEGORY_PROTECTED":
     case "PAYMENT_CATEGORY_IN_USE":

@@ -174,3 +174,31 @@ export function subtractAmounts(a: string | null | undefined, b: string | null |
   const cents = amountToCents(a) - amountToCents(b);
   return cents < BigInt(0) ? null : centsToAmount(cents);
 }
+
+// ---------- Phí sửa cont trừ vào tiền cược (upload hóa đơn của đề nghị cược cont đã chi tiền) ----------
+
+/** Số hãng tàu hoàn cược: được âm (phải trả thêm) và 0. "-5.000.000" → "-5000000", "0" → "0"; sai → null. */
+export function parseSignedAmount(value: string): string | null {
+  const raw = String(value ?? "").replace(/\s+/g, "").replace(/^[−–]/, "-");
+  const negative = raw.startsWith("-");
+  const body = negative ? raw.slice(1) : raw;
+  if (/^0+([.,]0{1,2})?$/.test(body)) return "0";
+  const parsed = parseAmountLoose(body);
+  if (parsed === null) return null;
+  return negative ? `-${parsed}` : parsed;
+}
+
+/**
+ * Phí sửa cont = tiền cược − số hoàn (như BE paymentCostService.planContainerRepairs). excess = phần phí sửa vượt tiền cược
+ * (số hoàn âm); refundTooHigh = hoàn nhiều hơn tiền cược (không hợp lệ, repair trả "0.00").
+ */
+export function containerRepairOf(deposit: string, refund: string): { repair: string; excess: string; refundTooHigh: boolean } {
+  const negative = refund.startsWith("-");
+  const refundCents = amountToCents(negative ? refund.slice(1) : refund) * BigInt(negative ? -1 : 1);
+  const repairCents = amountToCents(deposit) - refundCents;
+  return {
+    repair: repairCents < BigInt(0) ? "0.00" : centsToAmount(repairCents),
+    excess: centsToAmount(negative ? -refundCents : BigInt(0)),
+    refundTooHigh: repairCents < BigInt(0),
+  };
+}
