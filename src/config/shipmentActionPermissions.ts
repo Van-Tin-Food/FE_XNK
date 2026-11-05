@@ -46,7 +46,7 @@ export const PERMISSION_FUNCTIONS = {
   paymentDocuments: ["none", "edit"], // Upload chứng từ + lưu trữ hồ sơ đề nghị
   containerCosts: ["none", "view", "edit"], // Tab Chi phí của đơn: chi phí container
   costReports: ["none", "view"], // Báo cáo chi phí (menu Báo cáo): mặc định không role nào có, admin cấp riêng
-  bankTransactions: ["none", "view"], // Giao dịch ngân hàng (menu Báo cáo, thử nghiệm đối soát SePay): admin cấp riêng
+  bankTransactions: ["none", "view", "edit"], // Đối soát tiền chi (Báo cáo > Giao dịch ngân hàng): view xem, edit gắn / gỡ / bỏ qua; admin cấp riêng
 } as const satisfies Record<string, readonly PermissionLevel[]>;
 
 export type PermissionFunction = keyof typeof PERMISSION_FUNCTIONS;

@@ -202,6 +202,19 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
       return "Không tìm thấy chi phí của bạn (có thể đã bị xóa). Vui lòng tải lại.";
     case "PAYMENT_COST_LOCKED":
       return backendMessage || "Chi phí đã nằm trong đề nghị, không sửa / xóa được.";
+    // Đối soát tiền chi (BE bankTransactionService): gắn / gỡ / bỏ qua giao dịch ngân hàng.
+    case "BANK_MATCH_EXCEEDS":
+    case "BANK_MATCH_REQUEST_STATUS":
+    case "BANK_MATCH_CURRENCY":
+    case "BANK_MATCH_DUPLICATE":
+    case "BANK_TRANSACTION_IGNORED":
+    case "BANK_TRANSACTION_LINKED":
+    case "INVALID_BANK_MATCH":
+    case "INVALID_BANK_IGNORE":
+      return backendMessage || "Không cập nhật được đối soát giao dịch. Vui lòng kiểm tra lại.";
+    case "BANK_MATCH_NOT_FOUND":
+    case "BANK_TRANSACTION_NOT_FOUND":
+      return backendMessage || "Không tìm thấy giao dịch, vui lòng tải lại trang.";
     case "PAYMENT_COST_UNAVAILABLE":
       return backendMessage || "Chi phí đã được đưa vào đề nghị khác. Vui lòng tải lại danh sách chi phí.";
     // Phí sửa cont nhập khi upload hóa đơn của đề nghị cược cont (BE paymentCostService.planContainerRepairs).
