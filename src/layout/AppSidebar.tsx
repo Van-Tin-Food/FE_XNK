@@ -51,6 +51,8 @@ const AppSidebar: React.FC = () => {
   const canViewCostManagement = canViewPaymentCategories || canViewPaymentRequests;
   // Mục Báo cáo: báo cáo chi phí — quyền costReports (admin cấp riêng cho từng tài khoản).
   const canViewCostReport = Number(user?.id) === 1;
+  // Giao dịch ngân hàng (thử nghiệm đối soát SePay) — quyền bankTransactions (admin cấp riêng).
+  const canViewBankTransactions = can("bankTransactions");
   const { t } = useLanguage();
 
   return (
@@ -181,7 +183,7 @@ const AppSidebar: React.FC = () => {
             </li>
           )}
 
-          {canViewCostReport && (
+          {(canViewCostReport || canViewBankTransactions) && (
             <li>
               <button type="button" onClick={() => setReportsOpen((current) => !current)} className={`menu-item group w-full ${reportsOpen ? "menu-item-active" : "menu-item-inactive"} ${!showText ? "lg:justify-center" : "lg:justify-start"}`} aria-expanded={reportsOpen}>
                 <span className={reportsOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
@@ -194,7 +196,8 @@ const AppSidebar: React.FC = () => {
                 {showText && <span className="ml-auto text-xs">{reportsOpen ? "−" : "+"}</span>}
               </button>
               {reportsOpen && showText && <ul className="mt-1 space-y-1 pl-11">
-                <li><Link href="/reports/costs" className={`menu-dropdown-item ${pathname.startsWith("/reports/costs") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("costPayableReport")}</Link></li>
+                {canViewCostReport && <li><Link href="/reports/costs" className={`menu-dropdown-item ${pathname.startsWith("/reports/costs") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("costPayableReport")}</Link></li>}
+                {canViewBankTransactions && <li><Link href="/reports/bank-transactions" className={`menu-dropdown-item ${pathname.startsWith("/reports/bank-transactions") ? "menu-dropdown-item-active" : "menu-dropdown-item-inactive"}`}>{t("bankTransactionsMenu")}</Link></li>}
               </ul>}
             </li>
           )}

@@ -46,6 +46,7 @@ export const PERMISSION_FUNCTIONS = {
   paymentDocuments: ["none", "edit"], // Upload chứng từ + lưu trữ hồ sơ đề nghị
   containerCosts: ["none", "view", "edit"], // Tab Chi phí của đơn: chi phí container
   costReports: ["none", "view"], // Báo cáo chi phí (menu Báo cáo): mặc định không role nào có, admin cấp riêng
+  bankTransactions: ["none", "view"], // Giao dịch ngân hàng (menu Báo cáo, thử nghiệm đối soát SePay): admin cấp riêng
 } as const satisfies Record<string, readonly PermissionLevel[]>;
 
 export type PermissionFunction = keyof typeof PERMISSION_FUNCTIONS;
@@ -62,7 +63,7 @@ export const PERMISSION_GROUPS: ReadonlyArray<{ key: string; functions: readonly
   { key: "permissionGroupPayments", functions: ["paymentRequests", "paymentRequestsAll", "paymentRequestsOnBehalf", "paymentApprove", "paymentDocuments"] },
   { key: "permissionGroupSensitive", functions: ["purchaseAmounts", "supplierContact"] },
   { key: "permissionGroupCatalogs", functions: ["catalogSuppliers", "catalogCarriers", "catalogWarehouses", "paymentCategories"] },
-  { key: "reportsMenu", functions: ["costReports"] },
+  { key: "reportsMenu", functions: ["costReports", "bankTransactions"] },
   { key: "permissionGroupSystem", functions: ["users", "activityLogs", "userGuide"] },
 ];
 

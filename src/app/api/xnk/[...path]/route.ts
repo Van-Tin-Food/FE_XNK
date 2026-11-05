@@ -10,6 +10,9 @@ export const preferredRegion = "sin1";
 type RouteContext = { params: Promise<{ path: string[] }> };
 
 const GOOGLE_CHAT_EVENTS_ROUTE = "POST api/google-chat/events";
+// SePay gửi giao dịch ngân hàng (webhook); BE tự xác thực bằng chữ ký HMAC / API key nên phải chuyển nguyên các header này.
+const SEPAY_WEBHOOK_ROUTE = "POST api/bank-webhook/sepay";
+const SEPAY_HEADERS = ["x-sepay-signature", "x-sepay-timestamp", "authorization"];
 /**
  * Ảnh công khai trên thẻ Google Chat (ảnh trang đầu chứng từ, mã VietQR); BE tự kiểm tra vé có chữ ký (?t=) và trả
  * header cache để Google / CDN lưu ảnh. Link mới nằm dưới google-chat/events vì Cloudflare Access chỉ bypass prefix đó;
@@ -30,6 +33,7 @@ const PUBLIC_ROUTES = new Set([
   "POST api/auth/google/verify",
   // Google Chat gửi sự kiện nút Duyệt / Từ chối đề nghị thanh toán; BE tự kiểm tra token của Google.
   GOOGLE_CHAT_EVENTS_ROUTE,
+  SEPAY_WEBHOOK_ROUTE,
   ...PUBLIC_IMAGE_ROUTES,
   "GET health",
   "GET api/health",
@@ -92,6 +96,12 @@ async function forward(request: NextRequest, { params }: RouteContext) {
   const googleChatAuthorization = request.headers.get("authorization");
   if (`${request.method} ${joinedPath}` === GOOGLE_CHAT_EVENTS_ROUTE && googleChatAuthorization) {
     headers.set("Authorization", googleChatAuthorization);
+  }
+  if (`${request.method} ${joinedPath}` === SEPAY_WEBHOOK_ROUTE) {
+    for (const name of SEPAY_HEADERS) {
+      const value = request.headers.get(name);
+      if (value) headers.set(name, value);
+    }
   }
 
   const contentType = request.headers.get("content-type");
