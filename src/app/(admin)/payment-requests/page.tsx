@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PaginationControls from "@/components/common/PaginationControls";
-import { PaymentStatusBadge, RedFlowBadge, formatDateTime, formatDueDate, isOverdue } from "@/components/payment/PaymentRequestParts";
+import { BankPaidHint, PaymentStatusBadge, RedFlowBadge, formatDateTime, formatDueDate, isOverdue } from "@/components/payment/PaymentRequestParts";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
 import {
@@ -387,6 +387,7 @@ function PaymentRequestsContent() {
                       <span className="font-mono text-sm font-semibold text-brand-600 dark:text-brand-400">{request.id}</span>
                       <PaymentStatusBadge status={request.status} draft={!request.sent} />
                     </span>
+                    <BankPaidHint status={request.status} bankPayment={request.bankPayment} />
                     <span className="line-clamp-2 break-words text-sm font-medium text-gray-800 dark:text-white/90">{request.content}</span>
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="text-base font-bold tabular-nums text-gray-900 dark:text-white">{money(request)}</span>
@@ -449,6 +450,7 @@ function PaymentRequestsContent() {
                       <td className={`px-4 py-3 text-sm ${dueClass(request)}`}>{formatDueDate(request.dueDate)}</td>
                       <td className="px-4 py-3">
                         <PaymentStatusBadge status={request.status} draft={!request.sent} />
+                        <BankPaidHint status={request.status} bankPayment={request.bankPayment} />
                         {request.approverName && <p className="mt-1 truncate text-xs text-gray-500" title={request.approverName}>{request.approverName}</p>}
                       </td>
                     </tr>

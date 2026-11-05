@@ -33,6 +33,25 @@ export function PaymentStatusBadge({ status, draft = false }: { status: PaymentR
   );
 }
 
+/**
+ * Đối soát tiền chi: ngân hàng đã ghi nhận tiền đi (giao dịch SePay đã gắn) mà đề nghị còn "Đã duyệt" (chưa upload UNC) — một
+ * dòng nhỏ nhắc người phụ trách upload UNC. detail = kèm mã giao dịch + giờ tiền đi (trang chi tiết).
+ */
+export function BankPaidHint({ status, bankPayment, detail = false }: {
+  status: PaymentRequestStatus;
+  bankPayment: { reference: string; at: string } | null;
+  detail?: boolean;
+}) {
+  const { t, language } = useLanguage();
+  if (status !== 1 || !bankPayment) return null;
+  const info = [bankPayment.reference, formatDateTime(bankPayment.at, language)].filter((part) => part && part !== "—").join(" · ");
+  return (
+    <p className="mt-1 text-xs font-medium text-warning-700 dark:text-warning-300" title={info}>
+      {t("prBankPaidHint")}{detail && info && <span className="font-normal text-gray-500 dark:text-gray-400"> · {info}</span>}
+    </p>
+  );
+}
+
 export function PaymentFlowBadge({ flow }: { flow: PaymentFlow }) {
   const { t } = useLanguage();
   return <span className={`inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${FLOW_STYLES[flow]}`}>{t(`prFlow_${flow}`)}</span>;

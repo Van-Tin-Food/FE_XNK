@@ -169,6 +169,11 @@ export interface PaymentRequest {
   costs: PaymentCost[];
   /** Cont có tiền cược trong đề nghị + phí sửa đã ghi (chỉ có ở chi tiết; [] = không có cược cont / BE không trả). */
   containerDeposits: ContainerDeposit[];
+  /**
+   * Giao dịch ngân hàng đã gắn với đề nghị (đối soát tiền chi, SePay): tiền đã đi. Đề nghị còn "Đã duyệt" thì nhắc upload UNC.
+   * null = chưa có giao dịch.
+   */
+  bankPayment: { reference: string; amount: string; at: string } | null;
 }
 
 /**
@@ -391,6 +396,9 @@ function normalizeRequest(row: unknown): PaymentRequest | null {
     canConfirmDocuments: row.can_confirm_documents === undefined || row.can_confirm_documents === null ? null : row.can_confirm_documents === true,
     costCount: Number(row.cost_count ?? costs.length) || 0,
     costs,
+    bankPayment: isRecord(row.bank_payment)
+      ? { reference: str(row.bank_payment.reference), amount: str(row.bank_payment.amount), at: str(row.bank_payment.at) }
+      : null,
     containerDeposits: (Array.isArray(row.container_deposits) ? row.container_deposits : []).filter(isRecord).map((item) => ({
       contract: str(item.contract),
       container: str(item.container),

@@ -11,11 +11,11 @@ import {
   linkBankTransaction, listBankTransactions, searchLinkableRequests, setBankTransactionIgnored, unlinkBankMatch,
   type BankMatchState, type BankTransaction, type LinkableRequest,
 } from "@/services/bankTransactionApi";
-import { amountForInput, amountToCents, formatMoney, parseAmountLoose, sumAmounts } from "@/utils/paymentRequest";
+import { formatMoney } from "@/utils/paymentRequest";
 
 // Đối soát tiền chi (quyền bankTransactions: view xem, edit thao tác): giao dịch tiền ra SePay gửi về, mới nhất trước. Hệ thống
 // đã tự gắn khi có đúng 1 đề nghị đã duyệt cùng số tiền (BE bankTransactionService.autoMatch); giao dịch còn lại kế toán chọn
-// ứng viên, gắn tay (một giao dịch cho nhiều đề nghị, cả đề nghị đã có UNC), gỡ gắn nhầm hoặc bỏ qua kèm lý do (lương, thuế...).
+// ứng viên, gắn tay (một giao dịch = một đề nghị cùng số tiền, kể cả đề nghị đã có UNC), gỡ gắn nhầm hoặc bỏ qua kèm lý do.
 // Mỗi giao dịch một thẻ (dùng chung điện thoại / desktop).
 
 const LIMIT = 100;
@@ -30,11 +30,6 @@ const OUTLINE = `${BUTTON} border border-gray-300 text-gray-700 hover:bg-gray-50
 const PRIMARY = `${BUTTON} bg-brand-500 text-white hover:bg-brand-600`;
 const INPUT = "h-10 w-full min-w-0 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
 
-/** Còn bao nhiêu tiền của giao dịch chưa gắn với đề nghị nào. */
-const remainingOf = (row: BankTransaction) => {
-  const left = amountToCents(row.amount) - amountToCents(sumAmounts(row.matches.map((match) => match.amount)));
-  return left > BigInt(0) ? `${left / BigInt(100)}.${String(left % BigInt(100)).padStart(2, "0")}` : "0.00";
-};
 
 export default function BankTransactionsPage() {
   const { t, language } = useLanguage();
@@ -98,16 +93,16 @@ export default function BankTransactionsPage() {
       setBusy("");
     }
   };
-  const link = (row: BankTransaction, allocations: Array<{ requestId: string; amount: string }>) => run(`link-${row.id}`, async () => {
-    const result = await linkBankTransaction(row.id, allocations);
+  const link = (row: BankTransaction, requestId: string) => run(`link-${row.id}`, async () => {
+    const result = await linkBankTransaction(row.id, requestId);
     if (result.warnings.length) notify(result.warnings.join("; "), "warning");
-    return result.changed.length ? `${t("btLinked")}. ${t("btPaidNow", { list: result.changed.join(", ") })}` : t("btLinked");
+    return t("btLinked");
   });
   const unlink = async (matchId: string, requestId: string) => {
     if (!await confirm({ title: t("btUnlinkTitle"), message: t("btUnlinkConfirm", { id: requestId }), confirmText: t("btUnlink"), tone: "danger" })) return;
     await run(`unlink-${matchId}`, async () => {
       const result = await unlinkBankMatch(matchId);
-      return t(result.reverted ? "btReverted" : "btUnlinked", { id: result.requestId });
+      return t("btUnlinked", { id: result.requestId });
     });
   };
 
@@ -144,9 +139,8 @@ export default function BankTransactionsPage() {
       {rows && rows.length > 0 && (
         <div className="flex flex-col gap-3">
           {rows.map((row) => {
-            const remaining = remainingOf(row);
-            const open = row.type === "out" && !row.ignoredAt && amountToCents(remaining) > BigInt(0);
-            const pending = open && row.matches.length === 0;
+            // Tiền ra chưa gắn đề nghị, chưa bỏ qua.
+            const pending = row.type === "out" && !row.ignoredAt && row.matches.length === 0;
             return (
               <div key={row.id} className={`rounded-2xl border p-4 ${pending
                 ? "border-warning-300 bg-warning-50/50 dark:border-warning-500/40 dark:bg-warning-500/5"
@@ -197,8 +191,6 @@ export default function BankTransactionsPage() {
                     </div>
                   )}
 
-                  {open && row.matches.length > 0 && <p className="text-xs text-warning-700 dark:text-warning-300">{t("btRemaining", { amount: money(remaining) })}</p>}
-
                   {pending && (
                     row.candidates.length > 1 ? (
                       <div>
@@ -214,7 +206,7 @@ export default function BankTransactionsPage() {
                                 </span>
                               </span>
                               {canEdit && (
-                                <button type="button" disabled={Boolean(busy)} onClick={() => void link(row, [{ requestId: candidate.id, amount: row.amount }])} className={`${PRIMARY} shrink-0`}>
+                                <button type="button" disabled={Boolean(busy)} onClick={() => void link(row, candidate.id)} className={`${PRIMARY} shrink-0`}>
                                   {t("btChoose")}
                                 </button>
                               )}
@@ -227,17 +219,15 @@ export default function BankTransactionsPage() {
                     )
                   )}
 
-                  {canEdit && open && linking !== row.id && ignoring !== row.id && (
+                  {canEdit && pending && linking !== row.id && ignoring !== row.id && (
                     <div className="flex flex-wrap gap-2">
                       <button type="button" disabled={Boolean(busy)} onClick={() => { setLinking(row.id); setIgnoring(""); }} className={OUTLINE}>{t("btLinkOther")}</button>
-                      {row.matches.length === 0 && (
-                        <button type="button" disabled={Boolean(busy)} onClick={() => { setIgnoring(row.id); setLinking(""); }} className={OUTLINE}>{t("btIgnore")}</button>
-                      )}
+                      <button type="button" disabled={Boolean(busy)} onClick={() => { setIgnoring(row.id); setLinking(""); }} className={OUTLINE}>{t("btIgnore")}</button>
                     </div>
                   )}
                   {linking === row.id && (
-                    <LinkPanel remaining={remaining} busy={busy === `link-${row.id}`} onCancel={() => setLinking("")}
-                      onSave={(allocations) => void link(row, allocations)} />
+                    <LinkPanel transactionId={row.id} amount={money(row.amount)} busy={busy === `link-${row.id}`} onCancel={() => setLinking("")}
+                      onSave={(requestId) => void link(row, requestId)} />
                   )}
                   {ignoring === row.id && (
                     <IgnorePanel busy={busy === `ignore-${row.id}`} onCancel={() => setIgnoring("")}
@@ -254,23 +244,22 @@ export default function BankTransactionsPage() {
   );
 }
 
-/** Gắn tay: tìm đề nghị đã duyệt / đã chi tiền, chọn một hoặc nhiều, nhập số tiền gắn cho từng đề nghị. */
-function LinkPanel({ remaining, busy, onCancel, onSave }: {
-  remaining: string;
+/** Gắn tay: đề nghị đã duyệt / đã chi tiền CÙNG số tiền với giao dịch, chưa gắn giao dịch nào; bấm Gắn một đề nghị. */
+function LinkPanel({ transactionId, amount, busy, onCancel, onSave }: {
+  transactionId: string;
+  amount: string;
   busy: boolean;
   onCancel: () => void;
-  onSave: (allocations: Array<{ requestId: string; amount: string }>) => void;
+  onSave: (requestId: string) => void;
 }) {
   const { t, language } = useLanguage();
-  const { notify } = useSystemNotification();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<LinkableRequest[] | null>(null);
-  const [picked, setPicked] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      searchLinkableRequests(query.trim(), controller.signal)
+      searchLinkableRequests(transactionId, query.trim(), controller.signal)
         .then(setResults)
         .catch(() => { if (!controller.signal.aborted) setResults([]); });
     }, 300);
@@ -278,59 +267,32 @@ function LinkPanel({ remaining, busy, onCancel, onSave }: {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query]);
-
-  const toggle = (request: LinkableRequest) => setPicked((current) => {
-    const next = { ...current };
-    if (request.id in next) delete next[request.id];
-    else {
-      // Gợi ý số tiền = phần còn lại của đề nghị, không quá phần còn lại của giao dịch.
-      const requestLeft = amountToCents(request.total) - amountToCents(request.allocated);
-      const left = requestLeft < amountToCents(remaining) ? requestLeft : amountToCents(remaining);
-      next[request.id] = left > BigInt(0) ? amountForInput(`${left / BigInt(100)}.${String(left % BigInt(100)).padStart(2, "0")}`) : "";
-    }
-    return next;
-  });
-  const save = () => {
-    const allocations = Object.entries(picked).map(([requestId, value]) => ({ requestId, amount: parseAmountLoose(value) || "" }));
-    if (!allocations.length || allocations.some((item) => !item.amount)) return notify(t("btLinkInvalid"), "error");
-    onSave(allocations);
-  };
+  }, [query, transactionId]);
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-white/5">
       <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("btSearchPlaceholder")} className={INPUT} />
       <ul className="mt-2 flex max-h-72 flex-col gap-1.5 overflow-y-auto">
         {results === null && <li className="h-10 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />}
-        {results?.length === 0 && <li className="px-1 py-2 text-sm text-gray-500">{t("btSearchEmpty")}</li>}
-        {results?.map((request) => {
-          const checked = request.id in picked;
-          return (
-            <li key={request.id} className="flex flex-col gap-2 rounded-lg bg-white p-2.5 sm:flex-row sm:items-center dark:bg-gray-900">
-              <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 text-sm">
-                <input type="checkbox" checked={checked} onChange={() => toggle(request)} className="mt-1 h-4 w-4 shrink-0" />
-                <span className="min-w-0">
-                  <span className="font-mono font-semibold text-gray-800 dark:text-white/90">{request.id}</span>{" "}
-                  <PaymentStatusBadge status={request.status} />
-                  <span className="mt-0.5 block break-words text-gray-600 dark:text-gray-300">{request.content}</span>
-                  <span className="block text-xs text-gray-500">
-                    {[request.beneficiary && t("btBeneficiary", { name: request.beneficiary }), t("btAllocated", { allocated: formatMoney(request.allocated, "VND", language), total: formatMoney(request.total, "VND", language) })].filter(Boolean).join(" · ")}
-                  </span>
-                </span>
-              </label>
-              {checked && (
-                <input value={picked[request.id]} onChange={(event) => setPicked((current) => ({ ...current, [request.id]: event.target.value }))}
-                  inputMode="decimal" aria-label={t("btAllocateAmount")} placeholder={t("btAllocateAmount")} className={`${INPUT} sm:w-40`} />
-              )}
-            </li>
-          );
-        })}
+        {results?.length === 0 && <li className="px-1 py-2 text-sm text-gray-500">{t("btSearchEmpty", { amount })}</li>}
+        {results?.map((request) => (
+          <li key={request.id} className="flex flex-col gap-2 rounded-lg bg-white p-2.5 sm:flex-row sm:items-center dark:bg-gray-900">
+            <span className="min-w-0 flex-1 text-sm">
+              <span className="font-mono font-semibold text-gray-800 dark:text-white/90">{request.id}</span>{" "}
+              <PaymentStatusBadge status={request.status} />
+              <span className="mt-0.5 block break-words text-gray-600 dark:text-gray-300">{request.content}</span>
+              <span className="block text-xs text-gray-500">
+                {[request.beneficiary && t("btBeneficiary", { name: request.beneficiary }), t("btApprovedAt", { time: formatDateTime(request.approvedAt, language) })].filter(Boolean).join(" · ")}
+              </span>
+            </span>
+            <button type="button" onClick={() => onSave(request.id)} disabled={busy} className={`${PRIMARY} shrink-0`}>
+              {busy ? t("saving") : t("btLinkSave")}
+            </button>
+          </li>
+        ))}
       </ul>
-      <div className="mt-3 flex flex-wrap justify-end gap-2">
+      <div className="mt-3 flex justify-end">
         <button type="button" onClick={onCancel} disabled={busy} className={OUTLINE}>{t("cancel")}</button>
-        <button type="button" onClick={save} disabled={busy || Object.keys(picked).length === 0} className={PRIMARY}>
-          {busy ? t("saving") : t("btLinkSave", { count: Object.keys(picked).length })}
-        </button>
       </div>
     </div>
   );

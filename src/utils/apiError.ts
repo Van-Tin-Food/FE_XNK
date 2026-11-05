@@ -203,10 +203,10 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
     case "PAYMENT_COST_LOCKED":
       return backendMessage || "Chi phí đã nằm trong đề nghị, không sửa / xóa được.";
     // Đối soát tiền chi (BE bankTransactionService): gắn / gỡ / bỏ qua giao dịch ngân hàng.
-    case "BANK_MATCH_EXCEEDS":
+    case "BANK_MATCH_AMOUNT":
+    case "BANK_MATCH_TAKEN":
     case "BANK_MATCH_REQUEST_STATUS":
     case "BANK_MATCH_CURRENCY":
-    case "BANK_MATCH_DUPLICATE":
     case "BANK_TRANSACTION_IGNORED":
     case "BANK_TRANSACTION_LINKED":
     case "INVALID_BANK_MATCH":

@@ -29,7 +29,7 @@ import { saveSignedPaymentRequestPdf } from "@/utils/paymentRequestSignedPdf";
 import PaymentDocumentsPanel from "./PaymentDocumentsPanel";
 import PaymentTransferQr from "./PaymentTransferQr";
 import PaymentRequestWizard from "./PaymentRequestWizard";
-import { PaymentFlowBadge, PaymentStatusBadge, RedFlowBadge, formatDateTime, formatDueDate, isOverdue } from "./PaymentRequestParts";
+import { BankPaidHint, PaymentFlowBadge, PaymentStatusBadge, RedFlowBadge, formatDateTime, formatDueDate, isOverdue } from "./PaymentRequestParts";
 
 // Quy trình một đề nghị thanh toán, 4 nút: 1 lên đề nghị & gửi → 2 duyệt / từ chối → 3 chi tiền (upload ủy nhiệm chi / ảnh
 // chuyển tiền) → 4 lưu trữ hồ sơ. Nút đang ở mở ra để thao tác, nút đã xong thu gọn kết quả, nút chưa tới bị khoá.
@@ -469,6 +469,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
           {request.hasRed && <RedFlowBadge />}
           <span className="ml-auto text-lg font-bold tabular-nums text-gray-900 dark:text-white">{money(request.total)}</span>
         </div>
+        <BankPaidHint status={request.status} bankPayment={request.bankPayment} detail />
         <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">{request.content}</p>
         {cancelled && <p className="mt-3 rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-700 dark:bg-gray-800 dark:text-gray-300">🚫 {t("prCancelledInfo", { time: formatDateTime(request.updatedAt, language) })}</p>}
         {canEdit && !editing && (

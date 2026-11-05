@@ -3,9 +3,10 @@ import { backendApiUrl } from "@/services/backendApiUrl";
 import type { PaymentRequestStatus } from "@/services/paymentRequestApi";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
-// Đối soát tiền chi (BE: /api/bank-transactions, quyền bankTransactions — view xem, edit gắn / gỡ / bỏ qua): giao dịch tiền ra
+// Đối soát tiền chi — nhắc tiền đã đi mà chưa upload UNC (BE: /api/bank-transactions, quyền bankTransactions — view xem, edit
+// gắn / gỡ / bỏ qua; gắn không đổi trạng thái đề nghị): giao dịch tiền ra
 // SePay gửi về từ tài khoản ngân hàng công ty, đề nghị đã gắn (hệ thống tự gắn khi có đúng 1 đề nghị đã duyệt cùng số tiền,
-// hoặc kế toán gắn tay) và đề nghị ứng viên cho giao dịch chưa gắn.
+// hoặc kế toán gắn tay) và đề nghị ứng viên cho giao dịch chưa gắn. Một giao dịch = một đề nghị, số tiền bằng đúng tổng đề nghị.
 
 export type BankTransferType = "in" | "out";
 /** Lọc theo đối soát: "" tất cả, pending chờ xử lý (tiền ra chưa gắn, chưa bỏ qua), matched đã gắn, ignored đã bỏ qua. */
@@ -59,8 +60,6 @@ export interface LinkableRequest {
   content: string;
   beneficiary: string;
   approvedAt: string;
-  /** Số tiền đã gắn giao dịch ngân hàng. */
-  allocated: string;
 }
 
 const SCOPE = "Giao dịch ngân hàng";
@@ -142,9 +141,9 @@ export async function listBankTransactions(
   return { rows, total: Number(pagination.total) || rows.length };
 }
 
-/** Đề nghị đã duyệt / đã chi tiền (VND) để gắn tay, tìm theo mã / nội dung / người thụ hưởng. */
-export async function searchLinkableRequests(query: string, signal?: AbortSignal): Promise<LinkableRequest[]> {
-  const data = await request("GET", `/requests?q=${encodeURIComponent(query)}`, undefined, signal);
+/** Đề nghị gắn tay được cho giao dịch: đã duyệt / đã chi tiền, VND, CÙNG số tiền, chưa gắn giao dịch nào; lọc theo mã / nội dung / người thụ hưởng. */
+export async function searchLinkableRequests(transactionId: string, query: string, signal?: AbortSignal): Promise<LinkableRequest[]> {
+  const data = await request("GET", `/${encodeURIComponent(transactionId)}/requests?q=${encodeURIComponent(query)}`, undefined, signal);
   return list(data.data).map((row) => ({
     id: str(row.id),
     status: statusOf(row.status),
@@ -152,28 +151,21 @@ export async function searchLinkableRequests(query: string, signal?: AbortSignal
     content: str(row.content),
     beneficiary: str(row.beneficiary),
     approvedAt: str(row.approvedAt),
-    allocated: str(row.allocated),
   }));
 }
 
-/** Gắn tay giao dịch vào một hoặc nhiều đề nghị. Trả các đề nghị vừa chuyển "Đã chi tiền" + cảnh báo (tiền đi trước khi duyệt). */
-export async function linkBankTransaction(
-  transactionId: string,
-  allocations: Array<{ requestId: string; amount: string }>,
-): Promise<{ changed: string[]; warnings: string[] }> {
-  const data = await request("POST", `/${encodeURIComponent(transactionId)}/links`, { allocations });
+/** Gắn tay giao dịch vào một đề nghị (không đổi trạng thái đề nghị). Trả cảnh báo (tiền đi trước khi duyệt). */
+export async function linkBankTransaction(transactionId: string, requestId: string): Promise<{ warnings: string[] }> {
+  const data = await request("POST", `/${encodeURIComponent(transactionId)}/links`, { requestId });
   const result = isRecord(data.data) ? data.data : {};
-  return {
-    changed: (Array.isArray(result.changed) ? result.changed : []).map(str),
-    warnings: (Array.isArray(result.warnings) ? result.warnings : []).map(str),
-  };
+  return { warnings: (Array.isArray(result.warnings) ? result.warnings : []).map(str) };
 }
 
-/** Gỡ một lần gắn; reverted = đề nghị quay về "Đã duyệt" (không còn giao dịch nào, chưa có UNC). */
-export async function unlinkBankMatch(matchId: string): Promise<{ requestId: string; reverted: boolean }> {
+/** Gỡ một lần gắn nhầm (trạng thái đề nghị không đổi). */
+export async function unlinkBankMatch(matchId: string): Promise<{ requestId: string }> {
   const data = await request("DELETE", `/links/${encodeURIComponent(matchId)}`);
   const result = isRecord(data.data) ? data.data : {};
-  return { requestId: str(result.requestId), reverted: result.reverted === true };
+  return { requestId: str(result.requestId) };
 }
 
 /** Đánh dấu giao dịch không thuộc đề nghị (lương, thuế...) kèm lý do; reason rỗng = bỏ đánh dấu. */
