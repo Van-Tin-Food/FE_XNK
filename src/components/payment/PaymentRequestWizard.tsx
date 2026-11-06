@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
+import AmountInput from "@/components/form/input/AmountInput";
 import {
   INVOICE,
   PAYMENT_METHODS,
@@ -298,7 +299,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const preparedNoteOf = (cost: PaymentCost) => (cost.id in preparedNotes ? preparedNotes[cost.id] : cost.note);
   /** Số tiền khoản nhập sẵn: đang sửa (sai định dạng = null), chưa sửa thì số đã lưu. */
   const preparedAmountText = (cost: PaymentCost) => (cost.id in preparedAmounts ? preparedAmounts[cost.id] : formatAmount(cost.amount, "vi"));
-  const preparedAmountOf = (cost: PaymentCost) => (editing && cost.id in preparedAmounts ? parseAmountLoose(preparedAmounts[cost.id]) : cost.amount);
+  // Ô số tiền tự chia nhóm nghìn (AmountInput); đang gõ dở phần lẻ ("18.500,") vẫn đọc được.
+  const preparedAmountOf = (cost: PaymentCost) => (editing && cost.id in preparedAmounts ? parseAmountLoose(preparedAmounts[cost.id].replace(/,$/, "")) : cost.amount);
   const otherAmounts = manualRows.map((row) => parseAmountLoose(row.amount));
   const otherVats = manualRows.map((row) => (isTaxed(row.categoryId) ? parseVatInput(row.vat) : null));
   const otherValid = manualRows.every((row, index) => row.categoryId && otherAmounts[index] !== null && (!isTaxed(row.categoryId) || otherVats[index] !== null)
@@ -688,9 +690,9 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                               <div className="mb-1 ml-8 mr-1 flex flex-col gap-1">
                                                 <label className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
                                                   <span className="font-semibold">{t("prPreparedAmount")}</span>
-                                                  <input value={preparedAmountText(cost)} inputMode="decimal" aria-label={`${t("prPreparedAmount")} ${costLabel(cost)}`}
+                                                  <AmountInput value={preparedAmountText(cost)} aria-label={`${t("prPreparedAmount")} ${costLabel(cost)}`}
                                                     aria-invalid={amount === null}
-                                                    onChange={(event) => setPreparedAmounts((current) => ({ ...current, [cost.id]: event.target.value }))}
+                                                    onChange={(value) => setPreparedAmounts((current) => ({ ...current, [cost.id]: value }))}
                                                     className={`h-9 w-full min-w-0 rounded-lg border bg-white px-2.5 text-right text-sm tabular-nums text-gray-800 outline-none focus:border-brand-400 dark:bg-gray-900 dark:text-white sm:w-48 ${amount === null ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
                                                 </label>
                                                 {amount === null

@@ -80,6 +80,56 @@ export function parseAmountLoose(value: string): string | null {
   return amountToCents(normalized) > BigInt(0) ? normalized : null;
 }
 
+/**
+ * Ô nhập số tiền tự chia nhóm nghìn khi gõ (kiểu Việt Nam, như formatAmount "vi"): "192802100" → "192.802.100", phần lẻ sau
+ * dấu phẩy, tối đa 2 số ("18.500,5"). Dấu chấm trong ô là dấu nghìn do ô tự chèn; người dùng GÕ một dấu "." hoặc "," là bắt
+ * đầu phần lẻ. Dán cả chuỗi thì đọc như parseAmountLoose ("18,500.50" → "18.500,50"). Kết quả đọc lại đúng bằng
+ * parseAmountLoose (bỏ dấu phẩy cuối khi đang gõ dở: "18.500,").
+ * caret: vị trí con trỏ trong next → trả vị trí tương ứng trong text (sau đúng số chữ số / dấu phẩy đã đứng trước nó).
+ */
+export function formatAmountTyping(next: string, previous = "", caret = next.length): { text: string; caret: number } {
+  const value = String(next ?? "");
+  const before = String(previous ?? "");
+  // Dán (thêm nhiều ký tự một lúc, có dấu): đọc theo parseAmountLoose để hiểu đúng "18,500.50" / "1.250.000".
+  if (value.length > before.length + 1 && /[.,]/.test(value)) {
+    const pasted = parseAmountLoose(value);
+    if (pasted) {
+      const text = formatAmount(pasted, "vi");
+      return { text, caret: text.length };
+    }
+  }
+  // Vị trí (trong next) của dấu phần lẻ: gõ đúng một dấu "." / "," → dấu đó; còn lại → dấu phẩy đầu tiên (do ô đã tạo).
+  let decimalAt = -1;
+  if (value.length === before.length + 1) {
+    let index = 0;
+    while (index < before.length && value[index] === before[index]) index += 1;
+    const typed = value[index];
+    if ((typed === "." || typed === ",") && value.slice(0, index) + value.slice(index + 1) === before) {
+      if (before.includes(",")) return { text: before, caret: index }; // đã có phần lẻ: bỏ dấu gõ thêm
+      decimalAt = index;
+    }
+  }
+  if (decimalAt < 0) decimalAt = value.indexOf(",");
+  const digitsOf = (part: string) => part.replace(/\D/g, "");
+  const integerRaw = digitsOf(decimalAt < 0 ? value : value.slice(0, decimalAt));
+  const fraction = decimalAt < 0 ? "" : digitsOf(value.slice(decimalAt + 1)).slice(0, 2);
+  const integer = integerRaw.replace(/^0+(?=\d)/, "") || (decimalAt < 0 ? "" : "0");
+  const text = `${integer.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}${decimalAt < 0 ? "" : `,${fraction}`}`;
+  // Con trỏ: đếm chữ số + dấu phần lẻ đứng trước nó trong next (bỏ số 0 đầu bị cắt), đặt sau đúng chừng ấy ký tự trong text.
+  let wanted = 0;
+  for (let index = 0; index < Math.min(caret, value.length); index += 1) {
+    if (/\d/.test(value[index]) || index === decimalAt) wanted += 1;
+  }
+  const strippedZeros = integerRaw.length - integerRaw.replace(/^0+(?=\d)/, "").length;
+  const addedZero = !integerRaw && decimalAt >= 0 && wanted > 0 ? 1 : 0; // ",5" → "0,5"
+  wanted = Math.max(0, wanted - strippedZeros) + addedZero;
+  let position = 0;
+  for (let seen = 0; position < text.length && seen < wanted; position += 1) {
+    if (text[position] !== ".") seen += 1;
+  }
+  return { text, caret: position };
+}
+
 /** Số tiền không kèm loại tiền: "1250000.00" → "1.250.000"; "18500.5" → "18.500,50". */
 export function formatAmount(value: string | number | null | undefined, language: "vi" | "en" = "vi"): string {
   const cents = amountToCents(typeof value === "number" ? value.toFixed(2) : value);

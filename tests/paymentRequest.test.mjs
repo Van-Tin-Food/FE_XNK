@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { addVat, amountForInput, amountToCents, containerRepairOf, formatAmount, formatMoney, parseAmountInput, parseAmountLoose, parseSignedAmount, parseVatInput, splitVat, subtractAmounts, sumAmounts } from "../src/utils/paymentRequest.ts";
+import { addVat, amountForInput, amountToCents, containerRepairOf, formatAmount, formatAmountTyping, formatMoney, parseAmountInput, parseAmountLoose, parseSignedAmount, parseVatInput, splitVat, subtractAmounts, sumAmounts } from "../src/utils/paymentRequest.ts";
 
 test("đọc số tiền khi chưa biết loại tiền: phân biệt dấu nghìn và phần lẻ", () => {
   assert.equal(parseAmountLoose("1.250.000"), "1250000");
@@ -98,4 +98,38 @@ test("phí sửa cont: số hoàn được âm / 0; phí sửa = tiền cược 
   assert.deepEqual(containerRepairOf("10000000.00", "10000000"), { repair: "0.00", excess: "0.00", refundTooHigh: false });
   assert.deepEqual(containerRepairOf("10000000.00", "0"), { repair: "10000000.00", excess: "0.00", refundTooHigh: false });
   assert.equal(containerRepairOf("10000000.00", "10000000.01").refundTooHigh, true);
+});
+
+test("ô số tiền tự chia nhóm nghìn khi gõ, đọc lại đúng bằng parseAmountLoose", () => {
+  // Gõ từng chữ số từ ô trống.
+  let text = "";
+  for (const digit of "192802100") text = formatAmountTyping(text + digit, text).text;
+  assert.equal(text, "192.802.100");
+  assert.equal(parseAmountLoose(text), "192802100");
+  // Gõ "." hoặc "," = bắt đầu phần lẻ (tối đa 2 số); gõ thêm dấu nữa thì bỏ qua.
+  assert.equal(formatAmountTyping("18.500.", "18.500").text, "18.500,");
+  assert.equal(formatAmountTyping("18.500,", "18.500").text, "18.500,");
+  assert.equal(formatAmountTyping("18.500,5", "18.500,").text, "18.500,5");
+  assert.equal(formatAmountTyping("18.500,505", "18.500,50").text, "18.500,50");
+  assert.equal(formatAmountTyping("18.500,5.", "18.500,5").text, "18.500,5");
+  assert.equal(parseAmountLoose("18.500,5"), "18500.5");
+  assert.equal(formatAmountTyping(",", "").text, "0,");
+  assert.equal(formatAmountTyping("0,5", "0,").text, "0,5");
+  // Xóa: dấu chấm luôn là dấu nghìn, chia lại nhóm.
+  assert.equal(formatAmountTyping("1.23", "1.234").text, "123");
+  assert.equal(formatAmountTyping("12.345", "123.456").text, "12.345");
+  assert.equal(formatAmountTyping("", "1").text, "");
+  // Chữ / khoảng trắng bị bỏ; số 0 đầu bị bỏ.
+  assert.equal(formatAmountTyping("1.234a", "1.234").text, "1.234");
+  assert.equal(formatAmountTyping("007", "00").text, "7");
+  // Dán cả chuỗi: hiểu như parseAmountLoose.
+  assert.equal(formatAmountTyping("18,500.50", "").text, "18.500,50");
+  assert.equal(formatAmountTyping("1.250.000", "").text, "1.250.000");
+  assert.equal(formatAmountTyping("192802100", "").text, "192.802.100");
+  // Con trỏ: sửa giữa số không nhảy về cuối.
+  assert.deepEqual(formatAmountTyping("1.2345", "1.234", 6), { text: "12.345", caret: 6 });
+  assert.deepEqual(formatAmountTyping("1952.802.100", "192.802.100", 3), { text: "1.952.802.100", caret: 4 }, "chèn 5 sau 19: con trỏ ngay sau 5");
+  assert.deepEqual(formatAmountTyping("1.0234", "1.234", 3), { text: "10.234", caret: 2 });
+  assert.deepEqual(formatAmountTyping("1.34", "1.234", 2), { text: "134", caret: 1 });
+  assert.deepEqual(formatAmountTyping("1.234.", "1.234", 6), { text: "1.234,", caret: 6 });
 });
