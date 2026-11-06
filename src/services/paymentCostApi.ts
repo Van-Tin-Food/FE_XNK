@@ -30,6 +30,8 @@ export interface OrderCost {
   vat: string;
   requestId: string;
   requestStatus: PaymentRequestStatus | null;
+  /** Thứ tự khoản trong ô (cont / hợp đồng × khoản phí) theo ngày tạo: 1 = lần đầu, từ 2 = phí phát sinh. */
+  repeat: number;
 }
 
 export interface OrderCosts {
@@ -114,6 +116,7 @@ function normalize(payload: unknown): OrderCosts {
       vat: str(row.phan_tram_vat),
       requestId: str(row.id_payment_request),
       requestStatus: row.request_status === null || row.request_status === undefined ? null : Number(row.request_status) as PaymentRequestStatus,
+      repeat: Number(row.lan_phat_sinh) > 1 ? Number(row.lan_phat_sinh) : 1,
     })),
     access: { container: right(access.container) },
   };

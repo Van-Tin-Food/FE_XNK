@@ -17,6 +17,7 @@ import {
   parseTransferInfo,
   searchPaymentBeneficiaries,
   updatePaymentRequest,
+  costSlotKey,
   type PaymentCost,
   type PaymentMethod,
   type PaymentRequest,
@@ -290,6 +291,28 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const needsContainer = costCode === "CONT";
   const rowContractValid = (row: OtherRow) => !orderMode || contractCodes.has(row.contract.trim());
   const rowContainerValid = (row: OtherRow) => !orderMode || !needsContainer || containersOf(row.contract.trim()).includes(row.container);
+  // Ô (hợp đồng + container + khoản phí) đã có khoản trong đề nghị khác / có khoản chưa vào đề nghị (BE dùng lại khoản đó).
+  const usedSlots = useMemo(() => new Map((options?.usedSlots || []).map((slot) => [costSlotKey(slot.contract, slot.container, slot.categoryId), slot])), [options]);
+  const freeSlots = useMemo(() => {
+    const map = new Map<string, PaymentCost>();
+    for (const cost of options?.availableCosts || []) {
+      const key = costSlotKey(cost.contract, cost.container, cost.categoryId);
+      if (!map.has(key)) map.set(key, cost);
+    }
+    return map;
+  }, [options]);
+  /**
+   * Khoản nhập mới vào ô đã có khoản trong đề nghị khác: "chi phí đã được tạo" — lưu thành phí phát sinh lần n (ô còn khoản chưa
+   * vào đề nghị thì BE dùng lại khoản đó). Cọc hàng / thanh toán còn lại chỉ một khoản: blocked. null = không cảnh báo.
+   */
+  const rowRepeat = (row: OtherRow): { ids: string[]; n: number; blocked: boolean } | null => {
+    if (!orderMode || !row.categoryId || !rowContractValid(row) || !rowContainerValid(row)) return null;
+    const key = costSlotKey(row.contract, needsContainer ? row.container : "", row.categoryId);
+    const ids = (usedSlots.get(key)?.requestIds || []).filter((id) => id !== editing?.id);
+    if (!ids.length) return null;
+    const free = freeSlots.get(key);
+    return { ids, n: free ? free.repeat : (usedSlots.get(key)?.count || 0) + 1, blocked: !free && goodsPaymentKind(categoriesById.get(row.categoryId)) !== null };
+  };
   const isTaxed = (categoryId: string, fallback = false) => categoriesById.get(categoryId)?.taxed ?? fallback;
   // VAT khoản nhập sẵn: % đang gõ, chưa gõ thì % đã lưu; khoản không thuế bỏ qua.
   const preparedTaxed = (cost: PaymentCost) => isTaxed(cost.categoryId, cost.taxed);
@@ -410,6 +433,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   manualRows.forEach((row, index) => {
     const n = index + 1;
     if (!rowContractValid(row)) costIssues.push(t("prErrRowContract", { n }));
+    const repeat = rowRepeat(row);
+    if (repeat?.blocked) costIssues.push(t("costGoodsTaken", { name: categoriesById.get(row.categoryId)?.name || "", ids: repeat.ids.join(", ") }));
     else if (!rowContainerValid(row)) costIssues.push(t("prErrRowContainer", { n }));
     if (!row.categoryId) costIssues.push(t("prErrRowCategory", { n }));
     if (!row.amount.trim()) costIssues.push(t("prErrRowAmountEmpty", { n }));
@@ -443,7 +468,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
 
   // Các khoản đã chọn dạng dòng hiển thị (dùng cho tóm tắt bước chi phí và bản nháp ở bước lưu).
   const chosenLines = [
-    ...selectedCosts.map((cost) => ({ key: cost.id, name: costLabel(cost), note: preparedNoteOf(cost).trim(), target: targetOf(cost), amount: preparedAmountOf(cost) || "0", vatLine: vatLineOf(preparedAmountOf(cost), preparedVat(cost)) })),
+    ...selectedCosts.map((cost) => ({ key: cost.id, name: cost.repeat > 1 ? `${costLabel(cost)} (${t("costRepeatBadge", { n: cost.repeat })})` : costLabel(cost), note: preparedNoteOf(cost).trim(), target: targetOf(cost), amount: preparedAmountOf(cost) || "0", vatLine: vatLineOf(preparedAmountOf(cost), preparedVat(cost)) })),
     ...manualRows.map((row, index) => {
       const category = categoriesById.get(row.categoryId);
       const name = category?.code.toUpperCase() === "VH"
@@ -678,6 +703,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                               <input type="checkbox" className="h-4 w-4 shrink-0" checked={checked} onChange={(event) => toggle([cost.id], event.target.checked)} />
                                               <span className="min-w-0 flex-1">
                                                 <span className="block truncate text-sm text-gray-700 dark:text-gray-200" title={costLabel(cost)}>{costLabel(cost)}</span>
+                                                {cost.repeat > 1 && <span className="mt-0.5 inline-block rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-semibold text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("costRepeatBadge", { n: cost.repeat })}</span>}
                                                 {!checked && cost.note && <span className="block truncate text-xs text-gray-500" title={cost.note}>{cost.note}</span>}
                                               </span>
                                               <span className="shrink-0 text-right">
@@ -853,6 +879,18 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                 )}
                             </div>
                           )}
+                          {/* Ô đã có khoản trong đề nghị khác: cảnh báo "chi phí đã được tạo" (lưu = phí phát sinh lần n) */}
+                          {(() => {
+                            const repeat = rowRepeat(row);
+                            if (!repeat) return null;
+                            return (
+                              <p className={`mt-2 text-xs font-medium ${repeat.blocked ? "text-error-600 dark:text-error-400" : "text-warning-700 dark:text-warning-300"}`}>
+                                ⚠ {repeat.blocked
+                                  ? t("costGoodsTaken", { name: category?.name || "", ids: repeat.ids.join(", ") })
+                                  : t("costRepeatWarning", { ids: repeat.ids.join(", "), n: repeat.n })}
+                              </p>
+                            );
+                          })()}
                         </li>
                       );
                     })}

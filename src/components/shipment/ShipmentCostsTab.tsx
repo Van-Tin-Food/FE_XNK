@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
+import PaymentCategoryPicker from "@/components/payment/PaymentCategoryPicker";
 import { getOrderCosts, goodsPaymentKind, saveOrderCosts, type CostCategory, type OrderCost, type OrderCosts } from "@/services/paymentCostApi";
 import { amountToCents, formatAmount, parseAmountLoose, sumAmounts } from "@/utils/paymentRequest";
 
@@ -11,7 +12,8 @@ import { amountToCents, formatAmount, parseAmountLoose, sumAmounts } from "@/uti
 // Hai phần nằm cạnh nhau (desktop): phí theo hợp đồng (mã HD: cọc hàng, thanh toán tiền còn lại, thuế nhập khẩu...) bên
 // trái, phí theo container (mỗi cont một thẻ) bên phải; màn hình hẹp thì xếp dọc.
 // Mỗi khoản một khối: tên khoản, số tiền, nội dung (diễn giải). Chỉ nhập số (loại tiền chọn khi tạo đề nghị); số tiền là
-// số đã gồm VAT (% VAT nhập khi tạo đề nghị). Khoản đã đưa vào đề nghị hiện mã đề nghị, khoá.
+// số đã gồm VAT (% VAT nhập khi tạo đề nghị). Khoản đã đưa vào đề nghị hiện mã đề nghị, khoá; nhập lại khoản phí đó = thêm
+// khoản mới — phí phát sinh lần N (có dòng cảnh báo "chi phí đã được tạo"), trừ cọc hàng / thanh toán còn lại (một khoản).
 // Thanh toán tiền hàng: tiền cọc và tiền còn lại nhập độc lập; khoản còn lại phải nhỏ hơn tiền hàng.
 
 interface Props {
@@ -68,16 +70,33 @@ export default function ShipmentCostsTab({ contract }: Props) {
   }, [contract, reloadKey, t]);
 
   const categoriesById = useMemo(() => new Map((data?.categories || []).map((category) => [category.id, category])), [data]);
-  // Khoản chưa thuộc đề nghị (sửa được) và các khoản đã vào đề nghị (khoá), theo hợp đồng/cont + khoản phí.
-  const { freeByCell, lockedByTarget } = useMemo(() => {
+  // Ô (hợp đồng/cont + khoản phí) sửa khoản chưa thuộc đề nghị đầu tiên; danh sách bên dưới (lockedByTarget) = khoản đã vào đề
+  // nghị (khoá) + khoản chưa vào đề nghị thứ hai trở đi của ô (hiếm: đề nghị bị xóa trả khoản về khi ô đã có khoản khác).
+  // requestsByCell: mã đề nghị đã chứa khoản phí của ô — nhập lại ô đó là phí phát sinh (cảnh báo).
+  const { freeByCell, lockedByTarget, requestsByCell, countByCell } = useMemo(() => {
     const free = new Map<string, OrderCost>();
     const locked = new Map<Target, OrderCost[]>();
+    const requests = new Map<string, string[]>();
+    const counts = new Map<string, number>();
     for (const cost of data?.costs || []) {
-      if (cost.requestId) locked.set(cost.container, [...(locked.get(cost.container) || []), cost]);
-      else if (!free.has(cellKey(cost.container, cost.categoryId))) free.set(cellKey(cost.container, cost.categoryId), cost);
+      const key = cellKey(cost.container, cost.categoryId);
+      counts.set(key, (counts.get(key) || 0) + 1);
+      if (cost.requestId) requests.set(key, [...new Set([...(requests.get(key) || []), cost.requestId])]);
+      if (cost.requestId || free.has(key)) locked.set(cost.container, [...(locked.get(cost.container) || []), cost]);
+      else free.set(key, cost);
     }
-    return { freeByCell: free, lockedByTarget: locked };
+    return { freeByCell: free, lockedByTarget: locked, requestsByCell: requests, countByCell: counts };
   }, [data]);
+  /** Cảnh báo ô đã có khoản trong đề nghị mà chưa có khoản trống: lưu sẽ tạo phí phát sinh lần N. */
+  const repeatWarning = (key: string) => {
+    const requests = requestsByCell.get(key);
+    if (!requests?.length || freeByCell.has(key)) return null;
+    return (
+      <p className="mt-1 text-xs font-medium text-warning-700 dark:text-warning-300">
+        ⚠ {t("costRepeatWarning", { ids: requests.join(", "), n: (countByCell.get(key) || 0) + 1 })}
+      </p>
+    );
+  };
 
   const valueOf = (key: string) => (key in drafts ? drafts[key] : freeByCell.has(key) ? formatAmount(freeByCell.get(key)?.amount, language) : "");
   const isShown = (key: string) => !removed.includes(key) && (freeByCell.has(key) || added.includes(key));
@@ -120,14 +139,16 @@ export default function ShipmentCostsTab({ contract }: Props) {
     setDrafts((current) => ({ ...current, [key]: value }));
   };
 
-  /** Danh sách sổ xuống: nhóm theo mã chi phí, bỏ khoản đã nhập ở hợp đồng / cont này. */
+  /**
+   * Danh sách sổ xuống: nhóm theo mã chi phí, bỏ khoản đang có ô sửa. Khoản đã vào đề nghị vẫn chọn được (phí phát sinh, có
+   * cảnh báo), trừ cọc hàng / thanh toán còn lại — mỗi hợp đồng một khoản.
+   */
   const optionGroups = (target: Target) => {
     const groups = new Map<string, CostCategory[]>();
-    // Mỗi khoản phí chỉ một dòng trên một cont / hợp đồng: khoản đã vào đề nghị cũng không nhập thêm.
-    const lockedCategories = new Set((lockedByTarget.get(target) || []).map((cost) => cost.categoryId));
     const forContract = target === CONTRACT_TARGET;
     for (const category of forContract ? contractCategories : containerCategories) {
-      if (isShown(cellKey(target, category.id)) || lockedCategories.has(category.id)) continue;
+      const key = cellKey(target, category.id);
+      if (isShown(key) || (goodsPaymentKind(category) && requestsByCell.has(key))) continue;
       groups.set(category.code, [...(groups.get(category.code) || []), category]);
     }
     return [...groups.entries()];
@@ -270,6 +291,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
                       ) : <span />}
                     </div>
                     {kind === "balance" && balanceHint(parseAmountLoose(valueOf(key)))}
+                    {repeatWarning(key)}
                   </li>
                 );
               })}
@@ -279,10 +301,15 @@ export default function ShipmentCostsTab({ contract }: Props) {
                   <li key={cost.id} className="rounded-lg border border-dashed border-gray-200 p-2.5 dark:border-gray-700">
                     <div className="flex items-start gap-2">
                       <div className="min-w-0 flex-1">
-                        {/* Mã đề nghị chứa khoản này lên đầu (như các bảng chi phí khác). */}
-                        <Link href={`/payment-requests/${encodeURIComponent(cost.requestId)}`} className="mb-1 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-brand-600 hover:underline dark:bg-gray-800 dark:text-brand-400">
-                          🔒 {t("pcLockedIn", { id: cost.requestId })}
-                        </Link>
+                        {/* Mã đề nghị chứa khoản này lên đầu (như các bảng chi phí khác); phí phát sinh có nhãn lần thứ mấy. */}
+                        <div className="mb-1 flex flex-wrap items-center gap-1">
+                          {cost.requestId ? (
+                            <Link href={`/payment-requests/${encodeURIComponent(cost.requestId)}`} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-brand-600 hover:underline dark:bg-gray-800 dark:text-brand-400">
+                              🔒 {t("pcLockedIn", { id: cost.requestId })}
+                            </Link>
+                          ) : <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">{t("pcNotInRequest")}</span>}
+                          {cost.repeat > 1 && <span className="rounded-full bg-warning-50 px-2 py-0.5 text-xs font-semibold text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("costRepeatBadge", { n: cost.repeat })}</span>}
+                        </div>
                         <p className="break-words text-sm font-medium text-gray-600 dark:text-gray-300" title={name}>{name}</p>
                         {cost.note && <p className="break-words text-xs text-gray-500">{cost.note}</p>}
                       </div>
@@ -300,22 +327,13 @@ export default function ShipmentCostsTab({ contract }: Props) {
             <p className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">+ {t("pcAddTitle")}</p>
             {/* Một hàng: khoản phí | số tiền | nội dung | nút thêm (thẻ hẹp thì xếp dọc) */}
             <div className="grid grid-cols-1 items-end gap-2 @sm:grid-cols-[minmax(0,1.1fr)_7rem_minmax(0,1fr)_auto]">
-              <label className="min-w-0">
-                <span className={LABEL}>{t("pcFeeLabel")}</span>
-                <select value={entry.categoryId}
-                  onChange={(event) => {
-                    const categoryId = event.target.value;
-                    setNewEntry((current) => ({ ...current, [target]: { ...entry, categoryId } }));
-                  }}
-                  className={`${INPUT} w-full border-gray-200 dark:border-gray-700`}>
-                  <option value="">{t("pcSelectFee")}</option>
-                  {groups.map(([code, items]) => (
-                    <optgroup key={code} label={`${code} · ${t(`prType_${items[0].type}`)}`}>
-                      {items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                    </optgroup>
-                  ))}
-                </select>
-              </label>
+              {/* Khoản phí: gõ để lọc (không dấu cũng được, theo tên / mã / tài khoản), mũi tên + Enter để chọn — như form đề nghị */}
+              <div className="min-w-0">
+                <label htmlFor={`pc-fee-${target || "contract"}`} className={LABEL}>{t("pcFeeLabel")}</label>
+                <PaymentCategoryPicker id={`pc-fee-${target || "contract"}`} categories={groups.flatMap(([, items]) => items)} selectedId={entry.categoryId}
+                  onSelect={(category) => setNewEntry((current) => ({ ...current, [target]: { ...(current[target] || EMPTY_ENTRY), categoryId: category.id } }))}
+                  className={`${INPUT} w-full border-gray-200 dark:border-gray-700`} />
+              </div>
               <label className="min-w-0">
                 <span className={LABEL}>{t("pcAmountWithVatLabel")}</span>
                 <input inputMode="decimal" value={entry.amount} placeholder="1.250.000"
@@ -339,6 +357,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
               </button>
             </div>
             {entryKind === "balance" && balanceHint(parseAmountLoose(entry.amount))}
+            {entry.categoryId && repeatWarning(cellKey(target, entry.categoryId))}
           </div>
         )}
       </div>

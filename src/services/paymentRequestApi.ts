@@ -63,6 +63,8 @@ export interface PaymentCost {
   contract: string;
   requestId: string;
   createdAt: string;
+  /** Khoản theo cont / hợp đồng: thứ tự trong ô (cùng khoản phí) theo ngày tạo — 1 = lần đầu, từ 2 = phí phát sinh. */
+  repeat: number;
 }
 
 /**
@@ -216,7 +218,25 @@ export interface PaymentRequestOptions {
   banks: PaymentBank[];
   /** Tài khoản chọn làm người đứng tên (chỉ người được ủy quyền tạo đề nghị thay); rỗng = không được tạo thay. */
   requesters: PaymentRequester[];
+  /**
+   * Ô (hợp đồng + container + khoản phí) đã có khoản trong đề nghị: nhập khoản mới vào ô đó = phí phát sinh lần count + 1
+   * (form cảnh báo "chi phí đã được tạo"). container rỗng = phí theo hợp đồng.
+   */
+  usedSlots: PaymentUsedSlot[];
 }
+
+export interface PaymentUsedSlot {
+  contract: string;
+  container: string;
+  categoryId: string;
+  /** Số khoản đã có trong ô (kể cả khoản chưa vào đề nghị). */
+  count: number;
+  requestIds: string[];
+}
+
+/** Khoá ô của usedSlots: hợp đồng | container (hoa) | khoản phí. */
+export const costSlotKey = (contract: string, container: string, categoryId: string) =>
+  `${contract.trim()}|${container.trim().toUpperCase()}|${categoryId}`;
 
 /** Người đứng tên đề nghị khi tạo thay. */
 export interface PaymentRequester {
@@ -363,6 +383,7 @@ function normalizeCost(row: unknown): PaymentCost | null {
     contract: str(row.id_mua_hang),
     requestId: str(row.id_payment_request),
     createdAt: str(row.ngay_tao),
+    repeat: Number(row.lan_phat_sinh) > 1 ? Number(row.lan_phat_sinh) : 1,
   };
 }
 
@@ -497,6 +518,13 @@ export async function getPaymentRequestOptions(signal?: AbortSignal): Promise<Pa
     banks: list(data.banks).map((row) => ({ bin: str(row.bin), code: str(row.ma_ngan_hang), shortName: str(row.ten_viet_tat), name: str(row.ten_ngan_hang) }))
       .filter((bank) => /^\d{6}$/.test(bank.bin)),
     requesters: list(data.requesters).map((row) => ({ id: str(row.id), name: str(row.name) || str(row.username) })).filter((row) => row.id),
+    usedSlots: list(data.usedSlots).map((row) => ({
+      contract: str(row.id_mua_hang),
+      container: str(row.id_container),
+      categoryId: str(row.id_payment_category),
+      count: Number(row.so_khoan) || 0,
+      requestIds: Array.isArray(row.de_nghi) ? row.de_nghi.map(str).filter(Boolean) : [],
+    })).filter((row) => row.contract && row.categoryId),
   };
 }
 

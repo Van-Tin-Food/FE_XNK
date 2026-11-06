@@ -503,6 +503,8 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                       <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-white/90">
                         <span className="break-words">{cost.code.toUpperCase() === "VH" ? [cost.account, cost.categoryName].filter(Boolean).join(" · ") : costCodeName(cost.code, cost.categoryName)}{cost.note && <span className="font-normal text-gray-600 dark:text-gray-300"> — {cost.note}</span>}</span>
                         <PaymentFlowBadge flow={cost.flow} />
+                        {/* Phí phát sinh: cùng khoản phí của cont / hợp đồng đã tạo trước đó (lần thứ mấy). */}
+                        {cost.repeat > 1 && <span className="rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-semibold text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("costRepeatBadge", { n: cost.repeat })}</span>}
                       </p>
                       <p className="truncate text-xs text-gray-500">
                         {cost.container ? `${t("prContainer")} ${cost.container} · ${t("prContract")} ${cost.contract}` : cost.contract ? `${t("prContract")} ${cost.contract}` : t("prNoTarget")}
