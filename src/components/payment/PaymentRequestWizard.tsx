@@ -700,28 +700,27 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                                   : Number(amount) !== Number(cost.amount) && <span className="text-xs text-warning-700 dark:text-warning-300">{t("prPreparedAmountChanged", { amount: money(cost.amount) })}</span>}
                                               </div>
                                             )}
-                                            {/* Đã tick: sửa nội dung (diễn giải) của khoản */}
+                                            {/* Khoản đã tick: nội dung chi tiết và VAT của khoản có thuế nằm cùng một hàng. */}
                                             {checked && (
-                                              <div className="mb-1 ml-8 mr-1">
+                                              <div className={`mb-1 ml-8 mr-1 gap-2 ${taxed ? "sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start" : ""}`}>
                                                 <input value={preparedNoteOf(cost)} maxLength={500} placeholder={t("prCostNotePlaceholder")}
                                                   aria-label={`${t("prCostNote")} ${costLabel(cost)}`}
                                                   onChange={(event) => setPreparedNotes((current) => ({ ...current, [cost.id]: event.target.value }))}
                                                   className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
-                                              </div>
-                                            )}
-                                            {/* Khoản có thuế đã tick: nhập % VAT, tự tách tiền trước thuế / VAT */}
-                                            {checked && taxed && (
-                                              <div className="ml-8 mr-1 flex flex-col gap-1">
-                                                <span className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-                                                  <span className="font-semibold">VAT</span>
-                                                  <VatInput value={vatTextOf(cost)} label={`${t("prVatRate")} ${costLabel(cost)}`} invalid={rate === null && (Boolean(vatTextOf(cost).trim()) || costsTouched)}
-                                                    onChange={(value) => setVats((current) => ({ ...current, [cost.id]: value }))} />
-                                                </span>
-                                                {rate !== null
-                                                  ? <span className="text-xs text-gray-500">{vatLineOf(amount, rate)}</span>
-                                                  : vatTextOf(cost).trim() || costsTouched
-                                                    ? <span className="text-xs text-error-600 dark:text-error-400">{t("prVatInvalidShort")}</span>
-                                                    : <span className="text-xs text-warning-700 dark:text-warning-300">{t("prVatRequired")}</span>}
+                                                {taxed && (
+                                                  <div className="mt-2 flex flex-col gap-1 sm:mt-0 sm:min-w-[16rem]">
+                                                    <span className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                                                      <span className="font-semibold">VAT</span>
+                                                      <VatInput value={vatTextOf(cost)} label={`${t("prVatRate")} ${costLabel(cost)}`} invalid={rate === null && (Boolean(vatTextOf(cost).trim()) || costsTouched)}
+                                                        onChange={(value) => setVats((current) => ({ ...current, [cost.id]: value }))} />
+                                                    </span>
+                                                    {rate !== null
+                                                      ? <span className="text-xs text-gray-500">{vatLineOf(amount, rate)}</span>
+                                                      : vatTextOf(cost).trim() || costsTouched
+                                                        ? <span className="text-xs text-error-600 dark:text-error-400">{t("prVatInvalidShort")}</span>
+                                                        : <span className="text-xs text-warning-700 dark:text-warning-300">{t("prVatRequired")}</span>}
+                                                  </div>
+                                                )}
                                               </div>
                                             )}
                                           </li>
