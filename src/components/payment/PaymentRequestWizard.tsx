@@ -30,6 +30,7 @@ import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } fr
 import { addVat, costCodeName, formatAmount, formatMoney, parseAmountLoose, parseVatInput, roundRequestTotal, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
 import { goodsPaymentKind } from "@/services/paymentCostApi";
 import BankPicker, { matchBank } from "./BankPicker";
+import ContractPicker from "./ContractPicker";
 import PaymentCategoryPicker from "./PaymentCategoryPicker";
 import { PaymentFlowBadge, formatDueDate } from "./PaymentRequestParts";
 
@@ -772,11 +773,6 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
               <div className={orderMode ? "mt-4 border-t border-gray-100 pt-4 dark:border-gray-800" : "mt-4"}>
                 {orderMode && <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">{t("prOrderNewTitle")}</p>}
                 <p className="text-xs text-gray-500">{t(orderMode ? "prOrderNewHint" : "prOtherHint")}</p>
-                {orderMode && (
-                  <datalist id="pr-contracts">
-                    {(options?.contracts || []).map((item) => <option key={item.code} value={item.code}>{item.supplier}</option>)}
-                  </datalist>
-                )}
                 {others.length > 0 && (
                   <ul className="mt-2 space-y-2">
                     {others.map((row, index) => {
@@ -803,9 +799,10 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                             <div className={`mb-2 grid grid-cols-1 gap-2 ${needsContainer ? "sm:grid-cols-2" : ""}`}>
                               <label className="min-w-0">
                                 <span className={label}>{t("prContract")}</span>
-                                <input list="pr-contracts" value={row.contract} placeholder={t("prContractPlaceholder")} autoComplete="off"
-                                  onChange={(event) => updateRow(row.key, { contract: event.target.value, container: "" })}
-                                  aria-invalid={Boolean(contractError)}
+                                {/* Gõ để lọc theo mã hợp đồng / nhà cung cấp — cùng kiểu ô Khoản phí */}
+                                <ContractPicker id={`payment-contract-${row.key}`} contracts={options?.contracts || []} value={row.contract.trim()}
+                                  placeholder={t("prContractPlaceholder")} invalid={Boolean(contractError)}
+                                  onSelect={(code) => { if (code !== row.contract.trim()) updateRow(row.key, { contract: code, container: "" }); }}
                                   className={`${INPUT} font-mono ${contractError ? "border-error-400" : ""}`} />
                                 {rowContractValid(row) && suppliers.get(row.contract.trim()) && <span className="mt-1 block truncate text-xs text-gray-500">{suppliers.get(row.contract.trim())}</span>}
                                 <FieldError message={contractError} />

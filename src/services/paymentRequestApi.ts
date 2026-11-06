@@ -88,9 +88,9 @@ export const TRANSFER_FIELDS: Record<TransferKind, TransferField[]> = {
     { label: "Số tài khoản", key: "prTf_accountNumber", jsonKey: "so_tai_khoan", required: false },
     { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: false },
     { label: "Tên ngân hàng", key: "prTf_bankName", jsonKey: "ten_ngan_hang", required: false },
-    { label: "Loại phí giao dịch", key: "prTfTransactionFee", jsonKey: "loai_phi_giao_dich", required: false },
     { label: "Nội dung chuyển khoản", key: "prTf_paymentNote", jsonKey: "noi_dung_thanh_toan", required: false, multiline: true },
   ],
+  // "Loại phí giao dịch" chỉ có ở chuyển khoản quốc tế (đồng bộ TRANSFER_FIELDS ở BE).
   international: [
     { label: "Số IBAN người thụ hưởng", key: "prTf_iban", jsonKey: "so_tai_khoan", required: false },
     { label: "Tên người thụ hưởng", key: "prTf_beneficiaryName", jsonKey: "ten_nguoi_thu_huong", required: false },

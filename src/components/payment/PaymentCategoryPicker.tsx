@@ -9,7 +9,8 @@ import { costCodeName } from "@/utils/paymentRequest";
 // gõ để lọc, phím mũi tên/Enter để chọn và chỉ nhận mục trong danh sách.
 const MAX_RESULTS = 100;
 
-function searchKey(value: unknown): string {
+/** Chuỗi so khớp khi gõ để lọc: bỏ dấu, đ → d, chữ thường, chỉ chữ + số. */
+export function searchKey(value: unknown): string {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
