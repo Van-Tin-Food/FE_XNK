@@ -8,7 +8,6 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import {
-  cancelPaymentRequest,
   confirmPaymentRequestDocuments,
   deletePaymentRequest,
   fetchPaymentRequestPrintHtml,
@@ -173,7 +172,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<"" | "send" | "archive" | "cancel" | "delete" | "download" | "approve" | "reject">("");
+  const [busy, setBusy] = useState<"" | "send" | "archive" | "delete" | "download" | "approve" | "reject">("");
   // Đang tạo + lưu giấy đề nghị đã ký (PDF) sau khi upload ủy nhiệm chi.
   const [savingSignedForm, setSavingSignedForm] = useState(false);
   const [fileCount, setFileCount] = useState(0);
@@ -263,8 +262,9 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const cancelled = request.status === -2;
   // Chưa duyệt (nháp / đang chờ) hoặc bị từ chối: sửa, hủy, xóa được. Đã hủy: không duyệt được nữa nhưng vẫn sửa (về nháp,
   // gửi lại) hoặc xóa được.
-  const canCancel = canManage && (request.status === 0 || request.status === -1);
-  const canEdit = canCancel || (canManage && cancelled);
+  // Sửa / xóa được: người quản lý đề nghị, khi chưa duyệt hoặc bị từ chối (đề nghị đã hủy từ trước cũng sửa / xóa được).
+  const canModify = canManage && (request.status === 0 || request.status === -1);
+  const canEdit = canModify || (canManage && cancelled);
   // Chứng từ upload dần (tạm) cho tới khi bấm "Đầy đủ chứng từ"; đề nghị đã hủy / hoàn thành thì khóa. BE trả
   // can_upload_documents (gồm người tạo đề nghị thay khi chưa duyệt).
   const canUploadDocs = (request.canUploadDocuments ?? (isOwner || can("paymentDocuments", "edit"))) && request.status !== 2 && !cancelled;
@@ -345,21 +345,6 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
       notify(t("prSentSuccess", { id: request.id }), "success");
     } catch (sendError) {
       notify(sendError instanceof Error ? sendError.message : String(sendError), "error");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const cancelRequest = async () => {
-    if (busy) return;
-    if (!await confirm({ title: t("prCancelRequest"), message: t("prCancelMessage", { id: request.id }), confirmText: t("prCancelRequest"), tone: "danger" })) return;
-    setBusy("cancel");
-    try {
-      setRequest(await cancelPaymentRequest(request.id));
-      setEditing(false);
-      notify(t("prCancelledToast", { id: request.id }), "success");
-    } catch (cancelError) {
-      notify(cancelError instanceof Error ? cancelError.message : String(cancelError), "error");
     } finally {
       setBusy("");
     }
@@ -474,12 +459,6 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
         {cancelled && <p className="mt-3 rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-700 dark:bg-gray-800 dark:text-gray-300">🚫 {t("prCancelledInfo", { time: formatDateTime(request.updatedAt, language) })}</p>}
         {canEdit && !editing && (
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
-            {canCancel && (
-              <button type="button" onClick={() => void cancelRequest()} disabled={busy !== ""}
-                className="h-10 w-full rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 sm:w-auto dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">
-                {busy === "cancel" ? t("prSaving") : t("prCancelRequest")}
-              </button>
-            )}
             <button type="button" onClick={() => void deleteRequest()} disabled={busy !== ""}
               className="h-10 w-full rounded-lg border border-error-200 px-4 text-sm font-medium text-error-600 hover:bg-error-50 disabled:opacity-50 sm:w-auto dark:border-error-500/30 dark:text-error-400 dark:hover:bg-error-500/10">
               {busy === "delete" ? t("prDeleting") : `🗑 ${t("prDeleteRequest")}`}

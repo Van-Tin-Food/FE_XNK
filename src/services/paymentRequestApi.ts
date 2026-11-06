@@ -574,11 +574,6 @@ export async function sendPaymentRequest(id: string, { confirmFlow = false }: { 
   return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/send`, confirmFlow ? { confirm_flow: true } : undefined));
 }
 
-/** Người tạo (hoặc kế toán) hủy đề nghị chưa duyệt / bị từ chối. Không có xóa đề nghị. */
-export async function cancelPaymentRequest(id: string): Promise<PaymentRequest> {
-  return requireRequest(await request<unknown>("POST", `/${encodeURIComponent(id)}/cancel`));
-}
-
 /** Xóa đề nghị chưa duyệt / bị từ chối / đã hủy: chi phí được gỡ ra (không còn gắn với đề nghị). Trả số chi phí đã gỡ. */
 export async function deletePaymentRequest(id: string): Promise<{ releasedCosts: number }> {
   const payload = await request<unknown>("DELETE", `/${encodeURIComponent(id)}`);
