@@ -209,8 +209,11 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   })) : []));
   // % VAT đang nhập cho từng khoản nhập sẵn có thuế (theo id); chưa nhập thì lấy % đã lưu của khoản đó.
   const [vats, setVats] = useState<Record<string, string>>({});
-  // Nội dung đang sửa của khoản nhập sẵn (theo id); số tiền khoản nhập sẵn không sửa ở đây (giữ đúng tổng đề nghị).
+  // Nội dung đang sửa của khoản nhập sẵn (theo id).
   const [preparedNotes, setPreparedNotes] = useState<Record<string, string>>({});
+  // Số tiền đang sửa của khoản nhập sẵn (theo id) — chỉ khi sửa đề nghị (nháp / bị từ chối / đã hủy); BE ghi lại số tiền ở
+  // tab Chi phí và tính lại tổng đề nghị trong cùng lần lưu. Tạo đề nghị thì giữ số tiền đã nhập ở tab Chi phí.
+  const [preparedAmounts, setPreparedAmounts] = useState<Record<string, string>>({});
   // Loại chi phí + mã phí của đề nghị (sửa đề nghị: lấy theo khoản đầu tiên).
   const [costType, setCostType] = useState(editing?.costs[0]?.type || "");
   const [costCode, setCostCode] = useState(editing?.costs[0]?.code.toUpperCase() || "");
@@ -293,13 +296,16 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
   const preparedVat = (cost: PaymentCost) => (preparedTaxed(cost) ? parseVatInput(vatTextOf(cost)) : null);
   /** Nội dung khoản nhập sẵn: đang sửa, chưa sửa thì nội dung đã lưu. */
   const preparedNoteOf = (cost: PaymentCost) => (cost.id in preparedNotes ? preparedNotes[cost.id] : cost.note);
+  /** Số tiền khoản nhập sẵn: đang sửa (sai định dạng = null), chưa sửa thì số đã lưu. */
+  const preparedAmountText = (cost: PaymentCost) => (cost.id in preparedAmounts ? preparedAmounts[cost.id] : formatAmount(cost.amount, "vi"));
+  const preparedAmountOf = (cost: PaymentCost) => (editing && cost.id in preparedAmounts ? parseAmountLoose(preparedAmounts[cost.id]) : cost.amount);
   const otherAmounts = manualRows.map((row) => parseAmountLoose(row.amount));
   const otherVats = manualRows.map((row) => (isTaxed(row.categoryId) ? parseVatInput(row.vat) : null));
   const otherValid = manualRows.every((row, index) => row.categoryId && otherAmounts[index] !== null && (!isTaxed(row.categoryId) || otherVats[index] !== null)
     && rowContractValid(row) && rowContainerValid(row));
-  const preparedVatValid = selectedCosts.every((cost) => !preparedTaxed(cost) || preparedVat(cost) !== null);
+  const preparedVatValid = selectedCosts.every((cost) => (!preparedTaxed(cost) || preparedVat(cost) !== null) && preparedAmountOf(cost) !== null);
   // Từng khoản giữ 2 chữ số lẻ; tổng VND làm tròn đến đồng (nửa lên), khớp tong_tien BE lưu.
-  const total = roundRequestTotal(sumAmounts([...selectedCosts.map((cost) => cost.amount), ...otherAmounts]), currency);
+  const total = roundRequestTotal(sumAmounts([...selectedCosts.map(preparedAmountOf), ...otherAmounts]), currency);
   const costCount = selectedCosts.length + manualRows.length;
   const transfer = paymentMethod === "chuyen_khoan";
   // Có ít nhất một dòng đã điền (dòng chỉ có nhãn "Ngân hàng:" không tính, BE cũng bỏ các dòng đó).
@@ -364,7 +370,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     return amount && rate !== null ? formatAmount(splitVat(amount, rate, currency || (amount.includes(".") ? "" : "VND")).base, "vi") : "";
   };
   const taxTotal = sumAmounts([
-    ...selectedCosts.map((cost) => { const rate = preparedVat(cost); return rate === null ? "0" : splitVat(cost.amount, rate, currency).tax; }),
+    ...selectedCosts.map((cost) => { const rate = preparedVat(cost); const amount = preparedAmountOf(cost); return rate === null || !amount ? "0" : splitVat(amount, rate, currency).tax; }),
     ...manualRows.map((row, index) => { const amount = otherAmounts[index]; const rate = otherVats[index]; return amount && rate !== null ? splitVat(amount, rate, currency).tax : "0"; }),
   ]);
   const hasVat = selectedCosts.some((cost) => preparedVat(cost) !== null) || otherVats.some((rate) => rate !== null);
@@ -409,6 +415,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     if (row.categoryId && isTaxed(row.categoryId) && otherVats[index] === null) costIssues.push(t("prErrRowVat", { n }));
   });
   selectedCosts.forEach((cost) => {
+    if (preparedAmountOf(cost) === null) costIssues.push(t("prErrPreparedAmount", { name: costLabel(cost) }));
     if (preparedTaxed(cost) && preparedVat(cost) === null) costIssues.push(t("prErrPreparedVat", { name: costLabel(cost) }));
   });
   const contentIssues = content.trim() ? [] : [t("prErrContent")];
@@ -434,7 +441,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
 
   // Các khoản đã chọn dạng dòng hiển thị (dùng cho tóm tắt bước chi phí và bản nháp ở bước lưu).
   const chosenLines = [
-    ...selectedCosts.map((cost) => ({ key: cost.id, name: costLabel(cost), note: preparedNoteOf(cost).trim(), target: targetOf(cost), amount: cost.amount, vatLine: vatLineOf(cost.amount, preparedVat(cost)) })),
+    ...selectedCosts.map((cost) => ({ key: cost.id, name: costLabel(cost), note: preparedNoteOf(cost).trim(), target: targetOf(cost), amount: preparedAmountOf(cost) || "0", vatLine: vatLineOf(preparedAmountOf(cost), preparedVat(cost)) })),
     ...manualRows.map((row, index) => {
       const category = categoriesById.get(row.categoryId);
       const name = category?.code.toUpperCase() === "VH"
@@ -485,7 +492,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
         bankBin: transfer ? effectiveBin || undefined : undefined,
         dueDate,
         costs: [
-          ...selectedCosts.map((cost) => ({ id: cost.id, categoryId: cost.categoryId, amount: cost.amount, container: cost.container, contract: cost.contract, note: preparedNoteOf(cost), vat: preparedVat(cost) ?? undefined })),
+          ...selectedCosts.map((cost) => ({ id: cost.id, categoryId: cost.categoryId, amount: preparedAmountOf(cost) as string, container: cost.container, contract: cost.contract, note: preparedNoteOf(cost), vat: preparedVat(cost) ?? undefined })),
           ...manualRows.map((row, index) => ({
             id: row.id, categoryId: row.categoryId, amount: otherAmounts[index] as string, note: row.note.trim(), vat: otherVats[index] ?? undefined,
             ...(orderMode ? { contract: row.contract.trim(), container: needsContainer ? row.container : undefined } : {}),
@@ -647,7 +654,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                   {group.supplier && <span className="block truncate text-xs text-gray-500">{group.supplier}</span>}
                                 </span>
                                 <span className="shrink-0 text-right text-xs text-gray-500">
-                                  {t("prOrderCosts", { count: ids.length, total: money(sumAmounts(group.costs.map((cost) => cost.amount))) })}
+                                  {t("prOrderCosts", { count: ids.length, total: money(sumAmounts(group.costs.map((cost) => preparedAmountOf(cost) ?? cost.amount))) })}
                                   <span className="ml-1">{open ? "▴" : "▾"}</span>
                                 </span>
                               </button>
@@ -662,6 +669,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                         const checked = selected.includes(cost.id);
                                         const taxed = preparedTaxed(cost);
                                         const rate = preparedVat(cost);
+                                        const amount = preparedAmountOf(cost);
                                         return (
                                           <li key={cost.id} className={checked ? "rounded-lg bg-gray-50 pb-2 dark:bg-gray-800/50" : ""}>
                                             <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-lg px-1 py-1 hover:bg-gray-50 dark:hover:bg-gray-800">
@@ -671,11 +679,26 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                                 {!checked && cost.note && <span className="block truncate text-xs text-gray-500" title={cost.note}>{cost.note}</span>}
                                               </span>
                                               <span className="shrink-0 text-right">
-                                                <span className="block text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{money(cost.amount)}</span>
+                                                <span className="block text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{money(amount ?? cost.amount)}</span>
                                                 {taxed && <span className="block text-[11px] text-gray-400">{t("prVatIncluded")}</span>}
                                               </span>
                                             </label>
-                                            {/* Đã tick: sửa nội dung (diễn giải) của khoản; số tiền không sửa ở đây để giữ đúng tổng đề nghị */}
+                                            {/* Đã tick + đang sửa đề nghị: sửa số tiền (ghi lại ở tab Chi phí, tổng đề nghị tính lại khi lưu) */}
+                                            {checked && editing && (
+                                              <div className="mb-1 ml-8 mr-1 flex flex-col gap-1">
+                                                <label className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                                                  <span className="font-semibold">{t("prPreparedAmount")}</span>
+                                                  <input value={preparedAmountText(cost)} inputMode="decimal" aria-label={`${t("prPreparedAmount")} ${costLabel(cost)}`}
+                                                    aria-invalid={amount === null}
+                                                    onChange={(event) => setPreparedAmounts((current) => ({ ...current, [cost.id]: event.target.value }))}
+                                                    className={`h-9 w-full min-w-0 rounded-lg border bg-white px-2.5 text-right text-sm tabular-nums text-gray-800 outline-none focus:border-brand-400 dark:bg-gray-900 dark:text-white sm:w-48 ${amount === null ? "border-error-400" : "border-gray-200 dark:border-gray-700"}`} />
+                                                </label>
+                                                {amount === null
+                                                  ? <span className="text-xs text-error-600 dark:text-error-400">{t("prPreparedAmountInvalid")}</span>
+                                                  : Number(amount) !== Number(cost.amount) && <span className="text-xs text-warning-700 dark:text-warning-300">{t("prPreparedAmountChanged", { amount: money(cost.amount) })}</span>}
+                                              </div>
+                                            )}
+                                            {/* Đã tick: sửa nội dung (diễn giải) của khoản */}
                                             {checked && (
                                               <div className="mb-1 ml-8 mr-1">
                                                 <input value={preparedNoteOf(cost)} maxLength={500} placeholder={t("prCostNotePlaceholder")}
@@ -693,7 +716,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                                     onChange={(value) => setVats((current) => ({ ...current, [cost.id]: value }))} />
                                                 </span>
                                                 {rate !== null
-                                                  ? <span className="text-xs text-gray-500">{vatLineOf(cost.amount, rate)}</span>
+                                                  ? <span className="text-xs text-gray-500">{vatLineOf(amount, rate)}</span>
                                                   : vatTextOf(cost).trim() || costsTouched
                                                     ? <span className="text-xs text-error-600 dark:text-error-400">{t("prVatInvalidShort")}</span>
                                                     : <span className="text-xs text-warning-700 dark:text-warning-300">{t("prVatRequired")}</span>}
