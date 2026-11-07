@@ -21,7 +21,8 @@ export default function PaymentRequestPage() {
     );
   }
   return (
-    <div className="mx-auto w-full max-w-4xl">
+    <div className="mx-auto w-full max-w-4xl pb-20 sm:pb-24">
+      {/* pb: chừa chỗ cho nút chatbox AI nổi góc phải dưới (fixed, cao ~72–80px) để nút cuối trang không bị che. */}
       <PaymentRequestProcess key={id} id={id} />
     </div>
   );

@@ -140,15 +140,16 @@ function StepCard({ index, title, state, summary, onChange, children }: {
 }
 
 /** Một dòng khoản phí trong tóm tắt / bản nháp: tên khoản — nội dung, đơn / cont, (trước thuế · VAT), số tiền. */
+/** Một khoản trong tóm tắt / bản nháp: điện thoại xếp dọc (tên đủ bề rộng, số tiền dòng dưới); từ sm số tiền nằm bên phải. */
 function CostLine({ name, note, target, amount, vatLine }: { name: string; note: string; target: string; amount: string; vatLine?: string }) {
   return (
-    <li className="flex items-start justify-between gap-3 py-1.5">
+    <li className="flex flex-col gap-0.5 py-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
       <div className="min-w-0">
         <p className="break-words text-sm font-medium text-gray-800 dark:text-white/90">{name}{note && <span className="font-normal text-gray-600 dark:text-gray-300"> — {note}</span>}</p>
-        {target && <p className="truncate text-xs text-gray-500" title={target}>{target}</p>}
+        {target && <p className="break-words text-xs text-gray-500">{target}</p>}
         {vatLine && <p className="text-xs text-gray-500">{vatLine}</p>}
       </div>
-      <span className="shrink-0 text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{amount}</span>
+      <span className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{amount}</span>
     </li>
   );
 }
@@ -676,12 +677,13 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                 checked={chosen.length === ids.length} ref={(input) => { if (input) input.indeterminate = chosen.length > 0 && chosen.length < ids.length; }}
                                 onChange={(event) => toggle(ids, event.target.checked)} />
                               <button type="button" onClick={() => setOpenGroups((current) => (current.includes(group.contract) ? current.filter((item) => item !== group.contract) : [...current, group.contract]))}
-                                className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left" aria-expanded={open}>
-                                <span className="min-w-0">
+                                className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-2" aria-expanded={open}>
+                                {/* Điện thoại: mã hợp đồng + NCC đủ bề rộng, "N khoản · tổng" xuống dòng dưới */}
+                                <span className="w-full min-w-0 sm:w-auto">
                                   <span className="block truncate font-mono text-sm font-semibold text-gray-800 dark:text-white">{group.contract || t("prOrdersOther")}</span>
                                   {group.supplier && <span className="block truncate text-xs text-gray-500">{group.supplier}</span>}
                                 </span>
-                                <span className="shrink-0 text-right text-xs text-gray-500">
+                                <span className="shrink-0 text-left text-xs text-gray-500 sm:text-right">
                                   {t("prOrderCosts", { count: ids.length, total: money(sumAmounts(group.costs.map((cost) => preparedAmountOf(cost) ?? cost.amount))) })}
                                   <span className="ml-1">{open ? "▴" : "▾"}</span>
                                 </span>
@@ -703,7 +705,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
                                             <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-lg px-1 py-1 hover:bg-gray-50 dark:hover:bg-gray-800">
                                               <input type="checkbox" className="h-4 w-4 shrink-0" checked={checked} onChange={(event) => toggle([cost.id], event.target.checked)} />
                                               <span className="min-w-0 flex-1">
-                                                <span className="block truncate text-sm text-gray-700 dark:text-gray-200" title={costLabel(cost)}>{costLabel(cost)}</span>
+                                                <span className="line-clamp-2 break-words text-sm text-gray-700 dark:text-gray-200" title={costLabel(cost)}>{costLabel(cost)}</span>
                                                 {cost.repeat > 1 && <span className="mt-0.5 inline-block rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-semibold text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("costRepeatBadge", { n: cost.repeat })}</span>}
                                                 {!checked && cost.note && <span className="block truncate text-xs text-gray-500" title={cost.note}>{cost.note}</span>}
                                               </span>

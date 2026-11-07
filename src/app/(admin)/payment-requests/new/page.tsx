@@ -22,7 +22,8 @@ export default function NewPaymentRequestPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4">
+    <div className="mx-auto w-full max-w-3xl space-y-4 pb-20 sm:pb-24">
+      {/* pb: chừa chỗ cho nút chatbox AI nổi góc phải dưới (fixed, cao ~72–80px) để nút cuối trang không bị che. */}
       <header>
         <Link href="/payment-requests" className="text-sm text-gray-500 hover:text-brand-600">← {t("prBackToList")}</Link>
         <h1 className="mt-1 text-xl font-bold text-gray-900 dark:text-white">{t("prNewTitle")}</h1>

@@ -254,7 +254,8 @@ function PaymentRequestsContent() {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-20 sm:pb-24">
+      {/* pb: chừa chỗ cho nút chatbox AI nổi góc phải dưới (fixed, cao ~72–80px) để nút cuối trang không bị che. */}
       <header className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03] sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div className="min-w-0">
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">{t("paymentRequests")}</h1>
@@ -268,7 +269,8 @@ function PaymentRequestsContent() {
         )}
       </header>
 
-      {/* Thẻ lọc trạng thái (kiểu thẻ số liệu đơn hàng XNK) */}
+      {/* Thẻ lọc trạng thái (kiểu thẻ số liệu đơn hàng XNK). Điện thoại 2 cột: lề / biểu tượng nhỏ hơn, tên trạng thái và dòng mô tả
+          xuống dòng (tối đa 2) thay vì bị cắt. */}
       <div role="group" aria-label={t("status")} className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5 xl:gap-4">
         {STATE_CARDS.map((card) => {
           const summary = card.value ? summarizeStates([card.value]) : summarizeStates();
@@ -276,25 +278,25 @@ function PaymentRequestsContent() {
           const showAmount = card.value !== "paid" && card.value !== "completed";
           return (
             <button key={card.value || "all"} type="button" aria-pressed={selected} title={t(card.hintKey)} onClick={() => { setRequestState(card.value); setPage(1); }}
-              className={`relative flex min-h-[126px] w-full min-w-0 flex-col gap-3 rounded-2xl border px-5 py-4 text-left transition-all duration-200 hover:shadow-md ${selected
+              className={`relative flex min-h-[126px] w-full min-w-0 flex-col gap-2.5 rounded-2xl border px-3 py-3 text-left sm:gap-3 sm:px-5 sm:py-4 transition-all duration-200 hover:shadow-md ${selected
                 ? `${card.border} ${card.bg} shadow-sm`
                 : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700"}`}>
-              {selected && <span className={`absolute right-4 top-4 h-2.5 w-2.5 animate-pulse rounded-full bg-current ${card.color}`} aria-hidden="true" />}
-              <span className="flex min-w-0 items-center gap-2.5 pr-4">
-                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${selected ? `${card.bg} ${card.color}` : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
+              {selected && <span className={`absolute right-2.5 top-2.5 h-2.5 w-2.5 sm:right-4 sm:top-4 animate-pulse rounded-full bg-current ${card.color}`} aria-hidden="true" />}
+              <span className="flex min-w-0 items-center gap-2 pr-3 sm:gap-2.5 sm:pr-4">
+                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-10 sm:w-10 sm:rounded-xl transition-colors ${selected ? `${card.bg} ${card.color}` : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={card.icon} /></svg>
                 </span>
-                <span className={`min-w-0 truncate text-sm font-semibold uppercase tracking-wide ${selected ? card.color : "text-gray-600 dark:text-gray-300"}`}>{t(card.labelKey)}</span>
+                <span className={`line-clamp-2 min-w-0 break-words text-xs font-semibold uppercase leading-tight tracking-wide sm:text-sm ${selected ? card.color : "text-gray-600 dark:text-gray-300"}`}>{t(card.labelKey)}</span>
               </span>
               <span className="flex min-w-0 items-start justify-between gap-2">
-                <span className={`text-2xl font-bold leading-none tabular-nums ${selected ? card.color : "text-gray-800 dark:text-white/90"}`}>{summary.count}</span>
+                <span className={`text-xl font-bold leading-none tabular-nums sm:text-2xl ${selected ? card.color : "text-gray-800 dark:text-white/90"}`}>{summary.count}</span>
                 {showAmount && (
-                  <span className="flex min-w-0 flex-col items-end gap-0.5 text-right text-sm font-semibold leading-tight tabular-nums text-gray-700 dark:text-gray-200" title={`${t(card.amountKey)}: ${summary.amount}`}>
+                  <span className="flex min-w-0 flex-col items-end gap-0.5 text-right text-xs font-semibold leading-tight tabular-nums sm:text-sm text-gray-700 dark:text-gray-200" title={`${t(card.amountKey)}: ${summary.amount}`}>
                     {summary.amountLines.map((amount) => <span key={amount} className="truncate">{amount}</span>)}
                   </span>
                 )}
               </span>
-              <span className="truncate text-[11px] text-gray-400 dark:text-gray-500">{t(card.amountKey)} · {t(card.hintKey)}</span>
+              <span className="line-clamp-2 text-[11px] leading-snug text-gray-400 sm:line-clamp-1 dark:text-gray-500">{t(card.amountKey)} · {t(card.hintKey)}</span>
             </button>
           );
         })}

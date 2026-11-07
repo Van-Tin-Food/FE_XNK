@@ -71,10 +71,11 @@ function NodeCard({ index, title, state, last = false, anchor, children }: { ind
   const { t } = useLanguage();
   const open = state === "current" || state === "rejected";
   return (
-    <li id={anchor} className="relative flex scroll-mt-20 gap-3 sm:gap-4">
-      {!last && <span className={`absolute left-4 top-9 bottom-0 w-0.5 -translate-x-1/2 ${state === "done" ? NODE_STYLES.done.line : NODE_STYLES.locked.line}`} aria-hidden="true" />}
-      <span className={`relative z-[1] flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${NODE_STYLES[state].circle}`}>{nodeIcon(state, index)}</span>
-      <section className={`mb-4 min-w-0 flex-1 rounded-2xl border p-4 sm:p-5 ${open ? (state === "rejected" ? "border-error-200 bg-white dark:border-error-500/30 dark:bg-white/[0.03]" : "border-brand-300 bg-white shadow-theme-xs dark:border-brand-500/40 dark:bg-white/[0.03]") : state === "locked" ? "border-dashed border-gray-200 bg-gray-50/60 dark:border-gray-800 dark:bg-transparent" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"}`}>
+    // Điện thoại: vòng số / khoảng cách / lề thẻ nhỏ hơn để nội dung bước rộng hơn (đường nối luôn ở giữa vòng số).
+    <li id={anchor} className="relative flex scroll-mt-20 gap-2 sm:gap-4">
+      {!last && <span className={`absolute bottom-0 left-3.5 top-8 w-0.5 sm:left-4 sm:top-9 -translate-x-1/2 ${state === "done" ? NODE_STYLES.done.line : NODE_STYLES.locked.line}`} aria-hidden="true" />}
+      <span className={`relative z-[1] flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold sm:h-8 sm:w-8 sm:text-sm ${NODE_STYLES[state].circle}`}>{nodeIcon(state, index)}</span>
+      <section className={`mb-4 min-w-0 flex-1 rounded-2xl border p-3 sm:p-5 ${open ? (state === "rejected" ? "border-error-200 bg-white dark:border-error-500/30 dark:bg-white/[0.03]" : "border-brand-300 bg-white shadow-theme-xs dark:border-brand-500/40 dark:bg-white/[0.03]") : state === "locked" ? "border-dashed border-gray-200 bg-gray-50/60 dark:border-gray-800 dark:bg-transparent" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"}`}>
         <h2 className={`font-semibold ${state === "locked" ? "text-sm text-gray-400" : "text-base text-gray-900 dark:text-white"}`}>{title}</h2>
         <div className="mt-2">{state === "locked" ? <p className="text-sm text-gray-400">{t("prNodeLocked")}</p> : children}</div>
       </section>
@@ -497,16 +498,17 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                   fallback={<TransferInfoText text={request.transferInfo} />} />
               )}
               <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
+                {/* Điện thoại: tên khoản đủ bề rộng, số tiền xuống dòng dưới; từ sm số tiền nằm bên phải. */}
                 {request.costs.map((cost) => (
-                  <li key={cost.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2.5">
-                    <div className="min-w-0 flex-1">
+                  <li key={cost.id} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3">
+                    <div className="min-w-0 sm:flex-1">
                       <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-white/90">
                         <span className="break-words">{cost.code.toUpperCase() === "VH" ? [cost.account, cost.categoryName].filter(Boolean).join(" · ") : costCodeName(cost.code, cost.categoryName)}{cost.note && <span className="font-normal text-gray-600 dark:text-gray-300"> — {cost.note}</span>}</span>
                         <PaymentFlowBadge flow={cost.flow} />
                         {/* Phí phát sinh: cùng khoản phí của cont / hợp đồng đã tạo trước đó (lần thứ mấy). */}
                         {cost.repeat > 1 && <span className="rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-semibold text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("costRepeatBadge", { n: cost.repeat })}</span>}
                       </p>
-                      <p className="truncate text-xs text-gray-500">
+                      <p className="break-words text-xs text-gray-500">
                         {cost.container ? `${t("prContainer")} ${cost.container} · ${t("prContract")} ${cost.contract}` : cost.contract ? `${t("prContract")} ${cost.contract}` : t("prNoTarget")}
                       </p>
                       {cost.vat && (() => {
@@ -514,7 +516,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                         return <p className="text-xs text-gray-500">{t("prVatLine", { base: money(base), rate: String(Number(cost.vat)), tax: money(tax) })}</p>;
                       })()}
                     </div>
-                    <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{money(cost.amount)}</span>
+                    <span className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{money(cost.amount)}</span>
                   </li>
                 ))}
               </ul>
