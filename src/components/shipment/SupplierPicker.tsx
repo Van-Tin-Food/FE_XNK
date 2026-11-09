@@ -4,8 +4,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import type { SupplierRecord } from "@/types/postgresShipment";
 
-// Ô chọn nhà cung cấp khi tạo đơn (danh mục dài): gõ để lọc theo tên hoặc quốc gia, không phân biệt dấu. Chỉ nhận nhà
-// cung cấp chọn trong danh sách; gõ dở rồi rời ô thì trả lại tên đã chọn (khớp đúng một tên thì tự chọn tên đó).
+// Ô chọn nhà cung cấp (danh mục dài): gõ để lọc theo tên hoặc quốc gia, không phân biệt dấu. Chỉ nhận nhà cung cấp chọn
+// trong danh sách; gõ dở rồi rời ô thì trả lại tên đã chọn (khớp đúng một tên thì tự chọn tên đó). Dùng ở màn tạo đơn và
+// tab Chi tiết đơn hàng.
 
 function supplierSearchKey(value: unknown): string {
   return String(value || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -16,15 +17,23 @@ interface Props {
   suppliers: SupplierRecord[];
   /** id_ncc đã chọn ("" = chưa chọn). */
   selectedId: string;
-  /** Tên OCR đọc được nhưng chưa khớp danh mục: hiện gợi ý dưới ô. */
+  /** Tên đọc được (OCR / dữ liệu cũ) nhưng chưa khớp danh mục: hiện gợi ý dưới ô; khi khoá thì hiện trong ô. */
   unmatchedText?: string;
+  /** Key dịch của dòng gợi ý chưa khớp, nhận biến {value}. */
+  unmatchedLabelKey?: string;
   disabled?: boolean;
+  inputClassName?: string;
   onSelect: (supplier: SupplierRecord) => void;
 }
 
+const DEFAULT_INPUT_CLASS = "min-h-10 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 pr-9 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
+
 const MAX_RESULTS = 100;
 
-export default function SupplierPicker({ id, suppliers, selectedId, unmatchedText = "", disabled = false, onSelect }: Props) {
+export default function SupplierPicker({
+  id, suppliers, selectedId, unmatchedText = "", unmatchedLabelKey = "ocrNotMatched",
+  disabled = false, inputClassName = DEFAULT_INPUT_CLASS, onSelect,
+}: Props) {
   const { t } = useLanguage();
   const listRef = useRef<HTMLUListElement>(null);
   const selected = suppliers.find((supplier) => supplier.id_ncc === selectedId) || null;
@@ -79,15 +88,15 @@ export default function SupplierPicker({ id, suppliers, selectedId, unmatchedTex
 
   return (
     <div className="relative min-w-0">
-      <input id={id} value={text} autoComplete="off" role="combobox" aria-expanded={open} aria-controls={`${id}-list`} aria-autocomplete="list"
+      <input id={id} value={disabled && !selected ? unmatchedText : text} autoComplete="off" role="combobox" aria-expanded={open} aria-controls={`${id}-list`} aria-autocomplete="list"
         aria-invalid={!selected} disabled={disabled} placeholder={t("supplierSearchPlaceholder")}
         onFocus={(event) => { event.target.select(); setOpen(true); setHighlight(0); }}
         onBlur={handleBlur}
         onChange={(event) => { setText(event.target.value); setOpen(true); setHighlight(0); }}
         onKeyDown={onKeyDown}
-        className="min-h-10 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 pr-9 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+        className={inputClassName} />
       <span className="pointer-events-none absolute right-3 top-5 -translate-y-1/2 text-xs text-gray-400" aria-hidden="true">▾</span>
-      {!selected && unmatchedText && <span className="mt-1 block break-words text-xs font-normal text-warning-700 dark:text-warning-400">{t("ocrNotMatched", { value: unmatchedText })}</span>}
+      {!selected && unmatchedText && !disabled && <span className="mt-1 block break-words text-xs font-normal text-warning-700 dark:text-warning-400">{t(unmatchedLabelKey, { value: unmatchedText })}</span>}
       {open && (
         <ul id={`${id}-list`} ref={listRef} role="listbox"
           className="absolute left-0 right-0 top-11 z-30 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-lg custom-scrollbar dark:border-gray-700 dark:bg-gray-900">

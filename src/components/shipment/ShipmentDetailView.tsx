@@ -34,6 +34,7 @@ import { DOCUMENT_UPLOAD_EVENT, useDocumentUploadQueue, type DocumentUploadEvent
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import ShipmentCostsTab from "./ShipmentCostsTab";
 import OcrLoadingCard, { InlineSpinner } from "./OcrLoadingCard";
+import SupplierPicker from "./SupplierPicker";
 import InternationalPaymentStatus from "./InternationalPaymentStatus";
 
 interface ShipmentDetailViewProps {
@@ -3832,9 +3833,10 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
               ) : (
                 <section
                   key={group.key}
-                  className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]"
+                  className={`${group.key === "purchasing" ? "" : "overflow-hidden "}rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]`}
                 >
-                  <div className={`flex flex-wrap items-center gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-gray-800 sm:px-5 ${group.headerClass}`}>
+                  {/* Khung Mua hàng không overflow-hidden: danh sách chọn nhà cung cấp thả xuống ra ngoài khung; header tự bo góc trên. */}
+                  <div className={`flex flex-wrap items-center gap-3 rounded-t-2xl border-b border-gray-100 px-4 py-3.5 dark:border-gray-800 sm:px-5 ${group.headerClass}`}>
                     <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-xs font-bold shadow-sm ${group.badgeClass}`}>
                       {group.number}
                     </span>
@@ -3872,25 +3874,23 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
                               translate={t}
                             />
                           ) : normalizeSheetField(field) === normalizeSheetField("Nhà cung cấp") ? (
-                            <select
+                            <SupplierPicker
                               id={inputId}
-                              value={detailForm[field] || ""}
+                              suppliers={supplierOptions}
+                              selectedId={supplierOptions.find((supplier) => supplier.ten_ncc === detailForm[field])?.id_ncc || ""}
+                              unmatchedText={supplierOptions.some((supplier) => supplier.ten_ncc === detailForm[field]) ? "" : (detailForm[field] || "").trim()}
+                              unmatchedLabelKey="supplierNotInCatalog"
                               disabled={!canEditDetails || !isDetailsEditing}
-                              onChange={(event) => {
-                                const supplier = supplierOptions.find((item) => item.ten_ncc === event.target.value);
+                              onSelect={(supplier) => {
                                 const originField = findActualSheetField(Object.keys(detailForm), "XUẤT XỨ");
                                 setDetailForm((current) => ({
                                   ...current,
-                                  [field]: event.target.value,
-                                  [originField]: String(supplier?.quoc_gia || ""),
+                                  [field]: supplier.ten_ncc,
+                                  [originField]: String(supplier.quoc_gia || ""),
                                 }));
                               }}
-                              className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                            >
-                              <option value="">{t("selectSupplier")}</option>
-                              {detailForm[field] && !supplierOptions.some((supplier) => supplier.ten_ncc === detailForm[field]) && <option value={detailForm[field]}>{detailForm[field]}</option>}
-                              {supplierOptions.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.ten_ncc}</option>)}
-                            </select>
+                              inputClassName="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 pr-9 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                            />
                           ) : normalizeSheetField(field) === normalizeSheetField("Hãng tàu") ? (
                             <select id={inputId} value={detailForm[field] || ""} disabled={!canEditDetails || !isDetailsEditing} onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))} className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
                               <option value="">{t("selectCarrier")}</option>
