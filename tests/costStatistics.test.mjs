@@ -26,11 +26,11 @@ test("tình trạng khoản theo đề nghị và giai đoạn thanh toán (đã
     ["unrequested", "unsubmitted", "pending", "unsubmitted", "approved", "settled", "settled", null]);
 });
 
-test("tổng kỳ: chi phí (vận hành + phát sinh) tách khỏi hàng mua, không cộng VND với USD, bỏ đề nghị đã hủy / khoản bị ẩn", () => {
+test("tổng kỳ: chi phí tách khỏi hàng mua, không cộng VND với USD, bỏ đề nghị đã hủy / khoản bị ẩn", () => {
   const summary = summarizeCosts([
     cost({ id: "1", amount: "1250000.00", requestId: "DNTT-1", requestStatus: 1 }),
     cost({ id: "2", amount: "0.10", requestId: "DNTT-2", requestStatus: 0, requestSent: true }),
-    cost({ id: "3", amount: "0.20", kind: "incident", categoryName: "Kiểm hóa" }),
+    cost({ id: "3", amount: "0.20", categoryName: "Kiểm hóa" }),
     cost({ id: "4", amount: "999.99", requestId: "DNTT-3", requestStatus: -2 }),
     cost({ id: "5", amount: "18500.50", currency: "USD", kind: "goods", code: "HD", categoryName: "Cọc hàng", requestId: "DNTT-4", requestStatus: 2 }),
     cost({ id: "6", amount: null, currency: "USD", kind: "goods", code: "HD", categoryName: "Thanh toán tiền còn lại" }),
@@ -43,7 +43,7 @@ test("tổng kỳ: chi phí (vận hành + phát sinh) tách khỏi hàng mua, k
   assert.deepEqual([summary.goods.length, summary.goods[0].currency, summary.goods[0].total, summary.goods[0].stages.settled.total], [1, "USD", "18500.50", "18500.50"]);
   assert.deepEqual(summary.byFee.map((fee) => [fee.kind, fee.name, fee.count, fee.total, fee.share]), [
     ["operating", "Phí internet", 2, "1250000.10", 100],
-    ["incident", "Kiểm hóa", 1, "0.20", 0],
+    ["operating", "Kiểm hóa", 1, "0.20", 0],
     ["goods", "Cọc hàng", 1, "18500.50", 100],
   ]);
   assert.equal(summary.cancelledCount, 1);

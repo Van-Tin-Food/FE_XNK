@@ -318,7 +318,7 @@ export interface CostOverview {
   truncated: boolean;
 }
 
-const kindOf = (value: unknown): CostKind => (value === "goods" || value === "incident" || value === "deposit" ? value : "operating");
+const kindOf = (value: unknown): CostKind => (value === "goods" || value === "deposit" ? value : "operating");
 const specialOf = (value: unknown): CostSpecial => (value === "cuoc_cont" || value === "sua_cont" ? value : "");
 const nullableAmount = (value: unknown) => (value === null || value === undefined ? null : str(value));
 

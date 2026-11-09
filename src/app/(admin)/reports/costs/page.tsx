@@ -50,7 +50,6 @@ const STATE_BADGE: Record<CostState, string> = {
 /** Màu thanh tỷ trọng theo nhóm chi phí. */
 const KIND_BAR: Record<CostKind, string> = {
   operating: "bg-orange-500",
-  incident: "bg-theme-purple-500",
   goods: "bg-brand-500",
   deposit: "bg-gray-400",
 };

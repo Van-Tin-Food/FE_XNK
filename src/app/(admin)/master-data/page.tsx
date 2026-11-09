@@ -112,7 +112,9 @@ const ENTITY_CONFIG: Record<EntityKey, EntityConfig> = {
       { key: "noi_dung", labelKey: "pcatName", required: true },
       {
         key: "loai_phi", labelKey: "prCostTypeLabel", required: true, defaultValue: "van_hanh", formOnly: true,
-        options: ["mua_hang", "ban_hang", "van_hanh", "phat_sinh"].map((value) => ({ value, labelKey: `prType_${value}` })),
+        // 5 loại: tai_chinh = chi phí tài chính (TK 635), khac = chi phí khác (TK 811); không còn phat_sinh — đồng bộ TYPES ở
+        // BE paymentCategoryService.
+        options: ["mua_hang", "ban_hang", "van_hanh", "tai_chinh", "khac"].map((value) => ({ value, labelKey: `prType_${value}` })),
       },
       { key: "ma_phi", labelKey: "prCostCodeLabel", required: true, uppercase: true, hintKey: "pcatCodeHint", formOnly: true },
       // Số tài khoản kế toán hạch toán khoản phí (cột tai_khoang), không bắt buộc.

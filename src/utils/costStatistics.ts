@@ -16,16 +16,16 @@ export type CostState = "none" | "draft" | "pending" | "rejected" | "approved" |
  */
 export type SettlementStage = "settled" | "approved" | "pending" | "unsubmitted" | "unrequested";
 /**
- * operating = chi phí vận hành / logistics; incident = phát sinh; goods = tiền hàng (cọc / còn lại); deposit = tiền cược
- * container (ký cược / tạm ứng, không phải chi phí).
+ * operating = chi phí (vận hành / logistics; chi phí tài chính / TK 811 tạm tính chung); goods = tiền hàng (cọc / còn lại);
+ * deposit = tiền cược container (ký cược / tạm ứng, không phải chi phí). Không còn nhóm phát sinh (đã bỏ loại chi phí Phát sinh).
  */
-export type CostKind = "operating" | "incident" | "goods" | "deposit";
+export type CostKind = "operating" | "goods" | "deposit";
 /** Khoản đặc biệt (BE nhận theo tên khoản phí): cuoc_cont = tiền cược container; sua_cont = phí sửa cont trừ vào cược. */
 export type CostSpecial = "" | "cuoc_cont" | "sua_cont";
 
 export const COST_STATES: readonly CostState[] = ["none", "draft", "pending", "rejected", "approved", "paid", "completed", "cancelled"];
 export const SETTLEMENT_STAGES: readonly SettlementStage[] = ["settled", "approved", "pending", "unsubmitted", "unrequested"];
-export const COST_KINDS: readonly CostKind[] = ["operating", "incident", "goods", "deposit"];
+export const COST_KINDS: readonly CostKind[] = ["operating", "goods", "deposit"];
 const CURRENCY_ORDER = ["VND", "USD"];
 
 export interface MonthlyCost {

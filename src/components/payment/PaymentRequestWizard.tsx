@@ -74,7 +74,8 @@ const STEP_COUNT = 2;
 /** Mức VAT hay dùng (bấm nhanh); mức khác gõ tay vào ô %. */
 const VAT_PRESETS = ["5", "8"];
 const SAVE_STEP = STEP_COUNT;
-const TYPE_ORDER = ["mua_hang", "ban_hang", "van_hanh", "phat_sinh"];
+// Thứ tự nút loại chi phí (5 loại); tai_chinh (TK 635, mã TC) / khac (TK 811, mã KHAC) — đồng bộ TYPES ở BE.
+const TYPE_ORDER = ["mua_hang", "ban_hang", "van_hanh", "tai_chinh", "khac"];
 const INPUT = "h-11 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white";
 const PRIMARY = "h-11 rounded-lg bg-brand-500 px-5 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50";
 const SECONDARY = "h-11 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800";
@@ -424,7 +425,8 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
     return cost.code.toUpperCase() === "VH" ? [cost.account, name].filter(Boolean).join(" · ") : costCodeName(cost.code, name);
   };
   const typeLabel = (type: string) => (type ? t(`prType_${type}`) : "—");
-  const codeLabel = (code: string) => (code === "HD" ? `HD · ${t("prCode_HD")}` : code === "CONT" ? `CONT · ${t("prCode_CONT")}` : code === "VH" ? t("prCode_VH") : code === "BH" ? t("prCode_BH") : code);
+  const codeLabel = (code: string) => (code === "HD" ? `HD · ${t("prCode_HD")}` : code === "CONT" ? `CONT · ${t("prCode_CONT")}` : code === "VH" ? t("prCode_VH") : code === "BH" ? t("prCode_BH")
+    : code === "TC" ? `TC · ${t("prCode_TC")}` : code === "KHAC" ? `KHAC · ${t("prCode_KHAC")}` : code);
   const targetOf = (cost: PaymentCost) => [cost.container && `${t("prContainer")} ${cost.container}`, cost.contract && `${t("prContract")} ${cost.contract}`].filter(Boolean).join(" · ");
 
   // Lỗi từng bước (cùng điều kiện với complete): hiện thành danh sách khi người dùng bấm Tiếp tục / Lưu, để biết phải sửa gì.
