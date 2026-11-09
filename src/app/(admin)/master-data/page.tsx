@@ -151,6 +151,7 @@ export default function MasterDataPage() {
   const [countryFilter, setCountryFilter] = useState("");
   const [costFlowFilter, setCostFlowFilter] = useState("");
   const [costAccountFilter, setCostAccountFilter] = useState("");
+  const [costTypeFilter, setCostTypeFilter] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [form, setForm] = useState<Record<string, string>>(() => emptyForm(ENTITY_CONFIG.suppliers));
@@ -208,6 +209,7 @@ export default function MasterDataPage() {
     setCountryFilter("");
     setCostFlowFilter("");
     setCostAccountFilter("");
+    setCostTypeFilter("");
     setPage(1);
     void loadRows();
     // Chỉ tải lại khi đổi loại danh mục hoặc quyền hiện tại.
@@ -221,16 +223,18 @@ export default function MasterDataPage() {
       if (active === "paymentCategories") {
         if (costFlowFilter && String(row.vung_phi ?? "").trim() !== costFlowFilter) return false;
         if (costAccountFilter && String(row.tai_khoang ?? "").trim() !== costAccountFilter) return false;
+        if (costTypeFilter && String(row.loai_phi ?? "").trim() !== costTypeFilter) return false;
       }
       return !keyword || listFields.some((field) => displayValue(field, row).toLocaleLowerCase("vi").includes(keyword));
     });
     // displayValue chỉ phụ thuộc listFields + ngôn ngữ (t).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, countryFilter, costAccountFilter, costFlowFilter, listFields, query, rows, t]);
+  }, [active, countryFilter, costAccountFilter, costFlowFilter, costTypeFilter, listFields, query, rows, t]);
   const countries = useMemo(() => Array.from(new Set(rows.map((row) => String(row.quoc_gia ?? "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "vi")), [rows]);
   const costFilterOptions = useMemo(() => ({
     flows: Array.from(new Set(rows.map((row) => String(row.vung_phi ?? "").trim()).filter(Boolean))).sort(),
     accounts: Array.from(new Set(rows.map((row) => String(row.tai_khoang ?? "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "vi")),
+    types: Array.from(new Set(rows.map((row) => String(row.loai_phi ?? "").trim()).filter(Boolean))).sort(),
   }), [rows]);
   const countrySuggestions = useMemo(() => {
     const prefix = String(form.quoc_gia ?? "").trim().toLocaleLowerCase("vi");
@@ -385,7 +389,8 @@ export default function MasterDataPage() {
             <div><h2 className="font-semibold text-gray-800 dark:text-white">{t("catalogList", { catalog: t(config.titleKey) })}</h2><p className="text-xs text-gray-400">{t("dataCount", { count: filteredRows.length })}</p></div>
             <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row">{active === "suppliers" && <select value={countryFilter} onChange={(event) => { setCountryFilter(event.target.value); setPage(1); }} aria-label={t("country")} className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 sm:w-44 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">{t("allCountries")}</option>{countries.map((country) => <option key={country} value={country}>{country}</option>)}</select>}<SearchSuggestions value={query} onChange={(value) => { setQuery(value); setPage(1); }} suggestions={rows.flatMap((row) => listFields.map((field) => displayValue(field, row)))} placeholder={t("searchPlaceholderShort")} ariaLabel={t("searchPlaceholderShort")} className="h-10 min-w-0 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /><button type="button" onClick={() => void loadRows()} className="shrink-0 whitespace-nowrap rounded-xl border border-gray-200 px-3 text-sm font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300">{t("refreshData")}</button></div>
           </div>
-          {active === "paymentCategories" && <div className="grid gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:grid-cols-2">
+          {active === "paymentCategories" && <div className="grid gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:grid-cols-2 xl:grid-cols-3">
+            <select value={costTypeFilter} onChange={(event) => { setCostTypeFilter(event.target.value); setPage(1); }} aria-label={t("pcatAccountGroup")} className="h-10 min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">{t("pcatAllCostTypes")}</option>{costFilterOptions.types.map((type) => <option key={type} value={type}>{t(`prType_${type}`)}</option>)}</select>
             <select value={costFlowFilter} onChange={(event) => { setCostFlowFilter(event.target.value); setPage(1); }} aria-label={t("pcatFlow")} className="h-10 min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">{t("pcatAllFlows")}</option>{costFilterOptions.flows.map((flow) => <option key={flow} value={flow}>{t(`pcatFlow_${flow}`)}</option>)}</select>
             <select value={costAccountFilter} onChange={(event) => { setCostAccountFilter(event.target.value); setPage(1); }} aria-label={t("pcatAccount")} className="h-10 min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">{t("pcatAllAccounts")}</option>{costFilterOptions.accounts.map((account) => <option key={account} value={account}>{account}</option>)}</select>
           </div>}
