@@ -178,7 +178,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const apiPath = `/api/${path.replace(/^\//, "")}`;
   const scope = path.startsWith("ocr/")
     ? "OCR"
-    : ["uploadDocument", "startDocumentUpload", "completeDocumentUpload", "finishDocumentUploadBatch", "checkDocumentFileNames", "getArchivedDocuments", "moveCompletedOrder", "deleteDocumentFile"].some((name) => path.startsWith(name))
+    : ["uploadDocument", "startDocumentUpload", "completeDocumentUpload", "finishDocumentUploadBatch", "getArchivedDocuments", "moveCompletedOrder", "deleteDocumentFile"].some((name) => path.startsWith(name))
       ? "Drive"
       : "Backend";
   try {
@@ -726,39 +726,17 @@ export const MAX_DOCUMENT_UPLOAD_BYTES = 1024 * 1024 * 1024;
  */
 export const MAX_OCR_FILE_BYTES = 4 * 1024 * 1024;
 
-export interface DocumentFileNameCheck {
-  fileName: string;
-  targetName: string;
-  duplicate: boolean;
-  reason: "exists" | "same_batch" | null;
-}
-
-export interface DocumentFileNameCheckResponse {
-  success: boolean;
-  folderName: string;
-  hasDuplicates: boolean;
-  files: DocumentFileNameCheck[];
-}
-
-/** Kiểm tra tên sẽ lưu trên Drive có trùng không trước khi upload (không ghi gì lên Drive). */
-export function checkDocumentFileNames(payload: DocumentUploadTarget & { fileNames: string[] }): Promise<DocumentFileNameCheckResponse> {
-  return requestJson<DocumentFileNameCheckResponse>("checkDocumentFileNames", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-}
-
 export interface DocumentUploadSession {
   uploadUrl: string;
   uploadToken: string;
+  /** Tên lưu trên Drive (trùng tên thì BE đã thêm _1, _2...). */
   fileName: string;
 }
 
-/** Lỗi mở phiên của một file: code của BE (DUPLICATE_FILE_NAME...), tên sẽ lưu và thư mục đích. */
+/** Lỗi mở phiên của một file: code của BE, tên sẽ lưu và thư mục đích. */
 export type DocumentUploadSessionError = Error & { code?: string; targetName?: string; folderName?: string };
 
-/** Phiên upload của một file trong lượt: đã mở được, hoặc lỗi riêng của file đó (trùng tên, Drive không mở phiên...). */
+/** Phiên upload của một file trong lượt: đã mở được, hoặc lỗi riêng của file đó (Drive không mở phiên...). */
 export type DocumentUploadSessionResult = { session: DocumentUploadSession; error?: undefined } | { session?: undefined; error: Error };
 
 function postJson<T>(path: string, body: object): Promise<T> {
@@ -770,9 +748,9 @@ function postJson<T>(path: string, body: object): Promise<T> {
 }
 
 /**
- * Bước 1 cho cả lượt nhiều file, một request thay cho mở phiên từng file: BE kiểm tra đơn đã lưu trữ, tìm / tạo thư mục
- * và chặn trùng tên một lần rồi mở phiên upload cho mọi file. Kết quả cùng thứ tự `files`; file trùng tên hay mở phiên
- * lỗi chỉ hỏng file đó. Lỗi chung (đơn đã lưu trữ, hết quyền Google...) thì ném lỗi như các API khác.
+ * Bước 1 cho cả lượt nhiều file, một request thay cho mở phiên từng file: BE kiểm tra đơn đã lưu trữ, tìm / tạo thư mục,
+ * đặt tên không trùng (trùng thì thêm _1, _2...) một lần rồi mở phiên upload cho mọi file. Kết quả cùng thứ tự `files`;
+ * file mở phiên lỗi chỉ hỏng file đó. Lỗi chung (đơn đã lưu trữ, hết quyền Google...) thì ném lỗi như các API khác.
  */
 export async function openDocumentUploadSessions(target: DocumentUploadTarget, files: File[]): Promise<DocumentUploadSessionResult[]> {
   for (const file of files) {

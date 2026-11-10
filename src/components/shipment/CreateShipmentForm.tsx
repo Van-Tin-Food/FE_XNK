@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { analyzeDocument, createUploadBatch, MAX_OCR_FILE_BYTES, prepareDocumentUpload, uploadDocument, type DocumentUploadSessionError, type PreparedDocumentUpload } from "@/services/shipmentApi";
+import { analyzeDocument, createUploadBatch, MAX_OCR_FILE_BYTES, prepareDocumentUpload, uploadDocument, type PreparedDocumentUpload } from "@/services/shipmentApi";
 import { createDatabaseRow, databaseEndpoints, listCatalogRows } from "@/services/postgresShipmentApi";
 import type { PurchaseDetailRecord, PurchaseItemCodeRecord, PurchaseRecord, SupplierRecord } from "@/types/postgresShipment";
 import { useAuth } from "@/context/AuthContext";
@@ -302,23 +302,14 @@ export default function CreateShipmentForm({ onCancel, onCreated, existingOrderC
     let shipmentCreated = false;
     let preparedPi: PreparedDocumentUpload | null = null;
     try {
-      // Mở phiên upload PI trước khi ghi DB: BE kiểm tra trùng tên lúc mở phiên (trùng thì báo, không tạo đơn rỗng). Sau đó
+      // Mở phiên upload PI trước khi ghi DB (lỗi mở phiên thì không tạo đơn rỗng; trùng tên BE tự thêm _1, _2...). Sau đó
       // file PI gửi trước song song với ghi DB; Drive chỉ tạo file khi gửi phần cuối (sau khi đơn đã tạo), nên tạo đơn lỗi
       // thì không để lại file PI nào.
       if (piFile) {
         preparedPi = prepareDocumentUpload({ orderCode: normalizedOrderCode, documentCode: "PI" }, piFile, {
           onProgress: ({ loaded }) => setUploadedBytes(loaded),
         });
-        try {
-          await preparedPi.session;
-        } catch (sessionError) {
-          const { code, targetName, folderName } = sessionError as DocumentUploadSessionError;
-          if (code !== "DUPLICATE_FILE_NAME") throw sessionError;
-          setError(t("duplicateDocumentFileNames", {
-            files: `${targetName || piFile.name} (${t("duplicateReasonExists", { folder: folderName || "" })})`,
-          }));
-          return;
-        }
+        await preparedPi.session;
         setUploadedBytes(0);
       }
       await createDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, {

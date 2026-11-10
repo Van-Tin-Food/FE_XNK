@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentFileNames, checkDocumentProgress, deleteDocumentFile, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, createUploadBatch, MAX_DOCUMENT_UPLOAD_BYTES, MAX_OCR_FILE_BYTES, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, prepareDocumentUpload, SUMMARY_FIELDS, uploadDocument, type DocumentFileNameCheckResponse, type DocumentProgressResponse, type PreparedDocumentUpload } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentProgress, deleteDocumentFile, documentDisplayName, fetchReturnItems, getDocumentFolderNames, getArchivedDocuments, createUploadBatch, MAX_DOCUMENT_UPLOAD_BYTES, MAX_OCR_FILE_BYTES, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, prepareDocumentUpload, SUMMARY_FIELDS, uploadDocument, type DocumentProgressResponse, type PreparedDocumentUpload } from "@/services/shipmentApi";
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listCatalogRows, passDriveDocument, returnItemsFromRelations, savePostgresBlOcrRows, savePostgresInvOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, DriveDocumentFileRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord, XnkRecord } from "@/types/postgresShipment";
@@ -1841,12 +1841,6 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
     const folderNote = docId === "INSPECTION" ? inspectionFolderNote.trim() : "";
     return { ...(containerCode ? { transportCode: containerCode } : {}), ...(folderNote ? { folderNote } : {}) };
   };
-  const formatDuplicateFileNames = (check: DocumentFileNameCheckResponse) => t("duplicateDocumentFileNames", {
-    files: check.files
-      .filter((file) => file.duplicate)
-      .map((file) => `${file.targetName} (${file.reason === "exists" ? t("duplicateReasonExists", { folder: check.folderName }) : t("duplicateReasonSameBatch")})`)
-      .join("; "),
-  });
   const requiredDocumentsSorted = documentsSorted.filter((document) => !OPTIONAL_DOCUMENT_CODES.has(document.id.toUpperCase()));
   const optionalDocuments = documentsSorted.filter((document) => OPTIONAL_DOCUMENT_CODES.has(document.id.toUpperCase()));
   const missingDocs = requiredDocumentsSorted.filter(d => d.status === "missing" || d.status === "pending");
@@ -2130,20 +2124,7 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
         notify(message, "error");
         return;
       }
-      // Báo trùng tên ngay khi chọn file, trước khi upload hoặc chạy OCR.
-      setIsOcrSaving(true);
-      const nameCheck = await checkDocumentFileNames({
-        orderCode: shipment.orderCode,
-        documentCode: docId,
-        fileNames: files.map((selectedFile) => selectedFile.name),
-        ...uploadTarget,
-      });
-      if (nameCheck.hasDuplicates) {
-        const message = formatDuplicateFileNames(nameCheck);
-        setOcrUploadError(message);
-        notify(message, "error");
-        return;
-      }
+      // Trùng tên không chặn: BE tự thêm _1, _2... vào tên lưu trên Drive.
       if (!documentType) {
         uploadDocumentFiles(docId, files, uploadTarget);
         return;

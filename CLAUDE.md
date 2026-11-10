@@ -57,9 +57,9 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
   trang `user-guide`.
 - Mã `TRA_CONT` ↔ cột DB `tra_cong`. `TRA_CONT` và `INSPECTION` bắt buộc chọn số container (hoặc thư mục
   ảnh đã có với INSPECTION) trước khi upload; file nằm trong thư mục container trên Drive.
-- Mọi luồng upload phải kiểm tra trùng tên **trước** khi upload, chạy OCR hay ghi DB, để báo trùng tên sớm: gọi
-  `checkDocumentFileNames`, hoặc mở phiên trước (`prepareDocumentUpload` / `openDocumentUploadSessions`: BE chặn trùng lúc
-  mở phiên, như màn tạo đơn). Không tự đổi tên hay đánh số file ở FE — quy tắc đặt tên nằm ở BE.
+- Upload chứng từ **không chặn trùng tên**: BE tự thêm `_1`, `_2`... vào tên lưu trên Drive khi trùng (tên thật trả về ở
+  `fileName` của phiên / kết quả upload). Không kiểm tra trùng ở FE, không tự đổi tên hay đánh số file ở FE — quy tắc đặt
+  tên nằm ở BE.
 - File còn chờ người dùng xác nhận (OCR trong chi tiết đơn, PI khi bấm tạo đơn) dùng `prepareDocumentUpload`: mở phiên và
   gửi trước gần hết file song song với OCR / ghi DB (`preUploadToDriveSession` chừa phần cuối nên Drive chưa tạo file),
   xác nhận thì `uploadDocument(..., { prepared })` chỉ gửi phần cuối + lưu DB; huỷ thì `cancel()`, không có file thừa.

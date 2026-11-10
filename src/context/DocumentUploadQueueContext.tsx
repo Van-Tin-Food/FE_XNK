@@ -5,7 +5,6 @@ import UploadBatchProgressToast, { type UploadBatchFile, type UploadBatchJob } f
 import { useLanguage } from "@/context/LanguageContext";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import {
-  checkDocumentFileNames,
   createUploadBatch,
   finishDocumentUploadBatch,
   openDocumentUploadSessions,
@@ -271,35 +270,13 @@ export function DocumentUploadQueueProvider({ children }: { children: React.Reac
     void runJobSafely(jobId, input.files.map((_, index) => index));
   }, [runJobSafely]);
 
-  /** Upload lại các file lỗi của lượt (kiểm tra trùng tên lại vì có file có thể đã lên Drive). */
+  /** Upload lại các file lỗi của lượt. Tên trùng với file đã lên Drive thì BE tự thêm _1, _2... (không chặn). */
   const retryJob = useCallback(async (jobId: string) => {
     const record = recordsRef.current.get(jobId);
     if (!record || record.running || record.failedIndexes.length === 0) return;
     record.running = true;
     const indexes = record.failedIndexes;
-    const { t: translate, notify: send } = textRef.current;
     patchJob(jobId, (job) => ({ ...job, status: "running", message: undefined }));
-    try {
-      const nameCheck = await checkDocumentFileNames({ ...record.input.target, fileNames: indexes.map((index) => record.input.files[index].name) });
-      if (nameCheck.hasDuplicates) {
-        const message = translate("duplicateDocumentFileNames", {
-          files: nameCheck.files
-            .filter((file) => file.duplicate)
-            .map((file) => `${file.targetName} (${file.reason === "exists" ? translate("duplicateReasonExists", { folder: nameCheck.folderName }) : translate("duplicateReasonSameBatch")})`)
-            .join("; "),
-        });
-        send(message, "error");
-        record.running = false;
-        patchJob(jobId, (job) => ({ ...job, status: "failed", retryable: false, message }));
-        return;
-      }
-    } catch (error) {
-      const message = errorMessage(error, translate("uploadDocumentFailed"));
-      send(message, "error");
-      record.running = false;
-      patchJob(jobId, (job) => ({ ...job, status: "failed", message }));
-      return;
-    }
     patchJob(jobId, (job) => ({
       ...job,
       files: job.files.map((file, index) => (indexes.includes(index) ? { ...file, status: "queued", loaded: 0, error: undefined } : file)),
