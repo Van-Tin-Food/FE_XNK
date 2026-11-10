@@ -6,7 +6,7 @@ import type { Shipment, ShipmentFilter, ShipmentStatus, ShipmentFilterStatus } f
 import { fetchShipment, fetchShipments, computeMetrics, exportEtaRows, getCachedShipments } from "@/services/shipmentApi";
 import { DOCUMENT_UPLOAD_EVENT, type DocumentUploadEventDetail } from "@/context/DocumentUploadQueueContext";
 import { returnItemsFromRelations } from "@/services/postgresShipmentApi";
-import { buildEtaRows, getEtaHeaders } from "@/services/shipmentExcelExport";
+import { buildEtaRows, downloadEtaRowsExcel, getEtaHeaders } from "@/services/shipmentExcelExport";
 import { getGoodsPaymentSummary } from "@/services/paymentCostApi";
 import ShipmentMetrics from "./ShipmentMetrics";
 import DashboardInfoBar from "./DashboardInfoBar";
@@ -294,8 +294,21 @@ export default function ShipmentDashboard() {
       const exportedAt = new Date();
       const pad = (value: number) => String(value).padStart(2, "0");
       const version = `${pad(exportedAt.getHours())}:${pad(exportedAt.getMinutes())} ${pad(exportedAt.getDate())}/${pad(exportedAt.getMonth() + 1)}/${exportedAt.getFullYear()}`;
-      await exportEtaRows({ title: `Bảng ETA được xuất vào ${version}`, rows, headers: getEtaHeaders({ includeAmounts }) });
-      notify(t("exportExcelSucceeded"), "success");
+      const headers = getEtaHeaders({ includeAmounts });
+      const fileName = `Bang-ETA-${version.replace(/[/: ]/g, "-")}.xlsx`;
+      try {
+        await exportEtaRows({ title: `Bảng ETA được xuất vào ${version}`, rows, headers });
+        notify(t("exportExcelSucceeded"), "success");
+      } catch (sheetError) {
+        if (sheetError instanceof DOMException && sheetError.name === "AbortError") return;
+        try {
+          await downloadEtaRowsExcel(rows, headers, fileName);
+          notify(t("exportExcelSheetFallback"), "warning");
+        } catch (localError) {
+          const reason = localError instanceof Error ? localError.message : String(localError);
+          notify(`${t("exportExcelFallbackError")}: ${reason}`, "error");
+        }
+      }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       notify(error instanceof Error ? `${t("exportExcelError")}: ${error.message}` : t("exportExcelError"), "error");

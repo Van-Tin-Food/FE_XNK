@@ -296,3 +296,21 @@ export function getEtaHeaders({ includeAmounts = true }: { includeAmounts?: bool
   return ETA_EXPORT_HEADERS.filter((header) => includeAmounts || !ETA_AMOUNT_HEADERS.has(header));
 }
 
+/** Download ETA rows as an .xlsx file when the Google Sheet export is unavailable. */
+export async function downloadEtaRowsExcel(
+  rows: Array<Record<string, unknown>>,
+  headers: string[],
+  fileName: string,
+): Promise<void> {
+  const XLSX = await import("xlsx");
+  const sheetRows = [
+    headers,
+    ...rows.map((row) => headers.map((header) => excelValue(row[header]))),
+  ];
+  const sheet = XLSX.utils.aoa_to_sheet(sheetRows);
+  sheet["!cols"] = headers.map((header) => ({ wch: Math.max(12, Math.min(30, header.length + 4)) }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "ETA");
+  XLSX.writeFile(workbook, fileName);
+}
+
