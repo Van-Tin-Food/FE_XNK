@@ -26,9 +26,8 @@ export const PAYMENT_PROOF = "payment_proof" as const;
 /** Giấy đề nghị đã ký (PDF bản in tự tạo và lưu ngay sau khi upload ủy nhiệm chi — utils/paymentRequestSignedPdf.ts). */
 export const SIGNED_FORM = "signed_form" as const;
 /**
- * Hóa đơn VAT (mục "Hóa đơn" ở bước lưu trữ), chỉ cần khi đề nghị có khoản VAT (needsInvoice): luồng xanh đã chi tiền + có
- * hóa đơn thì BE tự lưu trữ; luồng đỏ bắt buộc có trước khi lưu trữ; đúng ngày đề nghị + 15 ngày mà đã chi tiền, chưa có thì
- * BE nhắc người đề nghị (luồng đỏ / vàng nhắc cả người duyệt theo luồng).
+ * Hóa đơn (mục "Hóa đơn" ở bước lưu trữ): không bắt buộc ở luồng nào, không có nhắc. Đề nghị đã hoàn thành vẫn bổ sung được
+ * hóa đơn (BE chỉ nhận loại này + giấy đề nghị đã ký sau khi hoàn thành). Luồng xanh tự hoàn thành khi có ủy nhiệm chi.
  */
 export const INVOICE = "invoice" as const;
 export type PaymentDocumentKind = typeof PAYMENT_PROOF | typeof SIGNED_FORM | typeof INVOICE | null;
@@ -587,12 +586,6 @@ export function requestFlow(paymentRequest: Pick<PaymentRequest, "hasRed" | "cos
   if (paymentRequest.hasRed || paymentRequest.costs.some((cost) => cost.flow === "do")) return "do";
   return paymentRequest.costs.some((cost) => cost.flow === "vang") ? "vang" : "xanh";
 }
-
-/**
- * Đề nghị cần hóa đơn VAT: có ít nhất một khoản thuộc danh mục có thuế (co_thue), như BE utils/paymentFlow.needsInvoice.
- * Toàn khoản không VAT thì không có hóa đơn VAT: không bắt hóa đơn, không nhắc.
- */
-export const needsInvoice = (paymentRequest: Pick<PaymentRequest, "costs">): boolean => paymentRequest.costs.some((cost) => cost.taxed);
 
 /**
  * Bước 2: xác nhận gửi (hoặc gửi lại) thẻ đề nghị lên Google Chat. Luồng đỏ / vàng (luồng cảnh báo): người gửi phải xác

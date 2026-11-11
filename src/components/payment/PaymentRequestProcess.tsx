@@ -18,7 +18,6 @@ import {
   approvePaymentRequest,
   notifyMissingPaymentDocuments,
   rejectPaymentRequest,
-  needsInvoice,
   requestFlow,
   sendPaymentRequest,
   type PaymentRequest,
@@ -178,8 +177,6 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   const [savingSignedForm, setSavingSignedForm] = useState(false);
   const [fileCount, setFileCount] = useState(0);
   const [documentsRevision, setDocumentsRevision] = useState(0);
-  // Số file hóa đơn (mục "Hóa đơn"): đề nghị luồng đỏ phải có mới lưu trữ được.
-  const [invoiceCount, setInvoiceCount] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -266,20 +263,24 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   // Sửa / xóa được: người quản lý đề nghị, khi chưa duyệt hoặc bị từ chối (đề nghị đã hủy từ trước cũng sửa / xóa được).
   const canModify = canManage && (request.status === 0 || request.status === -1);
   const canEdit = canModify || (canManage && cancelled);
-  // Chứng từ upload dần (tạm) cho tới khi bấm "Đầy đủ chứng từ"; đề nghị đã hủy / hoàn thành thì khóa. BE trả
-  // can_upload_documents (gồm người tạo đề nghị thay khi chưa duyệt).
-  const canUploadDocs = (request.canUploadDocuments ?? (isOwner || can("paymentDocuments", "edit"))) && request.status !== 2 && !cancelled;
-  // Chi tiền (upload ủy nhiệm chi): người duyệt / được ủy quyền / người lưu trữ chứng từ — BE trả can_record_payment.
-  const canRecordPayment = request.canRecordPayment === true;
-  const canUploadProof = canRecordPayment && (request.status === 1 || request.status === 3);
-  // Đã chi tiền (có ủy nhiệm chi): hồ sơ chỉ bổ sung, chỉ người có quyền chi tiền / lưu trữ bỏ được file (BE cũng chặn).
-  const canRemoveDocs = request.status !== 3 || canRecordPayment;
   // Luồng của đề nghị: đỏ / vàng là luồng cảnh báo (gửi phải xác nhận quy chuẩn; lưu trữ chỉ kế toán xác nhận).
   const flow = requestFlow(request);
   const warningFlow = flow !== "xanh";
-  // Hóa đơn VAT chỉ cần khi có khoản thuộc danh mục có VAT; luồng đỏ có VAT bắt buộc hóa đơn trước khi lưu trữ.
-  const invoiceNeeded = needsInvoice(request);
-  const redNeedsInvoice = request.hasRed && invoiceNeeded;
+  // Chứng từ upload dần (tạm) cho tới khi bấm "Đầy đủ chứng từ"; đề nghị đã hủy thì khóa. BE trả can_upload_documents (gồm
+  // người tạo đề nghị thay khi chưa duyệt). Đề nghị đã hoàn thành (không bỏ được file): luồng xanh (tự hoàn thành lúc có ủy
+  // nhiệm chi) vẫn bổ sung được mọi chứng từ; luồng vàng / đỏ (kế toán đã xác nhận) chỉ còn hóa đơn — hóa đơn không bắt buộc,
+  // có thể về sau.
+  const canUploadAny = (request.canUploadDocuments ?? (isOwner || can("paymentDocuments", "edit"))) && !cancelled;
+  const canUploadDocs = canUploadAny && (request.status !== 2 || !warningFlow);
+  const canUploadInvoice = canUploadAny;
+  // Chi tiền (upload ủy nhiệm chi): người duyệt / được ủy quyền / người lưu trữ chứng từ — BE trả can_record_payment.
+  const canRecordPayment = request.canRecordPayment === true;
+  const canUploadProof = canRecordPayment && (request.status === 1 || request.status === 3);
+  // Đã chi tiền (có ủy nhiệm chi): hồ sơ chỉ bổ sung, chỉ người có quyền chi tiền / lưu trữ bỏ được file; đã hoàn thành thì
+  // không ai bỏ được file (BE cũng chặn).
+  const canRemoveDocs = request.status !== 2 && (request.status !== 3 || canRecordPayment);
+  // Luồng xanh (trừ đề nghị cược cont): có ủy nhiệm chi là hoàn thành, không cần hóa đơn; đỏ / vàng kế toán lưu trữ thủ công.
+  const autoCompleteOnProof = !warningFlow && request.containerDeposits.length === 0;
   // Lưu trữ (đầy đủ chứng từ) chỉ sau khi đã chi tiền; luồng đỏ / vàng chỉ kế toán, admin (BE trả can_confirm_documents).
   const canArchive = can("paymentDocuments", "edit") && request.canConfirmDocuments !== false && request.status === 3;
   const accountantOnlyArchive = can("paymentDocuments", "edit") && request.canConfirmDocuments === false && request.status === 3;
@@ -636,6 +637,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
                 </p>
               )}
               {canUploadProof && request.status === 1 && <p className="mt-2 text-xs text-gray-500">{t("prPaymentChatHint", { id: request.id })}</p>}
+              {request.status === 1 && autoCompleteOnProof && <p className="mt-2 text-xs font-medium text-success-700 dark:text-success-300">{t("prGreenAutoComplete")}</p>}
             </div>
             {/* Chờ chi tiền: vẫn bổ sung được chứng từ hồ sơ / báo người đề nghị bổ sung. */}
             {request.status === 1 && (canUploadDocs || canSendMissing) && (
@@ -654,36 +656,31 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
 
         {/* 4. Lưu trữ hồ sơ (sau khi đã chi tiền) */}
         <NodeCard index={3} title={titles[3]} state={states[3]} last>
-          {/* Hóa đơn: luồng đỏ bắt buộc trước khi lưu trữ (quá 15 ngày từ ngày đề nghị chưa có thì app nhắc người đề nghị). */}
-          <div className={`mb-4 rounded-xl border p-3 sm:p-4 ${redNeedsInvoice && invoiceCount === 0 && request.status === 3 ? "border-error-200 dark:border-error-500/30" : "border-gray-200 dark:border-gray-700"}`}>
-            <p className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-gray-800 dark:text-white/90">
-              {t("prInvoiceTitle")}
-              {redNeedsInvoice && <span className="rounded-md bg-error-50 px-1.5 py-0.5 text-[11px] font-semibold text-error-700 dark:bg-error-500/10 dark:text-error-300">{t("prInvoiceRequired")}</span>}
-            </p>
-                <PaymentDocumentsPanel key={`invoice-${documentsRevision}`} requestId={request.id} kind={INVOICE} canUpload={canUploadDocs} canRemove={canRemoveDocs} onFilesChange={setInvoiceCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen}
+          {/* Hóa đơn: không bắt buộc ở luồng nào; đề nghị đã hoàn thành vẫn bổ sung được (không bỏ được file). */}
+          <div className="mb-4 rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
+            <p className="mb-2 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prInvoiceTitle")}</p>
+                <PaymentDocumentsPanel key={`invoice-${documentsRevision}`} requestId={request.id} kind={INVOICE} canUpload={canUploadInvoice} canRemove={canRemoveDocs} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen}
                   containerDeposits={request.status === 3 ? request.containerDeposits : []} currency={request.currency} />
           </div>
           <PaymentDocumentsPanel key={`archive-${documentsRevision}`} requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
-          {canUploadDocs && !canRemoveDocs && <p className="mt-2 text-xs text-gray-500">{t("prPaidAddOnlyHint")}</p>}
+          {canUploadDocs && !canRemoveDocs && request.status === 3 && <p className="mt-2 text-xs text-gray-500">{t("prPaidAddOnlyHint")}</p>}
           {request.status === 3 && (
             <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
               {fileCount > 0 && <p className="mb-3 rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-300">{t("prDocsDraftHint", { count: fileCount })}</p>}
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
                 {canArchive && (
-                  <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0 || (redNeedsInvoice && invoiceCount === 0)} className="h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto">
+                  <button type="button" onClick={() => void archive()} disabled={busy !== "" || fileCount === 0} className="h-11 w-full rounded-lg bg-success-600 px-5 text-sm font-semibold text-white hover:bg-success-700 disabled:opacity-50 sm:w-auto">
                     {busy === "archive" ? t("prSaving") : `🗄 ${t("prArchive")}`}
                   </button>
                 )}
                 {canSendMissing && <MissingDocumentsNotice requestId={request.id} creatorName={request.creatorName} disabled={busy !== ""} />}
               </div>
               {canArchive && fileCount === 0 && <p className="mt-2 text-xs text-gray-500">{t("prArchiveNeedsFile")}</p>}
-              {redNeedsInvoice && invoiceCount === 0 && <p className="mt-2 text-xs font-medium text-error-600 dark:text-error-400">{t("prArchiveNeedsInvoice")}</p>}
-              {!warningFlow && invoiceNeeded && invoiceCount === 0 && <p className="mt-2 text-xs text-gray-500">{t("prAutoArchiveHint")}</p>}
               {accountantOnlyArchive && <p className="mt-2 text-xs font-medium text-warning-700 dark:text-warning-300">{t("prArchiveAccountantOnly")}</p>}
               {!canArchive && <p className="mt-2 text-sm text-gray-500">{t("prWaitArchive")}</p>}
             </div>
           )}
-          {request.status === 2 && <p className="mt-3 text-sm font-medium text-success-700 dark:text-success-300">✓ {t("prCompletedHint")}</p>}
+          {request.status === 2 && <p className="mt-3 text-sm font-medium text-success-700 dark:text-success-300">✓ {t(warningFlow ? "prCompletedHint" : "prCompletedGreenHint")}</p>}
         </NodeCard>
       </ol>
       </div>
