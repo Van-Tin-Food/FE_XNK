@@ -17,7 +17,7 @@ import {
   type PaymentRequestState,
   type PaymentRequestStateTotal,
 } from "@/services/paymentRequestApi";
-import { canCreatePaymentRequests, canOpenPaymentRequests, costCodeName, formatMoney, sumAmounts } from "@/utils/paymentRequest";
+import { canCreatePaymentRequests, canOpenPaymentRequests, formatMoney, sumAmounts } from "@/utils/paymentRequest";
 
 // Danh sách đề nghị thanh toán: lọc (trạng thái, mã phí, từ khoá) + sắp xếp + phân trang đều phía server. Bấm một đề nghị -> trang quy trình /payment-requests/<mã>;
 // link cũ ?id=DNTT-001 tự chuyển sang trang đó.
@@ -216,19 +216,12 @@ function PaymentRequestsContent() {
 
   const money = (request: PaymentRequest) => formatMoney(request.total, request.currency, language);
   const dueClass = (request: PaymentRequest) => (isOverdue(request.dueDate, request.status) ? "text-error-600 dark:text-error-400" : "text-gray-700 dark:text-gray-300");
-  const costCodeLabel = (code: string) => {
-    const normalized = code.toUpperCase();
-    if (normalized === "VH") return `${normalized} · ${t("prType_van_hanh")}`;
-    if (normalized === "MH") return `${normalized} · ${t("prType_mua_hang")}`;
-    return code;
-  };
-  const costGroups = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => cost.code || "—"))].map(costCodeLabel);
   const costTargets = (request: PaymentRequest) => ({
     contracts: [...new Set(request.costs.map((cost) => cost.contract).filter(Boolean))],
     containers: [...new Set(request.costs.map((cost) => cost.container).filter(Boolean))],
   });
   const costTargetText = (request: PaymentRequest) => [...costTargets(request).contracts, ...costTargets(request).containers].join(", ");
-  const costNames = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => costCodeName(cost.code, cost.categoryName)).filter(Boolean))];
+  const costNames = (request: PaymentRequest) => [...new Set(request.costs.map((cost) => cost.categoryName).filter(Boolean))];
   const flowCountTotal = Object.values(flowCounts).reduce((sum, count) => sum + (count || 0), 0);
   const availableFlows = (["do", "xanh", "vang"] as const).filter((value) => (flowCounts[value] ?? 0) > 0 || flowFilter === value);
   const summarizeStates = (states?: PaymentRequestState[]) => {
@@ -429,7 +422,6 @@ function PaymentRequestsContent() {
                       <span className={dueClass(request)}>{t("prDueDate")}: {formatDueDate(request.dueDate)}</span>
                     </span>
                     <span className="w-full space-y-0.5 border-t border-gray-100 pt-1.5 text-left text-[11px] text-gray-500 dark:border-gray-800">
-                      <span className="block truncate" title={costGroups(request).join(", ")}>{t("prCostTypeLabel")}: {costGroups(request).join(", ") || "—"}</span>
                       <span className="block truncate" title={costTargetText(request)}>{t("prContractNumber")}: {costTargets(request).contracts.join(", ") || "—"}</span>
                       <span className="block truncate text-gray-400" title={costTargetText(request)}>{t("prContainer")}: {costTargets(request).containers.join(", ") || "—"}</span>
                       <span className="block truncate" title={costNames(request).join(", ")}>{t("prCosts")}: {costNames(request).join(", ") || "—"}</span>
@@ -441,15 +433,14 @@ function PaymentRequestsContent() {
 
             {/* Từ tablet (768px): bảng, thiếu chỗ thì cuộn ngang trong khung */}
             <div className="hidden overflow-x-auto custom-scrollbar md:block">
-              <table className="w-full min-w-[1280px] table-fixed text-left">
+              <table className="w-full min-w-[1120px] table-fixed text-left">
                 <thead className="bg-gray-50 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:bg-gray-900 dark:text-gray-400">
                   <tr>
                     <th className="w-[12%] px-4 py-3">{sortLabel("id", t("prCode"))}</th>
                     <th className="w-[12%] px-4 py-3">{sortLabel("creator", t("prCreator"))}</th>
-                    <th className="w-[22%] px-4 py-3">{sortLabel("content", t("prContent"))}</th>
-                    <th className="w-[14%] px-4 py-3">{sortLabel("cost", t("prCostTypeLabel"))}</th>
-                    <th className="w-[16%] px-4 py-3">{t("prContractNumber")}</th>
-                    <th className="w-[18%] px-4 py-3">{t("prCosts")}</th>
+                    <th className="w-[24%] px-4 py-3">{sortLabel("content", t("prContent"))}</th>
+                    <th className="w-[18%] px-4 py-3">{t("prContractNumber")}</th>
+                    <th className="w-[20%] px-4 py-3">{t("prCosts")}</th>
                     <th className="w-[15%] px-4 py-3 text-right">{sortLabel("total", t("prTotal"))}</th>
                     <th className="w-[10%] px-4 py-3">{sortLabel("due", t("prDueDate"))}</th>
                     <th className="w-[15%] px-4 py-3">{sortLabel("status", t("status"))}</th>
@@ -466,9 +457,6 @@ function PaymentRequestsContent() {
                       <td className="px-4 py-3">
                         <p className="truncate text-sm font-medium text-gray-800 dark:text-white/90" title={request.content}>{request.content}</p>
                         <p className="mt-0.5 flex items-center gap-2 text-xs text-gray-500">{t("prCostCount", { count: request.costCount })}{request.hasRed && <RedFlowBadge />}</p>
-                      </td>
-                      <td className="px-4 py-3 align-top text-sm text-gray-700 dark:text-gray-300">
-                        <p className="line-clamp-2" title={costGroups(request).join(", ")}>{costGroups(request).join(", ") || "—"}</p>
                       </td>
                       <td className="px-4 py-3 align-top text-sm text-gray-700 dark:text-gray-300">
                         <p className="truncate" title={costTargetText(request)}>{costTargets(request).contracts.join(", ") || "—"}</p>
