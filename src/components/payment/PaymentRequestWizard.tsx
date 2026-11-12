@@ -27,6 +27,7 @@ import {
   type TransferKind,
 } from "@/services/paymentRequestApi";
 import { DOCUMENT_FILE_ACCEPT, getDocumentMimeType, isSupportedDocumentFile } from "@/utils/documentFile";
+import { runWithConcurrency } from "@/utils/concurrency";
 import { addVat, costCodeName, formatAmount, formatMoney, parseAmountLoose, parseVatInput, roundRequestTotal, splitVat, sumAmounts, type PaymentCurrency } from "@/utils/paymentRequest";
 import { goodsPaymentKind } from "@/services/paymentCostApi";
 import BankPicker, { matchBank } from "./BankPicker";
@@ -96,6 +97,8 @@ const isOrderCode = (code: string) => ORDER_COST_CODES.includes(code.toUpperCase
 const MAX_COSTS = 100;
 const BENEFICIARY_DEBOUNCE_MS = 250;
 const MAX_ATTACHMENT_SIZE = 1024 * 1024 * 1024;
+/** Số file đính kèm gửi lên Drive cùng lúc khi lưu đề nghị (như khung chứng từ). */
+const PARALLEL_UPLOADS = 3;
 
 interface CreateAttachment {
   file: File;
@@ -534,34 +537,52 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
       const saved = editing ? await updatePaymentRequest(editing.id, input) : await createPaymentRequest(input);
       if (attachments.length) {
         try {
-          const invoiceFiles = attachments.filter((item) => item.isInvoice);
-          const regularFiles = attachments.filter((item) => !item.isInvoice);
-          let done = 0;
-          const totalBytes = attachments.reduce((sum, item) => sum + item.file.size, 0);
-          let uploadedBytes = 0;
-          for (const { files, kind } of [{ files: invoiceFiles, kind: INVOICE }, { files: regularFiles, kind: null }] as const) {
-            if (!files.length) continue;
+          const groups = ([
+            { files: attachments.filter((item) => item.isInvoice), kind: INVOICE },
+            { files: attachments.filter((item) => !item.isInvoice), kind: null },
+          ] as const).filter((group) => group.files.length > 0);
+          // Mở phiên upload cho hóa đơn và file thường cùng lúc; có file trùng tên thì báo trước khi gửi file nào.
+          const opened = await Promise.all(groups.map(async ({ files, kind }) => {
             const { duplicates, sessions } = await startPaymentDocumentUploads(
               saved.id,
               files.map(({ file }) => ({ file, mimeType: getDocumentMimeType(file) })),
               kind,
             );
-            if (duplicates.length) throw new Error(t("prDuplicateFiles", { names: duplicates.join(", ") }));
-            for (let index = 0; index < files.length; index += 1) {
-              const file = files[index].file;
-              await sendPaymentDocument(saved.id, sessions[index], file, {
-                onProgress: ({ loaded }) => setAttachmentUploadProgress({
-                  done,
-                  total: attachments.length,
-                  percent: totalBytes ? Math.min(99, Math.floor(((uploadedBytes + loaded) / totalBytes) * 100)) : 0,
-                }),
+            return { duplicates, uploads: files.map(({ file }, index) => ({ file, session: sessions[index] })) };
+          }));
+          const duplicates = opened.flatMap((group) => group.duplicates);
+          if (duplicates.length) throw new Error(t("prDuplicateFiles", { names: duplicates.join(", ") }));
+          const uploads = opened.flatMap((group) => group.uploads);
+          const totalBytes = uploads.reduce((sum, { file }) => sum + file.size, 0);
+          const loadedBytes = uploads.map(() => 0);
+          const failures: string[] = [];
+          let done = 0;
+          const report = () => setAttachmentUploadProgress({
+            done,
+            total: uploads.length,
+            percent: totalBytes ? Math.min(done === uploads.length ? 100 : 99, Math.floor((loadedBytes.reduce((sum, value) => sum + value, 0) / totalBytes) * 100)) : 100,
+          });
+          // Gửi song song như khung chứng từ (PARALLEL_UPLOADS file cùng lúc); file lỗi không chặn các file khác.
+          await runWithConcurrency(uploads, PARALLEL_UPLOADS, async ({ file, session }, index) => {
+            try {
+              await sendPaymentDocument(saved.id, session, file, {
+                onProgress: ({ loaded }) => {
+                  loadedBytes[index] = loaded;
+                  report();
+                },
               });
-              uploadedBytes += file.size;
+              loadedBytes[index] = file.size;
               done += 1;
-              setAttachmentUploadProgress({ done, total: attachments.length, percent: totalBytes ? Math.floor((uploadedBytes / totalBytes) * 100) : 100 });
+              report();
+            } catch (fileError) {
+              failures.push(`${file.name}: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
             }
+          });
+          if (failures.length) {
+            notify(t("prUploadPartial", { done, total: uploads.length, errors: failures.join("; ") }), done ? "warning" : "error");
+          } else {
+            notify(t("prDraftAttachmentsUploaded", { count: uploads.length }), "success");
           }
-          notify(t("prDraftAttachmentsUploaded", { count: attachments.length }), "success");
         } catch (uploadError) {
           notify(uploadError instanceof Error ? uploadError.message : String(uploadError), "error");
         } finally {
