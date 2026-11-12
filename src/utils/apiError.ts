@@ -232,7 +232,7 @@ function getFriendlyMessage(scope: string, status: number, code: string, backend
     case "PAYMENT_CATEGORY_NOT_FOUND":
       return "Không tìm thấy khoản phí (có thể đã bị đổi). Vui lòng tải lại danh mục.";
     case "GOODS_PAYMENT_MISMATCH":
-      return backendMessage || "Thanh toán tiền còn lại phải nhỏ hơn tiền hàng của hợp đồng.";
+      return backendMessage || "Thanh toán tiền còn lại không được lớn hơn tiền hàng của hợp đồng.";
     case "GOOGLE_CHAT_NOT_CONFIGURED":
       return "Google Chat chưa được cấu hình. Vui lòng liên hệ quản trị viên.";
     case "GOOGLE_CHAT_REQUEST_FAILED":

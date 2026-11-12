@@ -14,7 +14,7 @@ import { amountToCents, formatAmount, parseAmountLoose, sumAmounts } from "@/uti
 // Mỗi khoản một khối: tên khoản, số tiền, nội dung (diễn giải). Chỉ nhập số (loại tiền chọn khi tạo đề nghị); số tiền là
 // số đã gồm VAT (% VAT nhập khi tạo đề nghị). Khoản đã đưa vào đề nghị hiện mã đề nghị, khoá; nhập lại khoản phí đó = thêm
 // khoản mới — phí phát sinh lần N (có dòng cảnh báo "chi phí đã được tạo"), trừ cọc hàng / thanh toán còn lại (một khoản).
-// Thanh toán tiền hàng: tiền cọc và tiền còn lại nhập độc lập; khoản còn lại phải nhỏ hơn tiền hàng.
+// Thanh toán tiền hàng: tiền cọc và tiền còn lại nhập độc lập; khoản còn lại không được lớn hơn tiền hàng.
 
 interface Props {
   contract: string;
@@ -220,10 +220,10 @@ export default function ShipmentCostsTab({ contract }: Props) {
   const canEditContainer = data.access.container.edit && !data.cancelled;
   const money = (value: string | null | undefined) => formatAmount(value, language);
 
-  /** Khoản còn lại phải nhỏ hơn tiền hàng; tiền cọc không ảnh hưởng kiểm tra này. */
+  /** Khoản còn lại không được lớn hơn tiền hàng; tiền cọc không ảnh hưởng kiểm tra này. */
   const balanceHint = (amount: string | null) => {
     if (!goodsTotal) return null;
-    const valid = amount !== null && amountToCents(amount) < amountToCents(goodsTotal);
+    const valid = amount !== null && amountToCents(amount) <= amountToCents(goodsTotal);
     return (
       <p className={`mt-1 text-xs ${valid ? "text-gray-500" : "text-error-600 dark:text-error-400"}`}>
         {t("pcBalanceFormula", { goods: money(goodsTotal) })}
