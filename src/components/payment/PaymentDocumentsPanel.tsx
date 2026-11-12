@@ -28,7 +28,8 @@ import { formatDateTime } from "./PaymentRequestParts";
 // kind = payment_proof (bước chi tiền): chỉ hiện + upload ủy nhiệm chi / ảnh chuyển tiền; upload xong BE chuyển đề nghị sang
 // đã chi tiền và báo Google Chat ở file cuối của lượt. kind = null: mọi chứng từ, ủy nhiệm chi có nhãn "UNC".
 // File gửi thẳng lên Google Drive (không qua gateway), nên giới hạn là của Drive upload: 1 GB/file như chứng từ XNK.
-// Khung hóa đơn của đề nghị cược cont đã chi tiền (containerDeposits): cont nào chưa có phí sửa thì phải nhập số tiền hãng tàu
+// Khung hóa đơn của đề nghị cược cont đã chi tiền / đã hoàn thành (containerDeposits — phí sửa không ràng buộc hoàn thành, hóa
+// đơn hoàn cược nhập sau hoặc không nhập đều được): cont nào chưa có phí sửa thì phải nhập số tiền hãng tàu
 // hoàn cược (âm = phải trả thêm) + % VAT trước khi upload; phí sửa = tiền cược − số hoàn, BE ghi vào chi phí của cont.
 
 const MAX_FILE_MB = 1024;

@@ -279,8 +279,8 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
   // Đã chi tiền (có ủy nhiệm chi): hồ sơ chỉ bổ sung, chỉ người có quyền chi tiền / lưu trữ bỏ được file; đã hoàn thành thì
   // không ai bỏ được file (BE cũng chặn).
   const canRemoveDocs = request.status !== 2 && (request.status !== 3 || canRecordPayment);
-  // Luồng xanh (trừ đề nghị cược cont): có ủy nhiệm chi là hoàn thành, không cần hóa đơn; đỏ / vàng kế toán lưu trữ thủ công.
-  const autoCompleteOnProof = !warningFlow && request.containerDeposits.length === 0;
+  // Luồng xanh (kể cả đề nghị cược cont): có ủy nhiệm chi là hoàn thành, không cần hóa đơn; đỏ / vàng kế toán lưu trữ thủ công.
+  const autoCompleteOnProof = !warningFlow;
   // Lưu trữ (đầy đủ chứng từ) chỉ sau khi đã chi tiền; luồng đỏ / vàng chỉ kế toán, admin (BE trả can_confirm_documents).
   const canArchive = can("paymentDocuments", "edit") && request.canConfirmDocuments !== false && request.status === 3;
   const accountantOnlyArchive = can("paymentDocuments", "edit") && request.canConfirmDocuments === false && request.status === 3;
@@ -660,7 +660,7 @@ export default function PaymentRequestProcess({ id }: { id: string }) {
           <div className="mb-4 rounded-xl border border-gray-200 p-3 sm:p-4 dark:border-gray-700">
             <p className="mb-2 text-sm font-semibold text-gray-800 dark:text-white/90">{t("prInvoiceTitle")}</p>
                 <PaymentDocumentsPanel key={`invoice-${documentsRevision}`} requestId={request.id} kind={INVOICE} canUpload={canUploadInvoice} canRemove={canRemoveDocs} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen}
-                  containerDeposits={request.status === 3 ? request.containerDeposits : []} currency={request.currency} />
+                  containerDeposits={request.status === 3 || request.status === 2 ? request.containerDeposits : []} currency={request.currency} />
           </div>
           <PaymentDocumentsPanel key={`archive-${documentsRevision}`} requestId={request.id} canUpload={canUploadDocs} canRemoveProof={canRecordPayment} canRemove={canRemoveDocs} onFilesChange={setFileCount} onUploaded={reload} onPreviewVisibilityChange={setPreviewOpen} />
           {canUploadDocs && !canRemoveDocs && request.status === 3 && <p className="mt-2 text-xs text-gray-500">{t("prPaidAddOnlyHint")}</p>}
