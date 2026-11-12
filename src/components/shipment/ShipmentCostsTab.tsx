@@ -326,7 +326,7 @@ export default function ShipmentCostsTab({ contract }: Props) {
           <div className="mt-3 rounded-lg border border-dashed border-gray-300 p-2.5 dark:border-gray-700">
             <p className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">+ {t("pcAddTitle")}</p>
             {/* Một hàng: khoản phí | số tiền | nội dung | nút thêm (thẻ hẹp thì xếp dọc) */}
-            <div className="grid grid-cols-1 items-end gap-2 @sm:grid-cols-[minmax(0,1.1fr)_7rem_minmax(0,1fr)_auto]">
+            <div className="grid grid-cols-1 items-end gap-2 @sm:grid-cols-[minmax(0,1.35fr)_7rem_minmax(0,0.85fr)_auto]">
               {/* Khoản phí: gõ để lọc (không dấu cũng được, theo tên / mã / tài khoản), mũi tên + Enter để chọn — như form đề nghị */}
               <div className="min-w-0">
                 <label htmlFor={`pc-fee-${target || "contract"}`} className={LABEL}>{t("pcFeeLabel")}</label>

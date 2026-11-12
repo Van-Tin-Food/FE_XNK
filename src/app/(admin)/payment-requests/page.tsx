@@ -51,7 +51,7 @@ const STATE_CARDS: ReadonlyArray<{
   { value: "completed", labelKey: "prStateCompletedCard", hintKey: "prStateCompletedHint", amountKey: "prPaidSpend", color: "text-success-600 dark:text-success-300", bg: "bg-success-50 dark:bg-success-500/10", border: "border-success-300 dark:border-success-500/40", icon: "M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3" },
 ];
 
-/** Ô lọc trạng thái đầy đủ: ngoài các thẻ chính còn có Nháp, Không duyệt và Đã hủy để tra cứu. */
+/** Danh sách trạng thái; ô lọc chỉ hiện mục đang có dữ liệu trong phạm vi các điều kiện lọc khác. */
 const STATUS_FILTER_OPTIONS: ReadonlyArray<{ value: PaymentRequestState; labelKey: string }> = [
   { value: "draft", labelKey: "prStatusDraft" },
   { value: "pending", labelKey: "prStatusPending" },
@@ -354,7 +354,7 @@ function PaymentRequestsContent() {
           <label htmlFor="pr-filter-status" className={LABEL_CLASS}>{t("status")}</label>
           <select id="pr-filter-status" value={requestState} onChange={(event) => { setRequestState(event.target.value as "" | PaymentRequestState); setPage(1); }} className={INPUT_CLASS}>
             <option value="">{t("prAllStatuses")}</option>
-            {STATUS_FILTER_OPTIONS.map((status) => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
+            {STATUS_FILTER_OPTIONS.filter((status) => (stateTotals[status.value] ?? []).some((row) => row.count > 0) || requestState === status.value).map((status) => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
           </select>
         </div>
         <div className={`${mobileShow} col-span-2 w-full md:w-48`}>

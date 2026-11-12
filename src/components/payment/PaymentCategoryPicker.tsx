@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLanguage } from "@/context/LanguageContext";
 import type { PaymentCategory } from "@/services/paymentRequestApi";
-import { costCodeName } from "@/utils/paymentRequest";
 
 // Ô chọn danh mục chi phí có cùng hành vi với ô chọn nhà cung cấp lúc tạo đơn:
 // gõ để lọc, phím mũi tên/Enter để chọn và chỉ nhận mục trong danh sách.
@@ -15,9 +14,9 @@ export function searchKey(value: unknown): string {
 }
 
 function categoryLabel(category: PaymentCategory): string {
-  return category.code.toUpperCase() === "VH"
-    ? [category.account, category.name].filter(Boolean).join(" · ")
-    : costCodeName(category.code, category.name);
+  // Mã phí (CONT, HD, BH...) chỉ phục vụ quy tắc xử lý nội bộ; người dùng chọn theo
+  // tên danh mục và số tài khoản hạch toán để tránh danh sách bị rối.
+  return [category.account, category.name].filter(Boolean).join(" · ") || category.name;
 }
 
 interface Props {
