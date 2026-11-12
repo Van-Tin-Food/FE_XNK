@@ -1,15 +1,19 @@
 "use client";
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 
+/**
+ * Nav theo bề rộng màn hình:
+ * - Dưới 1024px: ngăn kéo (drawer) mở bằng nút ☰ trên header (`isMobileOpen`).
+ * - 1024–1679px: thanh rail cố định 90px (icon + nhãn ngắn, nhóm mở menu bật ra bên cạnh), không mở rộng.
+ * - Từ 1680px (màn 24"/27"): nav đầy đủ 290px như cũ, đẩy nội dung; nút ☰ thu về rail / mở lại (`isExpanded`, mặc định mở).
+ */
 type SidebarContextType = {
-  isExpanded: boolean;
   isMobileOpen: boolean;
-  activeItem: string | null;
-  openSubmenu: string | null;
-  toggleSidebar: () => void;
+  /** Chỉ có tác dụng từ 1680px: nav đầy đủ (true) hay thanh rail (false). */
+  isExpanded: boolean;
+  toggleExpanded: () => void;
   toggleMobileSidebar: () => void;
-  setActiveItem: (item: string | null) => void;
-  toggleSubmenu: (item: string) => void;
+  closeMobileSidebar: () => void;
 };
 
 const SidebarContext = createContext<SidebarContextType | undefined>(undefined);
@@ -25,65 +29,33 @@ export const useSidebar = () => {
 export const SidebarProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const [activeItem, setActiveItem] = useState<string | null>(null);
-  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
+  const [isExpanded, setIsExpanded] = useState(true);
 
+  // Cửa sổ giãn lên từ 1024px (rail) thì đóng ngăn kéo.
   useEffect(() => {
-    const handleResize = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      if (!mobile) {
-        setIsMobileOpen(false);
-      }
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const apply = () => {
+      if (desktop.matches) setIsMobileOpen(false);
     };
-
-    handleResize();
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      window.removeEventListener("resize", handleResize);
-    };
+    desktop.addEventListener("change", apply);
+    return () => desktop.removeEventListener("change", apply);
   }, []);
 
-  // Màn laptop (1024–1679px, gồm 15,6" ở tỉ lệ 125% = 1536px): sidebar mặc định thu nhỏ (chỉ icon, 90px) để bảng / nội dung
-  // rộng hơn; từ 1680px mặc định mở rộng. Chỉ đặt lại khi tải trang hoặc khi cửa sổ đổi qua mốc 1680px — người dùng bấm
-  // nút ☰ để mở / thu tuỳ ý.
-  useEffect(() => {
-    const laptop = window.matchMedia("(max-width: 1679px)");
-    const apply = () => setIsExpanded(!laptop.matches);
-    apply();
-    laptop.addEventListener("change", apply);
-    return () => laptop.removeEventListener("change", apply);
-  }, []);
-
-  const toggleSidebar = () => {
-    setIsExpanded((prev) => !prev);
-  };
-
-  const toggleMobileSidebar = () => {
+  const toggleMobileSidebar = useCallback(() => {
     setIsMobileOpen((prev) => !prev);
-  };
+  }, []);
 
-  const toggleSubmenu = (item: string) => {
-    setOpenSubmenu((prev) => (prev === item ? null : item));
-  };
+  const closeMobileSidebar = useCallback(() => {
+    setIsMobileOpen(false);
+  }, []);
+
+  const toggleExpanded = useCallback(() => {
+    setIsExpanded((prev) => !prev);
+  }, []);
 
   return (
-    <SidebarContext.Provider
-      value={{
-        isExpanded: isMobile ? false : isExpanded,
-        isMobileOpen,
-        activeItem,
-        openSubmenu,
-        toggleSidebar,
-        toggleMobileSidebar,
-        setActiveItem,
-        toggleSubmenu,
-      }}
-    >
+    <SidebarContext.Provider value={{ isMobileOpen, isExpanded, toggleExpanded, toggleMobileSidebar, closeMobileSidebar }}>
       {children}
     </SidebarContext.Provider>
   );

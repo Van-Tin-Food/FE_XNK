@@ -14,34 +14,38 @@ interface MetricCardProps {
   onClick: () => void;
 }
 
+// Điện thoại (dưới md): thẻ nằm ngang, gọn (biểu tượng nhỏ bên trái, tên + số bên phải, không viết hoa) — thẻ thấp ~56px
+// thay vì ~190px. Từ md: thẻ dọc như cũ.
 function MetricCard({ label, value, icon, colorClass, bgClass, borderClass, isActive, onClick }: MetricCardProps) {
   return (
     <button
+      type="button"
+      aria-pressed={isActive}
       onClick={onClick}
-      className={`group relative flex flex-col gap-3 rounded-2xl border p-4 md:p-5 text-left transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 cursor-pointer w-full ${
+      className={`group relative flex w-full cursor-pointer flex-row items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all duration-200 md:flex-col md:items-start md:gap-3 md:rounded-2xl md:p-5 md:hover:-translate-y-0.5 hover:shadow-lg ${
         isActive
-          ? `${borderClass} ${bgClass} shadow-md -translate-y-0.5`
+          ? `${borderClass} ${bgClass} shadow-md md:-translate-y-0.5`
           : "border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 hover:border-gray-300 dark:hover:border-gray-700"
       }`}
     >
       {/* Active indicator */}
       {isActive && (
-        <span className={`absolute top-3 right-3 w-2 h-2 rounded-full ${colorClass.replace("text-", "bg-")} animate-pulse`} />
+        <span className={`absolute right-2 top-2 h-1.5 w-1.5 rounded-full md:right-3 md:top-3 md:h-2 md:w-2 ${colorClass.replace("text-", "bg-")} animate-pulse`} />
       )}
 
       {/* Icon */}
-      <div className={`flex items-center justify-center w-10 h-10 rounded-xl ${isActive ? bgClass : "bg-gray-100 dark:bg-gray-800"} transition-colors duration-200`}>
+      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg md:h-10 md:w-10 md:rounded-xl [&_svg]:h-4 [&_svg]:w-4 md:[&_svg]:h-5 md:[&_svg]:w-5 ${isActive ? bgClass : "bg-gray-100 dark:bg-gray-800"} transition-colors duration-200`}>
         <span className={isActive ? colorClass : "text-gray-500 dark:text-gray-400"}>
           {icon}
         </span>
       </div>
 
       {/* Content */}
-      <div>
-        <p className={`text-xs font-medium uppercase tracking-wider mb-1 ${isActive ? colorClass : "text-gray-500 dark:text-gray-400"}`}>
+      <div className="min-w-0">
+        <p className={`line-clamp-1 text-[11px] font-medium leading-tight md:mb-1 md:line-clamp-none md:text-xs md:uppercase md:tracking-wider ${isActive ? colorClass : "text-gray-500 dark:text-gray-400"}`} title={label}>
           {label}
         </p>
-        <p className={`text-2xl font-bold tabular-nums ${isActive ? colorClass : "text-gray-800 dark:text-white/90"}`}>
+        <p className={`text-lg font-bold leading-tight tabular-nums md:text-2xl ${isActive ? colorClass : "text-gray-800 dark:text-white/90"}`}>
           {value}
         </p>
       </div>
@@ -123,7 +127,7 @@ export default function ShipmentMetrics({ metrics, activeFilter, onFilterChange 
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:gap-4">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:gap-4">
       {cards.map((card) => (
         <MetricCard
           key={card.key}

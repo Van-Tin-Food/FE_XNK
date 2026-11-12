@@ -177,11 +177,11 @@ export default function DocumentSyncPage() {
   if (!canViewSync) return null;
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">{t("documentSync")}</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("documentSyncDescription")}</p>
+    <div className="mx-auto w-full max-w-6xl space-y-3 md:space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3 md:gap-4">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold sm:text-xl md:text-2xl text-gray-900 dark:text-white">{t("documentSync")}</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 max-sm:hidden">{t("documentSyncDescription")}</p>
         </div>
         {canSync && <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <button type="button" onClick={() => void runAutoSync()} disabled={autoRunning || scanning} aria-busy={autoRunning} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 transition hover:bg-brand-100 disabled:cursor-wait disabled:opacity-60 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">

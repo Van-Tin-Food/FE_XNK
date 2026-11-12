@@ -17,7 +17,7 @@ export default function AdminLayout({
 }) {
   const { user, isInitialized } = useAuth();
   const router = useRouter();
-  const { isExpanded, isMobileOpen } = useSidebar();
+  const { isExpanded } = useSidebar();
 
   useEffect(() => {
     if (isInitialized && !user?.token) {
@@ -33,12 +33,8 @@ export default function AdminLayout({
     );
   }
 
-  // Dynamic class for main content margin based on sidebar state
-  const mainContentMargin = isMobileOpen
-    ? "ml-0"
-    : isExpanded
-    ? "lg:ml-[290px]"
-    : "lg:ml-[90px]";
+  // 1024–1679px nav là thanh rail 90px; từ 1680px nav đầy đủ 290px (thu về rail bằng ☰); dưới 1024px nav là ngăn kéo đè lên.
+  const mainContentMargin = isExpanded ? "lg:ml-[90px] min-[1680px]:ml-[290px]" : "lg:ml-[90px]";
 
   return (
     // Hàng đợi upload chứng từ chạy nền nằm ở layout: chuyển trang trong app vẫn upload tiếp.

@@ -22,7 +22,9 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
 
 ## Cấu trúc
 
-- `src/app/(admin)/` — các trang có sidebar; `src/app/(full-width-pages)/(auth)/` — đăng nhập.
+- `src/app/(admin)/` — các trang có sidebar; `src/app/(full-width-pages)/(auth)/` — đăng nhập. Nav (`layout/AppSidebar.tsx`):
+  dưới 1024px là ngăn kéo; 1024–1679px là thanh rail 90px (nhóm mở menu bật ra); từ 1680px nav đầy đủ như cũ (☰ thu về rail);
+  menu khai báo một lần ở mảng `entries`.
 - `src/app/api/xnk/[...path]/route.ts` — gateway: mọi request tới BE đi qua đây (`backendApiUrl()`),
   trình duyệt không bao giờ gọi thẳng BE. `src/proxy.ts` là middleware chặn trang khi chưa đăng nhập.
 - `src/services/` — toàn bộ lời gọi API (`shipmentApi.ts`, `postgresShipmentApi.ts`, `authApi.ts`...).
@@ -125,7 +127,7 @@ tài liệu có thể chưa kịp cập nhật — luôn đối chiếu code. H�
 4. Có đủ trạng thái loading / rỗng / lỗi / không có quyền / đang gửi (khoá nút, chống bấm hai lần).
 5. **Mọi giao diện viết mới hoặc sửa phải responsive ngay trong cùng thay đổi** (không để "làm sau"):
    dùng được ở điện thoại 375px, tablet 768px, laptop 1024–1280px và màn lớn; không cuộn ngang cả trang.
-   Viết mobile-first theo mẫu sẵn có (bảng: thẻ `lg:hidden` + bảng `hidden lg:block` như `ShipmentTable`).
+   Viết mobile-first theo mẫu sẵn có (bảng: thẻ `md:hidden` chỉ ở điện thoại + bảng `hidden md:block` từ tablet, như `ShipmentTable`).
    Quy tắc chi tiết: mục 8.1 của `.claude/docs/frontend-rules.md`.
 6. Xong việc: tsc, lint, test, build; báo rõ nếu chưa bấm thử trên trình duyệt (kể cả chưa thử ở màn nhỏ).
 

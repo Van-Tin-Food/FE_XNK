@@ -503,11 +503,11 @@ export default function ActivityLogsPage() {
   if (!canViewLogs) return <div className="flex min-h-[50vh] items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>;
 
   return (
-    <section className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">{t("activityLogs")}</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{activeTab === "activity" ? t("activityLogsDetailedDescription") : t("activityLogsDescription")}</p>
+    <section className="space-y-3 md:space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:items-end sm:gap-3">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold sm:text-xl md:text-2xl text-gray-800 dark:text-white/90">{t("activityLogs")}</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 max-sm:hidden">{activeTab === "activity" ? t("activityLogsDetailedDescription") : t("activityLogsDescription")}</p>
         </div>
         <button type="button" onClick={refresh} disabled={loading} className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">{loading ? t("loading") : t("refreshData")}</button>
       </div>

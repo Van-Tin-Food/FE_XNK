@@ -731,13 +731,13 @@ function databasePackageCountOrNull(value: unknown): number | null {
   return parsed;
 }
 
-// Bảng con trong modal: dưới 1024px mỗi dòng hiển thị thành thẻ (nhãn cột lấy từ data-label của ô)
-// để không phải cuộn ngang; từ lg trở lên là bảng bình thường.
-const STACK_TABLE = "max-lg:block";
-const STACK_HEAD = "max-lg:hidden";
-const STACK_BODY = "max-lg:block max-lg:space-y-3 max-lg:divide-y-0 max-lg:p-3";
-const STACK_ROW = "max-lg:block max-lg:rounded-xl max-lg:border max-lg:border-gray-200 max-lg:px-3 max-lg:py-1.5 dark:max-lg:border-gray-700";
-const STACK_CELL = "max-lg:grid max-lg:grid-cols-[6.5rem_minmax(0,1fr)] max-lg:items-center max-lg:gap-2 max-lg:px-0 max-lg:py-1.5 max-lg:before:text-[11px] max-lg:before:font-semibold max-lg:before:uppercase max-lg:before:tracking-wide max-lg:before:text-gray-400 max-lg:before:content-[attr(data-label)]";
+// Bảng con trong modal: dưới 768px (điện thoại) mỗi dòng hiển thị thành thẻ (nhãn cột lấy từ data-label của ô)
+// để không phải cuộn ngang; từ md (tablet) trở lên là bảng bình thường, thiếu chỗ thì cuộn ngang trong khung.
+const STACK_TABLE = "max-md:block";
+const STACK_HEAD = "max-md:hidden";
+const STACK_BODY = "max-md:block max-md:space-y-3 max-md:divide-y-0 max-md:p-3";
+const STACK_ROW = "max-md:block max-md:rounded-xl max-md:border max-md:border-gray-200 max-md:px-3 max-md:py-1.5 dark:max-md:border-gray-700";
+const STACK_CELL = "max-md:grid max-md:grid-cols-[6.5rem_minmax(0,1fr)] max-md:items-center max-md:gap-2 max-md:px-0 max-md:py-1.5 max-md:before:text-[11px] max-md:before:font-semibold max-md:before:uppercase max-md:before:tracking-wide max-md:before:text-gray-400 max-md:before:content-[attr(data-label)]";
 
 function PurchaseDetailsTable({
   group,
@@ -788,8 +788,8 @@ function PurchaseDetailsTable({
         </div>
         {editing && <button type="button" onClick={onAddRow} className="ml-auto shrink-0 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 dark:border-brand-500/30 dark:bg-gray-900 dark:text-brand-300">{translate("addRow")}</button>}
       </div>
-      <div className="lg:overflow-x-auto">
-        <table className={`w-full table-fixed text-left lg:min-w-[900px] xl:min-w-0 ${STACK_TABLE}`}>
+      <div className="custom-scrollbar md:overflow-x-auto">
+        <table className={`w-full table-fixed text-left md:min-w-[900px] ${STACK_TABLE}`}>
           <colgroup>
             <col className="w-[5%]" />
             <col className={showAmounts ? "w-[21%]" : "w-[29%]"} />
@@ -889,7 +889,7 @@ function PurchaseDetailsTable({
               </tr>
               );
             })}
-            {tableRows.length === 0 && <tr className="max-lg:block"><td colSpan={showAmounts ? 7 : 5} className="px-4 py-8 text-center text-sm text-gray-400 max-lg:block">{translate("noPurchaseDetails")}</td></tr>}
+            {tableRows.length === 0 && <tr className="max-md:block"><td colSpan={showAmounts ? 7 : 5} className="px-4 py-8 text-center text-sm text-gray-400 max-md:block">{translate("noPurchaseDetails")}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -956,8 +956,8 @@ function ContainerCargoDetailsTable({
           </button>
         )}
       </div>
-      <div className="lg:overflow-x-auto">
-        <table className={`w-full text-left lg:min-w-[900px] ${STACK_TABLE}`}>
+      <div className="custom-scrollbar md:overflow-x-auto">
+        <table className={`w-full text-left md:min-w-[900px] ${STACK_TABLE}`}>
           <thead className={`bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400 ${STACK_HEAD}`}>
             <tr>
               <th className="px-4 py-3">#</th>
@@ -978,7 +978,7 @@ function ContainerCargoDetailsTable({
                   <td data-label={translate("billNumber")} className={`break-all px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200 ${STACK_CELL}`}>{selectedContainer?.billNumber || "—"}</td>
                   <td data-label={translate("containerCode")} className={`px-4 py-3 ${STACK_CELL}`}>
                     {editing ? (
-                      <select value={detail.id_bl_container} onChange={(event) => onChange(detail.id_chi_tiet_container, "id_bl_container", event.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-sm lg:w-auto lg:min-w-40 text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+                      <select value={detail.id_bl_container} onChange={(event) => onChange(detail.id_chi_tiet_container, "id_bl_container", event.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-sm md:w-auto md:min-w-40 text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
                         <option value="">{translate("selectContainer")}</option>
                         {containers.map((container) => <option key={container.id_bl_container} value={container.id_bl_container}>{container.ma_container}</option>)}
                       </select>
@@ -991,7 +991,7 @@ function ContainerCargoDetailsTable({
                         onChange={(event) => {
                           onChange(detail.id_chi_tiet_container, "id_item_code", event.target.value);
                         }}
-                        className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-sm lg:w-auto lg:min-w-64 text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                        className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 text-sm md:w-auto md:min-w-64 text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                       >
                         <option value="">{translate("selectProduct")} / {translate("selectItemCode")}</option>
                         {itemOptions.map(({ item, purchaseDetail }) => (
@@ -1011,12 +1011,12 @@ function ContainerCargoDetailsTable({
                 </tr>
               );
             })}
-            {details.length === 0 && <tr className="max-lg:block"><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400 max-lg:block">{translate("noContainerCargo")}</td></tr>}
+            {details.length === 0 && <tr className="max-md:block"><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400 max-md:block">{translate("noContainerCargo")}</td></tr>}
           </tbody>
-          <tfoot className="border-t border-gray-200 bg-gray-50/80 max-lg:block dark:border-gray-700 dark:bg-gray-900/60">
-            <tr className="max-lg:block">
-              <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 max-lg:block max-lg:pb-0 max-lg:text-left dark:text-gray-400">{translate("containerPackageComparison")}</td>
-              <td className={`px-4 py-3 text-sm font-bold max-lg:block ${allocationPending ? "text-gray-500 dark:text-gray-400" : packagesMatch ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400"}`}>
+          <tfoot className="border-t border-gray-200 bg-gray-50/80 max-md:block dark:border-gray-700 dark:bg-gray-900/60">
+            <tr className="max-md:block">
+              <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 max-md:block max-md:pb-0 max-md:text-left dark:text-gray-400">{translate("containerPackageComparison")}</td>
+              <td className={`px-4 py-3 text-sm font-bold max-md:block ${allocationPending ? "text-gray-500 dark:text-gray-400" : packagesMatch ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400"}`}>
                 {formatPackageQuantity(allocatedPackages)} / {formatPackageQuantity(expectedPackages)} {allocationPending ? translate("quantityNotAllocated") : packagesMatch ? translate("quantityMatched") : translate("quantityNotMatched")}
               </td>
             </tr>
@@ -3743,8 +3743,8 @@ export default function ShipmentDetailView({ shipment, onBack, onRefresh }: Ship
 
         {currentTab ==="details" && (
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-sm font-semibold text-gray-800 dark:text-white">{t("shipmentDetails")}</p>
                 <p className="mt-1 text-xs text-gray-400">{t("summarySheetFields")}</p>
               </div>

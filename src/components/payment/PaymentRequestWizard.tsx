@@ -1051,7 +1051,7 @@ export default function PaymentRequestWizard({ editing, onSaved, onCancel }: Pro
             <ul className="mt-3 divide-y divide-gray-100 border-y border-gray-100 dark:divide-gray-800 dark:border-gray-800">
               {chosenLines.map((line) => <CostLine key={line.key} name={line.name} note={line.note} target={line.target} amount={money(line.amount)} vatLine={line.vatLine} />)}
             </ul>
-            <div className="mt-2 flex items-center justify-between gap-3">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <span className="text-sm text-gray-600 dark:text-gray-300">{t("prTotal")} · {t("prCostCount", { count: costCount })}</span>
               <span className="text-lg font-bold tabular-nums text-gray-900 dark:text-white">{money(total)}</span>
             </div>

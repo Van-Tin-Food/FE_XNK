@@ -379,24 +379,26 @@ export default function ShipmentDashboard() {
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-5">
-      <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm font-medium text-blue-600 shadow-sm dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+    // Điện thoại: khoảng cách giữa các khối, thông báo, tiêu đề gọn hơn (bỏ dòng mô tả) để thấy danh sách sớm hơn.
+    <div className="flex min-w-0 flex-col gap-3 md:gap-5">
+      <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs font-medium md:px-4 md:py-3 md:text-sm text-blue-600 shadow-sm dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
         {t("etaDataNotice")}
       </div>
 
       {/* Page title */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+      {/* Điện thoại: nút Tạo đơn / Đang tải xuống dòng dưới tiêu đề khi không đủ chỗ. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 md:items-start md:gap-3">
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-gray-900 dark:text-white md:text-xl">
             {t("dashboardTitle")}
           </h1>
-          <p className="text-sm text-gray-400 mt-0.5">
+          <p className="mt-0.5 text-sm text-gray-400 max-sm:hidden">
             {t("dashboardSubtitle")}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 md:gap-3">
         {canCreateShipment && (
-          <Link href={CREATE_SHIPMENT_PATH} onClick={markShipmentListRestore} className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600">
+          <Link href={CREATE_SHIPMENT_PATH} onClick={markShipmentListRestore} className="inline-flex min-h-9 items-center whitespace-nowrap rounded-xl bg-brand-500 px-3 py-1.5 text-xs md:min-h-10 md:px-4 md:py-2 md:text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600">
             {t("createShipment")}
           </Link>
         )}

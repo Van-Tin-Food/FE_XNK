@@ -133,14 +133,24 @@ trước, mobile sau".
 
 **Breakpoint** (khai báo ở `src/app/globals.css`, dùng đúng tên này):
 `2xsm` 375px · `xsm` 425px · `sm` 640px · `md` 768px · `lg` 1024px · `xl` 1280px · `2xl` 1536px · `3xl` 2000px.
-Sidebar chỉ chiếm chỗ từ `lg` (`lg:ml-[290px]` / `lg:ml-[90px]`); dưới `lg` nội dung dùng toàn bộ chiều ngang.
+Nav (`AppSidebar`): dưới `lg` là ngăn kéo (nút ☰); 1024–1679px là thanh rail cố định 90px (icon + nhãn ngắn `navShort*`, mục có
+trang con bấm thì menu bật ra bên phải), nội dung `lg:ml-[90px]`; từ 1680px (màn 24"/27") nav đầy đủ 290px như cũ, ☰ thu về rail
+(`isExpanded`). Mục menu mới: thêm vào mảng `entries` trong `AppSidebar` (một nguồn cho cả rail và danh sách đầy đủ), kèm nhãn ngắn vi/en.
 
 **Cách viết**
 
 - Mobile-first: class không tiền tố là giao diện điện thoại (từ 360px), thêm `sm:` / `md:` / `lg:` / `xl:` cho màn lớn hơn.
 - Không để trang cuộn ngang. Chỉ vùng bảng được cuộn ngang, và phải bọc `overflow-x-auto custom-scrollbar`.
-- **Bảng dữ liệu**: theo mẫu `ShipmentTable` — dưới `lg` hiện danh sách thẻ (`lg:hidden`), từ `lg` hiện bảng
-  (`hidden lg:block`). Bảng phụ nhỏ trong modal có thể chỉ bọc `overflow-x-auto` + `min-w-[...]`.
+- **Bảng dữ liệu**: theo mẫu `ShipmentTable` — chỉ điện thoại (dưới `md`, 768px) hiện danh sách thẻ (`md:hidden`); từ tablet
+  (`md`) hiện bảng giống laptop (`hidden md:block`), bọc `overflow-x-auto custom-scrollbar` + `min-w-[...]` để thiếu chỗ thì
+  cuộn ngang trong khung bảng, không chuyển thành thẻ. Bảng nhiều cột (như `ShipmentTable`): khi khung hẹp thì chuyển **dạng
+  gọn** — gộp thông tin phụ xuống dưới cột chính (vd. `@max-[1140px]:hidden` / `hidden @max-[1140px]:block`) để vừa khung, tránh cuộn ngang
+  (trên tablet cảm ứng không thấy thanh cuộn, trông như mất cột). Đo theo bề rộng khung (`@container`), không theo `xl:`/`2xl:`.
+  Bảng phụ nhỏ trong modal có thể chỉ bọc `overflow-x-auto` + `min-w-[...]`.
+- **Bộ lọc trang danh sách ở điện thoại**: chỉ hiện ô tìm kiếm + nút `MobileFilterToggle` (components/common, có số bộ lọc đang
+  bật); các ô lọc khác thêm `max-md:hidden` khi đóng, xếp lưới 2 cột khi mở (mẫu: `ShipmentFilters`, trang payment-requests).
+  Phần đầu trang ở điện thoại: tiêu đề `text-lg`, ẩn dòng mô tả chung (`max-sm:hidden`), nút chính cùng hàng tiêu đề; thẻ số liệu
+  nằm ngang, gọn (`ShipmentMetrics`).
 - **Lưới / form / bộ lọc**: `grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`; hàng bộ lọc
   `flex flex-col gap-3 md:flex-row md:flex-wrap`, ô nhập `w-full md:w-44` (xem `ShipmentFilters`).
 - **Modal / panel**: `w-full max-w-*`, có lề ở màn nhỏ, `max-h-[90vh] overflow-y-auto`; nhóm nút

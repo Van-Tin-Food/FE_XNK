@@ -25,7 +25,7 @@ TypeScript/lint/build hiển nhiên; các vấn đề khác liệt kê để ng�
    - **Responsive** (mục 8.1): với mọi file `.tsx` đã đổi, rà phần giao diện mới/sửa:
      - `grep -nE "w-\[[0-9]+px\]|min-w-\[[0-9]+px\]|h-\[[0-9]+px\]"` — kích thước cố định phải có `max-w`/`w-full`,
        biến thể breakpoint, hoặc nằm trong vùng `overflow-x-auto`.
-     - Bảng mới có dạng thẻ dưới `lg` hoặc bọc `overflow-x-auto`; lưới/flex nhiều cột có bản một cột ở mobile
+     - Bảng mới có dạng thẻ chỉ dưới `md` (điện thoại), từ `md` là bảng bọc `overflow-x-auto`; lưới/flex nhiều cột có bản một cột ở mobile
        (`grid-cols-1`, `flex-col` rồi mới `sm:`/`md:`/`lg:`).
      - Phần tử con trong flex chứa chữ dài có `min-w-0` + `truncate`/`break-words`.
      - Ghi rõ đã thử ở 375 / 768 / 1024 / 1280px hay chưa.

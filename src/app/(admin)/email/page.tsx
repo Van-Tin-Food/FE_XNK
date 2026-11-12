@@ -290,10 +290,10 @@ export default function EmailPage() {
   if (!canView) return null;
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-3 md:space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">{t("emailPageTitle")}</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("emailPageDescription")}</p>
+        <h1 className="text-lg font-semibold sm:text-xl md:text-2xl text-gray-800 dark:text-white/90">{t("emailPageTitle")}</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 max-sm:hidden">{t("emailPageDescription")}</p>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("emailMaxRecipients", { count: MAX_EMAIL_RECIPIENTS })}</p>
       </div>
       {job && <EmailSendProgress job={job} connectionLost={connectionLost} onClose={closeJob} onReselectFailed={reselectFailed} />}

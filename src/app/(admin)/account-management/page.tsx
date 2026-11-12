@@ -214,10 +214,10 @@ export default function AccountManagementPage() {
   }
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-3 md:space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">{t("accountManagement")}</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+        <h1 className="text-lg font-semibold sm:text-xl md:text-2xl text-gray-800 dark:text-white/90">{t("accountManagement")}</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 max-sm:hidden">
           {t("accountManagementDescription")}
         </p>
       </div>
@@ -230,9 +230,9 @@ export default function AccountManagementPage() {
       </div>
 
       {activeTab === "users" && (
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)] lg:items-start">
-          {/* Màn nhỏ: chọn tài khoản thì chỉ hiện phần quyền, có nút quay lại danh sách. */}
-          <div className={selected ? "hidden lg:block" : ""}>
+        <div className="@container"><div className="grid gap-5 @min-[700px]:grid-cols-[minmax(0,280px)_minmax(0,1fr)] @min-[700px]:items-start @min-[1000px]:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+          {/* Khung hẹp dưới 700px (điện thoại; đo theo khung nên mở nav cũng tính): chọn tài khoản thì chỉ hiện phần quyền, có nút quay lại. */}
+          <div className={selected ? "hidden @min-[700px]:block" : ""}>
             <UserList
               users={displayedUsers}
               total={filteredUsers.length}
@@ -252,7 +252,7 @@ export default function AccountManagementPage() {
               onSelect={selectUser}
             />
           </div>
-          <div className={selected ? "" : "hidden lg:block"}>
+          <div className={selected ? "" : "hidden @min-[700px]:block"}>
             {selected ? (
               <UserPermissionPanel
                 account={selected}
@@ -280,7 +280,7 @@ export default function AccountManagementPage() {
               </div>
             )}
           </div>
-        </div>
+        </div></div>
       )}
       {activeTab === "register" && canEditUsers && <RegisterPanel currentUser={user} roleOptions={[...roleOptions]} onCreated={() => void loadUsers()} />}
       {activeTab === "password" && canEditUsers && <PasswordPanel currentUser={user} />}
@@ -318,7 +318,7 @@ function UserPermissionPanel({ account, roleOptions, draftRole, draftEmail, draf
     <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
       <div className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-start sm:justify-between dark:border-gray-800">
         <div className="min-w-0">
-          <button type="button" onClick={onBack} className="mb-2 min-h-9 text-sm font-medium text-brand-600 hover:text-brand-700 lg:hidden dark:text-brand-400">← {t("accountList")}</button>
+          <button type="button" onClick={onBack} className="mb-2 min-h-9 text-sm font-medium text-brand-600 hover:text-brand-700 @min-[700px]:hidden dark:text-brand-400">← {t("accountList")}</button>
           <h2 className="break-words font-semibold text-gray-800 dark:text-white/90">{account.name || account.username}</h2>
           <p className="break-all text-xs text-gray-500 dark:text-gray-400">@{account.username} · #{account.id}</p>
         </div>
@@ -535,7 +535,7 @@ function RoleStandardsPanel({ roles, loading, error }: { roles: RoleStandard[]; 
       </div>
       {error ? <Feedback message={error} type="error" /> : loading ? <div className="flex min-h-64 items-center justify-center"><Spinner /></div> : (
         <>
-          <ul className="divide-y divide-gray-100 lg:hidden dark:divide-gray-800">
+          <ul className="divide-y divide-gray-100 md:hidden dark:divide-gray-800">
             {PERMISSION_FUNCTION_KEYS.map((fn) => (
               <li key={fn} className="p-4">
                 <p className="text-sm font-medium text-gray-800 dark:text-white/90">{t(`permissionFn_${fn}`)}</p>
@@ -550,7 +550,7 @@ function RoleStandardsPanel({ roles, loading, error }: { roles: RoleStandard[]; 
               </li>
             ))}
           </ul>
-          <div className="hidden overflow-x-auto custom-scrollbar lg:block">
+          <div className="hidden overflow-x-auto custom-scrollbar md:block">
             <table className="w-full min-w-[720px]">
               <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
                 <tr>

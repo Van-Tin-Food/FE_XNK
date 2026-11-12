@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import MobileFilterToggle from "@/components/common/MobileFilterToggle";
 import PaginationControls from "@/components/common/PaginationControls";
 import { BankPaidHint, PaymentStatusBadge, RedFlowBadge, formatDateTime, formatDueDate, isOverdue } from "@/components/payment/PaymentRequestParts";
 import { useAuth } from "@/context/AuthContext";
@@ -24,8 +25,9 @@ import { canCreatePaymentRequests, canOpenPaymentRequests, costCodeName, formatM
 const DEFAULT_PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 350;
 // Ô lọc cùng kiểu thanh lọc đơn hàng XNK (components/shipment/ShipmentFilters): nhãn nhỏ phía trên, ô bo tròn.
-const INPUT_CLASS = "h-10 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500 dark:focus:ring-brand-500/20";
-const LABEL_CLASS = "mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400";
+// Điện thoại: ô thấp hơn (h-9), nhãn nhỏ hơn — giống bộ lọc đơn hàng XNK (ShipmentFilters).
+const INPUT_CLASS = "h-9 md:h-10 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500 dark:focus:ring-brand-500/20";
+const LABEL_CLASS = "mb-1 block text-[11px] font-medium text-gray-500 md:mb-1.5 md:text-xs dark:text-gray-400";
 
 /**
  * Thẻ lọc trạng thái (cùng kiểu thẻ số liệu đơn hàng XNK — components/shipment/ShipmentMetrics): Tất cả / Chưa duyệt (chi
@@ -47,6 +49,17 @@ const STATE_CARDS: ReadonlyArray<{
   { value: "approved", labelKey: "prStateApprovedCard", hintKey: "prStateApprovedHint", amountKey: "prExpectedSpend", color: "text-blue-light-600 dark:text-blue-light-300", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", border: "border-blue-light-300 dark:border-blue-light-500/40", icon: "M9 12l2 2 4-4M7 3h10a2 2 0 0 1 2 2v14l-3-2-2 2-2-2-2 2-2-2-3 2V5a2 2 0 0 1 2-2z" },
   { value: "paid", labelKey: "prStatePaidCard", hintKey: "prStatePaidHint", amountKey: "prPaidSpend", color: "text-orange-600 dark:text-orange-300", bg: "bg-orange-50 dark:bg-orange-500/10", border: "border-orange-300 dark:border-orange-500/40", icon: "M3 7h18v10H3zM3 10h18M7 15h3" },
   { value: "completed", labelKey: "prStateCompletedCard", hintKey: "prStateCompletedHint", amountKey: "prPaidSpend", color: "text-success-600 dark:text-success-300", bg: "bg-success-50 dark:bg-success-500/10", border: "border-success-300 dark:border-success-500/40", icon: "M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3" },
+];
+
+/** Ô lọc trạng thái đầy đủ: ngoài các thẻ chính còn có Nháp, Không duyệt và Đã hủy để tra cứu. */
+const STATUS_FILTER_OPTIONS: ReadonlyArray<{ value: PaymentRequestState; labelKey: string }> = [
+  { value: "draft", labelKey: "prStatusDraft" },
+  { value: "pending", labelKey: "prStatusPending" },
+  { value: "approved", labelKey: "prStatusApproved" },
+  { value: "paid", labelKey: "prStatusPaid" },
+  { value: "completed", labelKey: "prStatusCompleted" },
+  { value: "rejected", labelKey: "prStatusRejected" },
+  { value: "cancelled", labelKey: "prStatusCancelled" },
 ];
 /**
  * Thời gian tạo đề nghị: tháng này / tháng trước / quý này / năm nay / tất cả / tùy chọn (từ ngày – đến ngày). Mốc ngày theo giờ
@@ -115,6 +128,8 @@ function PaymentRequestsContent() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [requestState, setRequestState] = useState<"" | PaymentRequestState>("");
   const [periodFilter, setPeriodFilter] = useState<PaymentRequestPeriod>(DEFAULT_PERIOD);
+  // Điện thoại: mở / đóng các ô lọc (nút "Bộ lọc" cạnh ô tìm kiếm).
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [customRange, setCustomRange] = useState({ from: "", to: "" });
   const [flowFilter, setFlowFilter] = useState<"" | PaymentFlow>("");
   const [stateTotals, setStateTotals] = useState<Partial<Record<PaymentRequestState, PaymentRequestStateTotal[]>>>({});
@@ -228,6 +243,9 @@ function PaymentRequestsContent() {
     };
   };
   const hasActiveFilter = Boolean(query || requesterFilter || flowFilter || periodFilter !== DEFAULT_PERIOD || requestState);
+  // Điện thoại: chỉ ô tìm kiếm + nút "Bộ lọc" (số bộ lọc đang bật, ngoài ô tìm kiếm); bấm mới mở các ô lọc còn lại.
+  const activeFilterCount = [requesterFilter, flowFilter, requestState, periodFilter !== DEFAULT_PERIOD].filter(Boolean).length;
+  const mobileShow = filtersOpen ? "" : "max-md:hidden";
   // Ngày tùy chọn: "đến ngày" trước "từ ngày" thì BE báo lỗi — chặn sớm ở ô nhập (min / max).
   const periodHint = (() => {
     const range = getPeriodRange(periodFilter, customRange);
@@ -254,16 +272,17 @@ function PaymentRequestsContent() {
   );
 
   return (
-    <div className="space-y-5 pb-20 sm:pb-24">
+    <div className="space-y-3 pb-20 sm:pb-24 md:space-y-5">
       {/* pb: chừa chỗ cho nút chatbox AI nổi góc phải dưới (fixed, cao ~72–80px) để nút cuối trang không bị che. */}
-      <header className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03] sm:flex-row sm:items-center sm:justify-between sm:p-6">
+      {/* Điện thoại: tiêu đề + nút tạo cùng một hàng, bỏ dòng mô tả (giống trang đơn hàng XNK). */}
+      <header className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:gap-3 sm:rounded-2xl sm:p-6">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">{t("paymentRequests")}</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("prDescription")}</p>
+          <h1 className="text-lg font-bold text-gray-900 dark:text-white sm:text-xl">{t("paymentRequests")}</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 max-sm:hidden">{t("prDescription")}</p>
         </div>
         {canCreate && (
           <Link href="/payment-requests/new"
-            className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg bg-brand-500 px-5 text-sm font-semibold text-white hover:bg-brand-600">
+            className="inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-brand-500 px-3 text-xs font-semibold text-white hover:bg-brand-600 sm:h-11 sm:px-5 sm:text-sm">
             + {t("prCreate")}
           </Link>
         )}
@@ -271,64 +290,74 @@ function PaymentRequestsContent() {
 
       {/* Thẻ lọc trạng thái (kiểu thẻ số liệu đơn hàng XNK). Điện thoại 2 cột: lề / biểu tượng nhỏ hơn, tên trạng thái và dòng mô tả
           xuống dòng (tối đa 2) thay vì bị cắt. */}
-      <div role="group" aria-label={t("status")} className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5 xl:gap-4">
+      <div role="group" aria-label={t("status")} className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 xl:grid-cols-5 xl:gap-4">
         {STATE_CARDS.map((card) => {
           const summary = card.value ? summarizeStates([card.value]) : summarizeStates();
           const selected = requestState === card.value;
           const showAmount = card.value !== "paid" && card.value !== "completed";
           return (
             <button key={card.value || "all"} type="button" aria-pressed={selected} title={t(card.hintKey)} onClick={() => { setRequestState(card.value); setPage(1); }}
-              className={`relative flex min-h-[126px] w-full min-w-0 flex-col gap-2.5 rounded-2xl border px-3 py-3 text-left sm:gap-3 sm:px-5 sm:py-4 transition-all duration-200 hover:shadow-md ${selected
+              className={`relative flex w-full min-w-0 flex-col gap-1.5 rounded-xl border p-2.5 text-left sm:min-h-[126px] sm:gap-3 sm:rounded-2xl sm:px-5 sm:py-4 transition-all duration-200 hover:shadow-md ${selected
                 ? `${card.border} ${card.bg} shadow-sm`
                 : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700"}`}>
               {selected && <span className={`absolute right-2.5 top-2.5 h-2.5 w-2.5 sm:right-4 sm:top-4 animate-pulse rounded-full bg-current ${card.color}`} aria-hidden="true" />}
               <span className="flex min-w-0 items-center gap-2 pr-3 sm:gap-2.5 sm:pr-4">
-                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-10 sm:w-10 sm:rounded-xl transition-colors ${selected ? `${card.bg} ${card.color}` : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
+                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg [&_svg]:h-4 [&_svg]:w-4 sm:h-10 sm:[&_svg]:h-[18px] sm:[&_svg]:w-[18px] sm:w-10 sm:rounded-xl transition-colors ${selected ? `${card.bg} ${card.color}` : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={card.icon} /></svg>
                 </span>
-                <span className={`line-clamp-2 min-w-0 break-words text-xs font-semibold uppercase leading-tight tracking-wide sm:text-sm ${selected ? card.color : "text-gray-600 dark:text-gray-300"}`}>{t(card.labelKey)}</span>
+                <span className={`line-clamp-2 min-w-0 break-words text-[11px] font-semibold leading-tight sm:text-sm sm:uppercase sm:tracking-wide ${selected ? card.color : "text-gray-600 dark:text-gray-300"}`}>{t(card.labelKey)}</span>
               </span>
               <span className="flex min-w-0 items-start justify-between gap-2">
-                <span className={`text-xl font-bold leading-none tabular-nums sm:text-2xl ${selected ? card.color : "text-gray-800 dark:text-white/90"}`}>{summary.count}</span>
+                <span className={`text-lg font-bold leading-none tabular-nums sm:text-2xl ${selected ? card.color : "text-gray-800 dark:text-white/90"}`}>{summary.count}</span>
                 {showAmount && (
-                  <span className="flex min-w-0 flex-col items-end gap-0.5 text-right text-xs font-semibold leading-tight tabular-nums sm:text-sm text-gray-700 dark:text-gray-200" title={`${t(card.amountKey)}: ${summary.amount}`}>
+                  <span className="flex min-w-0 flex-col items-end gap-0.5 text-right text-[11px] font-semibold leading-tight tabular-nums sm:text-sm text-gray-700 dark:text-gray-200" title={`${t(card.amountKey)}: ${summary.amount}`}>
                     {summary.amountLines.map((amount) => <span key={amount} className="truncate">{amount}</span>)}
                   </span>
                 )}
               </span>
-              <span className="line-clamp-2 text-[11px] leading-snug text-gray-400 sm:line-clamp-1 dark:text-gray-500">{t(card.amountKey)} · {t(card.hintKey)}</span>
+              <span className="line-clamp-1 text-[11px] leading-snug text-gray-400 max-sm:hidden dark:text-gray-500">{t(card.amountKey)} · {t(card.hintKey)}</span>
             </button>
           );
         })}
       </div>
 
       {/* Thanh lọc (kiểu thanh lọc đơn hàng XNK) */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3.5 dark:border-gray-800 dark:bg-gray-900 md:flex-row md:flex-wrap md:items-end">
-        <div className="min-w-0 md:w-72 md:flex-none">
-          <label htmlFor="pr-filter-search" className={LABEL_CLASS}>{t("prSearchLabel")}</label>
-          <div className="relative">
+      <div className="grid grid-cols-2 gap-2 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900 md:flex md:flex-row md:flex-wrap md:items-end md:gap-3 md:rounded-2xl md:px-4 md:py-3.5">
+        <div className="col-span-2 min-w-0 md:w-72 md:flex-none">
+          <label htmlFor="pr-filter-search" className={`${LABEL_CLASS} max-md:sr-only`}>{t("prSearchLabel")}</label>
+          <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
             <input id="pr-filter-search" type="search" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("prSearch")}
               className={`${INPUT_CLASS} pl-9`} />
           </div>
+          <MobileFilterToggle open={filtersOpen} onToggle={() => setFiltersOpen((open) => !open)} activeCount={activeFilterCount} controls="pr-filter-panel" />
+          </div>
         </div>
-        <div className="w-full md:w-52">
+        <div id="pr-filter-panel" className={`${mobileShow} col-span-2 w-full md:w-52`}>
           <label htmlFor="pr-filter-requester" className={LABEL_CLASS}>{t("prCreator")}</label>
           <select id="pr-filter-requester" value={requesterFilter} onChange={(event) => { setRequesterFilter(event.target.value); setPage(1); }} className={INPUT_CLASS}>
             <option value="">{t("prAllRequesters")}</option>
             {requesters.map((requester) => <option key={requester.id} value={requester.id}>{requester.username ? `${requester.name} · @${requester.username}` : requester.name}</option>)}
           </select>
         </div>
-        <div className="w-full md:w-44">
+        <div className={`${mobileShow} min-w-0 w-full md:w-44`}>
           <label htmlFor="pr-filter-flow" className={LABEL_CLASS}>{t("prFlowFilter")}</label>
           <select id="pr-filter-flow" value={flowFilter} onChange={(event) => { setFlowFilter(event.target.value as "" | PaymentFlow); setPage(1); }} className={INPUT_CLASS}>
             <option value="">{t("prAllFlows")} ({flowCountTotal})</option>
             {availableFlows.map((flow) => <option key={flow} value={flow}>{t(`prFlow_${flow}`)} ({flowCounts[flow] ?? 0})</option>)}
           </select>
         </div>
-        <div className="w-full md:w-48">
+        <div className={`${mobileShow} min-w-0 w-full md:w-40`}>
+          <label htmlFor="pr-filter-status" className={LABEL_CLASS}>{t("status")}</label>
+          <select id="pr-filter-status" value={requestState} onChange={(event) => { setRequestState(event.target.value as "" | PaymentRequestState); setPage(1); }} className={INPUT_CLASS}>
+            <option value="">{t("prAllStatuses")}</option>
+            {STATUS_FILTER_OPTIONS.map((status) => <option key={status.value} value={status.value}>{t(status.labelKey)}</option>)}
+          </select>
+        </div>
+        <div className={`${mobileShow} col-span-2 w-full md:w-48`}>
           <label htmlFor="pr-filter-period" className={LABEL_CLASS}>
             {t("prPeriodFilter")}
             {periodHint && <span className="ml-1 font-normal text-gray-400">· {periodHint}</span>}
@@ -338,7 +367,7 @@ function PaymentRequestsContent() {
           </select>
         </div>
         {periodFilter === "custom" && (
-          <div className="grid w-full grid-cols-2 gap-2 md:w-auto">
+          <div className={`${mobileShow} col-span-2 grid w-full grid-cols-2 gap-2 md:w-auto`}>
             <div className="min-w-0 md:w-40">
               <label htmlFor="pr-filter-from" className={LABEL_CLASS}>{t("prPeriodFrom")}</label>
               <input id="pr-filter-from" type="date" value={customRange.from} max={customRange.to || undefined}
@@ -353,7 +382,7 @@ function PaymentRequestsContent() {
         )}
         {hasActiveFilter && (
           <button type="button" onClick={clearFilters}
-            className="h-10 shrink-0 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.03]">
+            className="col-span-2 h-9 shrink-0 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-600 md:h-10 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.03]">
             {t("prClearFilters")}
           </button>
         )}
@@ -379,12 +408,12 @@ function PaymentRequestsContent() {
           <p className="py-16 text-center text-sm text-gray-500">{t("prEmpty")}</p>
         ) : (
           <div aria-busy={loading} className={loading ? "opacity-60 transition-opacity" : "transition-opacity"}>
-            {/* Điện thoại / tablet: thẻ */}
-            <ul className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 lg:hidden">
+            {/* Điện thoại (dưới 768px): thẻ */}
+            <ul className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 md:hidden">
               {requests.map((request) => (
                 <li key={request.id}>
                   <button type="button" onClick={() => openDetail(request.id)}
-                    className="flex h-full w-full min-w-0 flex-col gap-2 rounded-xl border border-gray-200 p-4 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/30 dark:border-gray-700 dark:hover:border-brand-500/50">
+                    className="flex h-full w-full min-w-0 flex-col gap-1.5 rounded-xl border border-gray-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/30 dark:border-gray-700 dark:hover:border-brand-500/50">
                     <span className="flex w-full items-center justify-between gap-2">
                       <span className="font-mono text-sm font-semibold text-brand-600 dark:text-brand-400">{request.id}</span>
                       <PaymentStatusBadge status={request.status} draft={!request.sent} />
@@ -399,7 +428,7 @@ function PaymentRequestsContent() {
                       <span className="truncate">{request.creatorName} · {t("prCostCount", { count: request.costCount })}</span>
                       <span className={dueClass(request)}>{t("prDueDate")}: {formatDueDate(request.dueDate)}</span>
                     </span>
-                    <span className="w-full space-y-0.5 border-t border-gray-100 pt-2 text-left text-xs text-gray-500 dark:border-gray-800">
+                    <span className="w-full space-y-0.5 border-t border-gray-100 pt-1.5 text-left text-[11px] text-gray-500 dark:border-gray-800">
                       <span className="block truncate" title={costGroups(request).join(", ")}>{t("prCostTypeLabel")}: {costGroups(request).join(", ") || "—"}</span>
                       <span className="block truncate" title={costTargetText(request)}>{t("prContractNumber")}: {costTargets(request).contracts.join(", ") || "—"}</span>
                       <span className="block truncate text-gray-400" title={costTargetText(request)}>{t("prContainer")}: {costTargets(request).containers.join(", ") || "—"}</span>
@@ -410,8 +439,8 @@ function PaymentRequestsContent() {
               ))}
             </ul>
 
-            {/* Màn lớn: bảng */}
-            <div className="hidden overflow-x-auto custom-scrollbar lg:block">
+            {/* Từ tablet (768px): bảng, thiếu chỗ thì cuộn ngang trong khung */}
+            <div className="hidden overflow-x-auto custom-scrollbar md:block">
               <table className="w-full min-w-[1280px] table-fixed text-left">
                 <thead className="bg-gray-50 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:bg-gray-900 dark:text-gray-400">
                   <tr>

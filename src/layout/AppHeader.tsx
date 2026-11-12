@@ -20,14 +20,12 @@ const AppHeader: React.FC = () => {
   const canViewPaymentRequests = can("paymentRequests");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
 
-  const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
+  const { isMobileOpen, toggleMobileSidebar, toggleExpanded } = useSidebar();
 
+  // Nút ☰: dưới 1024px mở ngăn kéo nav; 1024–1679px ẩn (nav là thanh rail); từ 1680px mở rộng / thu gọn nav.
   const handleToggle = () => {
-    if (window.innerWidth >= 1024) {
-      toggleSidebar();
-    } else {
-      toggleMobileSidebar();
-    }
+    if (window.matchMedia("(min-width: 1680px)").matches) toggleExpanded();
+    else toggleMobileSidebar();
   };
 
   const toggleApplicationMenu = () => {
@@ -55,7 +53,7 @@ const AppHeader: React.FC = () => {
       <div className="flex flex-col items-center justify-between grow lg:flex-row lg:px-6">
         <div className="flex items-center justify-between w-full gap-2 px-3 py-3 border-b border-gray-200 dark:border-gray-800 sm:gap-4 lg:justify-normal lg:border-b-0 lg:px-0 lg:py-4">
           <button
-            className="items-center justify-center w-10 h-10 text-gray-500 border-gray-200 rounded-lg z-99999 dark:border-gray-800 lg:flex dark:text-gray-400 lg:h-11 lg:w-11 lg:border"
+            className="flex items-center justify-center w-10 h-10 text-gray-500 border-gray-200 rounded-lg z-99999 dark:border-gray-800 dark:text-gray-400 lg:hidden min-[1680px]:flex min-[1680px]:h-11 min-[1680px]:w-11 min-[1680px]:border"
             onClick={handleToggle}
             aria-label="Toggle Sidebar"
           >

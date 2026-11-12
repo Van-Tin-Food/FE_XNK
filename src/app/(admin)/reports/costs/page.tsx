@@ -258,10 +258,10 @@ export default function CostReportPage() {
   );
 
   return (
-    <div className="space-y-5">
-      <header className={`${CARD} flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between`}>
+    <div className="space-y-3 md:space-y-5">
+      <header className={`${CARD} flex flex-col gap-3 p-3 sm:gap-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between`}>
         <div className="min-w-0">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">{t("rpTitle")}</h1>
+          <h1 className="text-lg font-bold text-gray-900 dark:text-white sm:text-xl">{t("rpTitle")}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("rpSubtitle", { month: monthLabel(month) })}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

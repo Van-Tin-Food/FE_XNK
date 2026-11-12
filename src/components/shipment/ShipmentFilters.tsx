@@ -1,8 +1,9 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import type { ShipmentFilter, ShipmentFilterStatus } from "@/types/shipment";
 import { useLanguage } from "@/context/LanguageContext";
 import SearchSuggestions from "@/components/common/SearchSuggestions";
+import MobileFilterToggle from "@/components/common/MobileFilterToggle";
 import { toDateInputValue } from "@/utils/shipmentDateFilter";
 
 interface ShipmentFiltersProps {
@@ -14,9 +15,10 @@ interface ShipmentFiltersProps {
   searchSuggestions?: string[];
 }
 
+// Điện thoại: ô thấp hơn (py-1.5), nhãn nhỏ hơn; từ md giữ như cũ. Cỡ chữ ô nhập giữ text-sm.
 const inputCls =
-  "w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500 dark:focus:ring-brand-500/20";
-const labelCls = "mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400";
+  "w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 md:py-2 text-sm text-gray-800 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500 dark:focus:ring-brand-500/20";
+const labelCls = "mb-1 block text-[11px] font-medium text-gray-500 md:mb-1.5 md:text-xs dark:text-gray-400";
 
 function CalendarIcon() {
   return (
@@ -38,6 +40,9 @@ export default function ShipmentFilters({
   searchSuggestions = [],
 }: ShipmentFiltersProps) {
   const { t } = useLanguage();
+  // Điện thoại (dưới md): chỉ hiện ô tìm kiếm + nút "Bộ lọc"; bấm nút mới mở các bộ lọc còn lại. Từ md luôn hiện đủ.
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const mobileShow = mobileOpen ? "" : "max-md:hidden";
   const statusOptions: { value: ShipmentFilterStatus | "all"; label: string }[] = [
     { value: "all", label: t("allStatuses") },
     { value: "shipping", label: t("shipping") },
@@ -85,6 +90,15 @@ export default function ShipmentFilters({
     onChange({ status: "all", search: "", dateFrom: "", dateTo: "", dateField: "eta", supplier: undefined, port: undefined, vessel: undefined });
   };
 
+  // Số bộ lọc đang bật (ngoài ô tìm kiếm) — hiện trên nút "Bộ lọc" ở điện thoại khi bộ lọc đang đóng.
+  const activeFilterCount = [
+    filter.status && filter.status !== "all",
+    filter.supplier,
+    filter.port,
+    filter.vessel,
+    filter.dateFrom || filter.dateTo,
+  ].filter(Boolean).length;
+
   const hasActiveFilter =
     filter.search ||
     filter.dateFrom ||
@@ -95,13 +109,14 @@ export default function ShipmentFilters({
     filter.vessel;
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900">
-      {/* Row 1: Search + Status */}
-      <div className="order-2 flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap">
+    <div className="flex flex-col gap-2.5 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900 md:gap-3 md:px-4 md:py-4">
+      {/* Row 1: Search + Status. Điện thoại: hàng này lên đầu, các ô lọc xếp lưới 2 cột. */}
+      <div className="order-1 grid grid-cols-2 gap-2 md:order-2 md:flex md:flex-row md:flex-wrap md:items-end md:gap-3">
         {/* Search: mã đơn + tên hàng */}
-        <div className="flex-1 min-w-[200px]">
-          <label className={labelCls}>{t("search")}</label>
-          <div className="relative">
+        <div className="col-span-2 min-w-0 md:min-w-[200px] md:flex-1">
+          <label className={`${labelCls} max-md:sr-only`}>{t("search")}</label>
+          <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
             <svg
               className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
               width="16" height="16" viewBox="0 0 24 24" fill="none"
@@ -116,13 +131,16 @@ export default function ShipmentFilters({
               suggestions={searchSuggestions}
               placeholder={t("searchPlaceholder")}
               ariaLabel={t("search")}
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 text-sm text-gray-800 placeholder-gray-400 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:placeholder-gray-500 dark:focus:border-brand-500 dark:focus:ring-brand-500/20"
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 py-1.5 pl-9 pr-3 text-sm md:py-2 text-gray-800 placeholder-gray-400 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:placeholder-gray-500 dark:focus:border-brand-500 dark:focus:ring-brand-500/20"
             />
+          </div>
+          {/* Nút Bộ lọc: chỉ ở điện thoại. */}
+          <MobileFilterToggle open={mobileOpen} onToggle={() => setMobileOpen((open) => !open)} activeCount={activeFilterCount} controls="shipment-filter-panel shipment-filter-dates" />
           </div>
         </div>
 
         {/* Trạng thái */}
-        <div className="w-full md:w-48">
+        <div id="shipment-filter-panel" className={`${mobileShow} col-span-2 w-full md:w-48`}>
           <label className={labelCls}>{t("status")}</label>
           <select id="filter-status" value={filter.status || "all"} onChange={handleStatus} className={inputCls}>
             {statusOptions.map(opt => (
@@ -132,7 +150,7 @@ export default function ShipmentFilters({
         </div>
 
         {/* Nhà cung cấp */}
-        <div className="w-full md:w-44">
+        <div className={`${mobileShow} col-span-2 w-full md:w-44`}>
           <label className={labelCls}>{t("supplier")}</label>
           <select id="filter-supplier" value={filter.supplier || ""} onChange={handleSupplier} className={inputCls}>
             <option value="">{t("all")}</option>
@@ -143,7 +161,7 @@ export default function ShipmentFilters({
         </div>
 
         {/* Cảng */}
-        <div className="w-full md:w-36">
+        <div className={`${mobileShow} min-w-0 w-full md:w-36`}>
           <label className={labelCls}>{t("port")}</label>
           <select id="filter-port" value={filter.port || ""} onChange={handlePort} className={inputCls}>
             <option value="">{t("all")}</option>
@@ -154,7 +172,7 @@ export default function ShipmentFilters({
         </div>
 
         {/* Hãng tàu */}
-        <div className="w-full md:w-36">
+        <div className={`${mobileShow} min-w-0 w-full md:w-36`}>
           <label className={labelCls}>{t("carrier")}</label>
           <select id="filter-vessel" value={filter.vessel || ""} onChange={handleVessel} className={inputCls}>
             <option value="">{t("all")}</option>
@@ -165,16 +183,16 @@ export default function ShipmentFilters({
         </div>
       </div>
 
-      {/* Row 2: Date range */}
-      <div className="order-1 flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap">
+      {/* Row 2: Date range. Điện thoại: dưới các ô lọc, chỉ hiện khi mở Bộ lọc; ô "Lọc theo: ETA" (cố định) ẩn. */}
+      <div id="shipment-filter-dates" className={`${mobileShow} order-2 grid grid-cols-2 gap-2 md:order-1 md:flex md:flex-row md:flex-wrap md:items-end md:gap-3`}>
         {/* Lọc theo */}
-        <div className="w-full md:w-28">
+        <div className="hidden w-full md:block md:w-28">
           <label className={labelCls}>{t("filterBy")}</label>
           <div id="filter-datefield" className={inputCls}>ETA</div>
         </div>
 
         {/* Từ ngày */}
-        <div className="w-full md:w-44">
+        <div className="min-w-0 w-full md:w-44">
           <label className={labelCls}>{t("fromDate")}</label>
           <div className="relative">
             <input
@@ -196,7 +214,7 @@ export default function ShipmentFilters({
         </div>
 
         {/* Đến ngày */}
-        <div className="w-full md:w-44">
+        <div className="min-w-0 w-full md:w-44">
           <label className={labelCls}>{t("toDate")}</label>
           <div className="relative">
             <input
@@ -222,7 +240,7 @@ export default function ShipmentFilters({
           <button
             id="filter-clear"
             onClick={handleClear}
-            className="flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-500 hover:bg-red-100 hover:text-red-600 dark:border-red-800/40 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 transition-colors"
+            className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-500 hover:bg-red-100 hover:text-red-600 dark:border-red-800/40 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20 transition-colors"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"/>
@@ -233,7 +251,7 @@ export default function ShipmentFilters({
         )}
 
         {/* Nhanh */}
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="col-span-2 flex flex-wrap items-center gap-2 md:ml-auto">
           <span className="text-xs text-gray-400">{t("quick")}</span>
           {(["today", "week", "month"] as const).map((p) => {
             const now = new Date();
@@ -244,7 +262,7 @@ export default function ShipmentFilters({
               <button
                 key={p}
                 onClick={() => onChange({ ...filter, dateFrom: fromDate, dateTo: toDateInputValue(toDate), dateField: filter.dateField || "eta" })}
-                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-brand-50 hover:border-brand-200 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400 transition-colors"
+                className="min-h-8 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-brand-50 hover:border-brand-200 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400 transition-colors"
               >
                 {p === "today" ? t("today") : p === "week" ? t("sevenDays") : t("thirtyDays")}
               </button>
