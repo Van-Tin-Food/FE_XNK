@@ -7,7 +7,20 @@ const CATALOG_KEYS: Record<string, string> = {
   "nha-cung-cap": "supplierLower",
   "hang-tau": "carrierLower",
   kho: "warehouseLower",
+  // Log BE ghi theo tên bảng ("MasterData/nha_cung_cap") hoặc tên màn ("MasterData/PaymentCategory").
+  nha_cung_cap: "supplierLower",
+  hang_tau: "carrierLower",
+  PaymentCategory: "paymentCategories",
 };
+
+function orderDetailTab(tab: string | undefined, t: Translate): string | undefined {
+  if (tab === "Documents") return t("locDocuments");
+  if (tab === "Details") return t("locOrderInfo");
+  if (tab === "ReturnItem") return t("locTransport");
+  if (tab === "Costs") return t("locCosts");
+  if (tab === "Overview") return t("locOverview");
+  return tab;
+}
 
 function capitalize(value: string): string {
   return value ? value.charAt(0).toLocaleUpperCase("vi") + value.slice(1) : value;
@@ -26,15 +39,27 @@ export function activityLocationParts(location: string, t: Translate): string[] 
   switch (head) {
     case "ShipmentDashboard":
       return [t("locHome"), t("locCreateShipment")];
-    case "ShipmentDetailModal": {
-      const tab = rest[0];
-      const tabLabel = tab === "Documents" ? t("locDocuments")
-        : tab === "Details" ? t("locOrderInfo")
-          : tab === "ReturnItem" ? t("locTransport")
-          : tab === "Costs" ? t("locCosts")
-            : tab;
+    case "ShipmentDetailModal":
+    case "ShipmentDetail": {
+      const tabLabel = orderDetailTab(rest[0], t);
       return [t("locHome"), t("locOrderDetail"), ...(tabLabel ? [tabLabel] : []), ...tail];
     }
+    case "MasterData": {
+      const catalogKey = CATALOG_KEYS[rest[0]];
+      return [t("masterDataManagement"), ...(rest[0] ? [catalogKey ? capitalize(t(catalogKey)) : rest[0]] : [])];
+    }
+    case "MyCosts":
+      return [t("myCosts")];
+    case "CostReport":
+      return [t("costPayableReport")];
+    case "BankTransactions":
+      return [t("bankTransactionsMenu")];
+    case "Profile":
+      return [t("myProfile"), ...(rest[0] === "Signature" ? [t("locSignature")] : rest)];
+    case "System":
+      if (rest[0] === "AutoDocumentSync") return [t("locSystem"), t("documentSync"), ...tail];
+      if (rest[0] === "EtaArrivalReminder") return [t("locSystem"), t("locEtaReminder")];
+      return [t("locSystem"), ...rest];
     case "Dashboard":
       return [t("locHome"), rest[0] === "ExportExcel" ? t("exportExcel") : rest[0]].filter(Boolean);
     case "master-data": {

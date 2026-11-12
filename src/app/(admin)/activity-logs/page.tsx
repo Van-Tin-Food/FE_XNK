@@ -1,17 +1,34 @@
 "use client";
 
 import SearchSuggestions from "@/components/common/SearchSuggestions";
+import MobileFilterToggle from "@/components/common/MobileFilterToggle";
 import { useAuth } from "@/context/AuthContext";
 import { useLanguage } from "@/context/LanguageContext";
+import { RBAC_ROLES } from "@/config/shipmentActionPermissions";
 import {
   getActivityLogBatch,
   getEmailDeliveryLogs,
   type ActivityActor,
   type ActivityLog,
+  type ActivityLogFilters,
   type EmailActivityLog,
 } from "@/services/activityLogApi";
 import { activityLogSummary } from "@/utils/activityLogSummary";
 import { activityDetailLines, activityLocationParts } from "@/utils/activityLogFormat";
+import {
+  ACTIVITY_GROUPS,
+  ACTIVITY_PERIODS,
+  activityActionLabel,
+  activityActionQuery,
+  activityGroupOf,
+  activityPeriodRange,
+  dateKey,
+  groupActivityByDay,
+  parseLogDate,
+  relativeDay,
+  type ActivityGroupKey,
+  type ActivityPeriod,
+} from "@/utils/activityLogCatalog";
 import { paginateItems } from "@/utils/pagination";
 import PaginationControls from "@/components/common/PaginationControls";
 import { useRouter } from "next/navigation";
@@ -23,87 +40,60 @@ const DEFAULT_PAGE_SIZE = 15;
 const ACTIVITY_BATCH_SIZE = 50;
 const LOAD_MORE_MARGIN = "600px";
 const SEARCH_DEBOUNCE_MS = 350;
-const ACTION_LABEL_KEYS: Record<string, string> = {
-  LOGIN: "logLogin",
-  LOGIN_GOOGLE: "logLoginGoogle",
-  LOGIN_FAILED: "logLoginFailed",
-  LOGOUT: "logLogout",
-  CREATE_SHIPMENT: "logCreateShipment",
-  UPLOAD_DOCUMENT: "logUploadDocument",
-  UPLOAD_OCR_DOCUMENT: "logUploadOcrDocument",
-  PASS_DOCUMENT: "logPassDocument",
-  ARCHIVE_DOCUMENTS: "logArchiveDocuments",
-  EDIT_RETURN_ITEM: "logEditContainerTransport",
-  EDIT_SHIPMENT_DETAILS: "logEditShipmentDetails",
-  CANCEL_SHIPMENT: "logCancelShipment",
-  EXPORT_EXCEL: "logExportExcel",
-  AI_CHAT: "logAiChat",
-  CREATE_MASTER_DATA: "logCreateMasterData",
-  UPDATE_MASTER_DATA: "logUpdateMasterData",
-  DELETE_MASTER_DATA: "logDeleteMasterData",
-  REGISTER_USER: "logRegisterUser",
-  UPDATE_USER_PERMISSION: "logUpdatePermission",
-  UPDATE_USER_PASSWORD: "logResetPassword",
-  SEND_EMAIL: "logSendEmail",
-  DOCUMENT_SYNC_SCAN: "logDocumentSyncScan",
-  DOCUMENT_SYNC_ACCEPT: "logDocumentSyncAccept",
-  DOCUMENT_SYNC_RENAME: "logDocumentSyncRename",
-  DOCUMENT_SYNC_RESTORE: "logDocumentSyncRestore",
-  AUTO_DOCUMENT_SYNC: "logAutoDocumentSync",
-  AUTO_DOCUMENT_SYNC_RUN: "logAutoDocumentSyncRun",
-  ETA_ARRIVAL_REMINDER: "logEtaArrivalReminder",
-  DELETE_DOCUMENT_FILE: "logDeleteDocumentFile",
-  PAYMENT_REQUEST_CREATE: "logPaymentCreate",
-  PAYMENT_REQUEST_UPDATE: "logPaymentUpdate",
-  PAYMENT_REQUEST_LINK: "logPaymentLink",
-  PAYMENT_REQUEST_NOTIFY: "logPaymentNotify",
-  PAYMENT_REQUEST_APPROVE: "logPaymentApprove",
-  PAYMENT_REQUEST_REJECT: "logPaymentReject",
-  PAYMENT_REQUEST_COMPLETE: "logPaymentComplete",
-  PAYMENT_REQUEST_SEND: "logPaymentSend",
-  PAYMENT_REQUEST_UPLOAD: "logPaymentUpload",
-  PAYMENT_REQUEST_DOCUMENT_REMOVE: "logPaymentDocRemove",
-  PAYMENT_REQUEST_MISSING_DOCUMENTS: "logPaymentMissingDocs",
-  PAYMENT_COST_UPDATE: "logPaymentCostUpdate",
-  PAYMENT_COST_DELETE: "logPaymentCostDelete",
-  PAYMENT_REQUEST_CANCEL: "logPaymentCancel",
-};
-const ROLES = ["admin", "it", "logistic", "van_chuyen", "ke_toan"];
 const SELECT_CLASS = "h-10 min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200";
+const INPUT_CLASS = "h-10 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500 dark:focus:ring-brand-500/20";
+const LABEL_CLASS = "mb-1 block text-[11px] font-medium text-gray-500 md:mb-1.5 md:text-xs dark:text-gray-400";
 
-function actionLabel(action: string, t: (key: string) => string): string {
-  const key = ACTION_LABEL_KEYS[action.trim().toUpperCase()];
-  return key ? t(key) : action || t("unknown");
-}
+/** Màu nhãn thao tác theo nhóm chức năng: nhìn màu là biết thao tác thuộc mảng nào. */
+const GROUP_TONE: Record<ActivityGroupKey, string> = {
+  shipment: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300",
+  payment: "bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-300",
+  cost: "bg-warning-50 text-warning-700 dark:bg-warning-500/10 dark:text-warning-300",
+  documentSync: "bg-blue-light-50 text-blue-light-700 dark:bg-blue-light-500/10 dark:text-blue-light-300",
+  masterData: "bg-theme-purple-500/10 text-theme-purple-500",
+  account: "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
+  auth: "bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300",
+  system: "bg-theme-pink-500/10 text-theme-pink-500",
+  other: "bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300",
+};
+const FAILED_TONE = "bg-error-50 text-error-700 dark:bg-error-500/10 dark:text-error-300";
 
-function parseLogDate(value: string): Date {
-  const raw = String(value || "").trim();
-  // PostgreSQL timestamp without time zone is a wall-clock value. Keep it in local time.
-  const postgresMatch = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?$/);
-  if (postgresMatch) {
-    const milliseconds = (postgresMatch[3] || "").slice(0, 3).padEnd(3, "0");
-    return new Date(`${postgresMatch[1]}T${postgresMatch[2]}.${milliseconds}`);
-  }
-  return new Date(raw);
+type Translate = (key: string, variables?: Record<string, string | number>) => string;
+
+function locale(language: "vi" | "en"): string {
+  return language === "en" ? "en-GB" : "vi-VN";
 }
 
 function dateTime(value: string, language: "vi" | "en", withSeconds = false): string {
   const date = parseLogDate(value);
   if (Number.isNaN(date.getTime())) return value || "—";
-  return date.toLocaleString(language === "en" ? "en-GB" : "vi-VN", {
+  return date.toLocaleString(locale(language), {
     hour: "2-digit", minute: "2-digit", ...(withSeconds ? { second: "2-digit" } : {}), day: "2-digit", month: "2-digit", year: "numeric",
   });
+}
+
+function timeOnly(value: string, language: "vi" | "en"): string {
+  const date = parseLogDate(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleTimeString(locale(language), { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Tiêu đề nhóm ngày: "Hôm nay · Thứ Năm, 12/11/2026". */
+function dayHeading(day: string, language: "vi" | "en", t: Translate): string {
+  if (!day) return t("unknown");
+  const [year, month, date] = day.split("-").map(Number);
+  const label = new Date(year, month - 1, date).toLocaleDateString(locale(language), { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
+  const relative = relativeDay(day);
+  const text = label.charAt(0).toLocaleUpperCase() + label.slice(1);
+  return relative ? `${t(relative === "today" ? "logToday" : "logYesterday")} · ${text}` : text;
 }
 
 function actor(log: ActivityLog): string {
   return log.userName || log.username || (log.userId ? `User #${log.userId}` : "—");
 }
 
-function dateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function roleLabel(role: string | undefined, t: Translate): string {
+  if (!role) return "";
+  return (RBAC_ROLES as readonly string[]).includes(role) ? t(`logRole_${role}`) : role;
 }
 
 function localDate(value: string): string {
@@ -142,96 +132,153 @@ function PinIcon() {
   );
 }
 
-function DeviceIcon() {
+function ChevronIcon({ open }: { open: boolean }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-      <rect x="3" y="4" width="18" height="12" rx="2" />
-      <path d="M8 20h8M12 16v4" />
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`}>
+      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }
 
-/** Một dòng nhật ký thao tác: ai - làm gì - ở đâu (màn hình, thiết bị, IP) - khi nào, mở rộng xem từng thay đổi. */
-function ActivityRow({ log }: { log: ActivityLog }) {
+/**
+ * Một dòng nhật ký, đọc như một câu: [giờ] [Ai] [làm gì — màu theo nhóm] / [trên đối tượng nào] / [ở màn hình nào].
+ * Bấm tên người / nhãn thao tác để lọc nhanh. "Chi tiết" mở bảng thay đổi Trước → Sau và thời gian chính xác, thiết bị, IP.
+ */
+function ActivityRow({ log, onFilterUser, onFilterAction }: {
+  log: ActivityLog;
+  onFilterUser?: (userId: number) => void;
+  onFilterAction?: (action: string) => void;
+}) {
   const { language, t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   const failed = log.status === "failed";
+  const action = log.action.trim().toUpperCase();
+  const label = activityActionLabel(log.action, t);
   const summary = activityLogSummary(log.action, log.detail, log.location, language);
   const where = activityLocationParts(log.location, t).join(" › ");
-  const device = log.device || "";
   const lines = activityDetailLines(log.detail);
-  // Chỉ cần nút "Xem chi tiết" khi nội dung đầy đủ khác dòng tóm tắt.
-  const hasMore = lines.length > 1 || (lines.length === 1 && (lines[0].text || "") !== summary);
+  const changes = lines.filter((line) => line.field !== undefined);
+  const notes = lines.filter((line) => line.field === undefined && line.text && line.text !== summary);
+  const name = actor(log);
+  const role = roleLabel(log.role, t);
+  const detailId = `activity-detail-${String(log.id)}`;
 
   return (
-    <article className="px-4 py-4 transition-colors hover:bg-gray-50/60 dark:hover:bg-white/[0.02] sm:px-5">
-      <div className="flex gap-3">
-        <span aria-hidden="true" className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ${failed ? "bg-error-50 text-error-700 dark:bg-error-500/10 dark:text-error-300" : "bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"}`}>
-          {actor(log).charAt(0).toUpperCase()}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-semibold text-gray-800 dark:text-white/90">{actor(log)}</span>
-            {log.username && log.username !== log.userName && <span className="text-xs text-gray-500 dark:text-gray-400">@{log.username}</span>}
-            {log.role && <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">{log.role}</span>}
-            <time dateTime={log.createdAt} title={dateTime(log.createdAt, language, true)} className="w-full text-xs text-gray-500 sm:ml-auto sm:w-auto">{dateTime(log.createdAt, language, true)}</time>
-          </div>
-
-          <div className="mt-1.5 flex flex-wrap items-start gap-x-2 gap-y-1">
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${failed ? "bg-error-50 text-error-700 dark:bg-error-500/10 dark:text-error-300" : "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300"}`}>
-              {actionLabel(log.action, t)}{failed ? ` · ${t("activityFailed")}` : ""}
-            </span>
-            {summary && <span className="min-w-0 break-words text-sm font-medium text-gray-700 dark:text-gray-200">{summary}</span>}
-          </div>
-
-          <div className="mt-1.5 flex flex-col gap-1 text-xs text-gray-500 dark:text-gray-400 sm:flex-row sm:flex-wrap sm:gap-x-4">
-            {where && (
-              <span className="flex min-w-0 items-center gap-1" title={log.location}>
-                <PinIcon />
-                <span className="sr-only">{t("activityWhere")}:</span>
-                <span className="break-words">{where}</span>
-              </span>
-            )}
-            {(device || log.ipAddress) && (
-              <span className="flex min-w-0 items-center gap-1">
-                <DeviceIcon />
-                <span className="sr-only">{t("activityDevice")}:</span>
-                <span className="break-all">{[device, log.ipAddress ? `${t("activityIp")} ${log.ipAddress}` : ""].filter(Boolean).join(" · ")}</span>
-              </span>
-            )}
-          </div>
-
-          {hasMore && (
-            <button
-              type="button"
-              onClick={() => setExpanded((value) => !value)}
-              aria-expanded={expanded}
-              className="mt-2 text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400"
-            >
-              {expanded ? t("activityHideDetail") : t("activityShowDetail")}
+    // Mọi dòng cùng viền trái 3px (trong suốt khi thành công) để cột giờ thẳng hàng; dòng thất bại tô viền đỏ + nền đỏ nhạt.
+    <article className={`flex gap-3 border-l-[3px] py-3 pl-[13px] pr-4 transition-colors sm:gap-4 sm:pl-[17px] sm:pr-5 ${failed
+      ? "border-error-500 bg-error-50/40 hover:bg-error-50/70 dark:bg-error-500/[0.06] dark:hover:bg-error-500/10"
+      : "border-transparent hover:bg-gray-50 dark:hover:bg-white/[0.03]"}`}>
+      <time dateTime={log.createdAt} title={dateTime(log.createdAt, language, true)} className="w-11 shrink-0 pt-0.5 text-sm font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+        {timeOnly(log.createdAt, language)}
+      </time>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {onFilterUser && log.userId ? (
+            <button type="button" onClick={() => onFilterUser(log.userId as number)} title={t("logFilterByUser", { name })}
+              className="max-w-full truncate text-left font-semibold text-gray-800 hover:text-brand-600 hover:underline dark:text-white/90 dark:hover:text-brand-400">
+              {name}
             </button>
+          ) : (
+            <span className="max-w-full truncate font-semibold text-gray-800 dark:text-white/90">{name}</span>
           )}
-          {expanded && (
-            <ul className="mt-2 space-y-1.5 rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm dark:border-gray-800 dark:bg-white/[0.03]">
-              {lines.map((line, index) => (
-                <li key={index} className="break-words">
-                  {line.field !== undefined ? (
-                    <span className="flex flex-col gap-0.5 sm:flex-row sm:flex-wrap sm:gap-x-2">
-                      <span className="font-medium text-gray-700 dark:text-gray-200">{line.field}:</span>
-                      <span className="flex flex-wrap items-center gap-x-1.5">
-                        <span className="text-gray-400 line-through decoration-gray-300 dark:text-gray-500">{line.before || "—"}</span>
-                        <span aria-hidden="true" className="text-gray-400">→</span>
-                        <span className="font-medium text-success-700 dark:text-success-400">{line.after || "—"}</span>
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="text-gray-600 dark:text-gray-300">{line.text}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
+          {role && <span className="text-xs text-gray-500 dark:text-gray-400">{role}</span>}
+          {onFilterAction ? (
+            <button type="button" onClick={() => onFilterAction(action)} title={t("logFilterByAction", { action: label })}
+              className={`rounded-full px-2 py-0.5 text-xs font-medium hover:ring-1 hover:ring-current ${GROUP_TONE[activityGroupOf(action)]}`}>
+              {label}
+            </button>
+          ) : (
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${GROUP_TONE[activityGroupOf(action)]}`}>{label}</span>
           )}
+          {failed && <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${FAILED_TONE}`}>{t("activityFailed")}</span>}
         </div>
+
+        {summary && <p className="mt-1 break-words text-sm text-gray-700 dark:text-gray-200">{summary}</p>}
+
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+          {where && (
+            <span className="flex min-w-0 items-center gap-1" title={log.location}>
+              <PinIcon />
+              <span className="sr-only">{t("activityWhere")}:</span>
+              <span className="break-words">{where}</span>
+            </span>
+          )}
+          <button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} aria-controls={detailId}
+            className="inline-flex min-h-8 items-center gap-1 font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400">
+            {expanded ? t("activityHideDetail") : changes.length > 0 ? t("logShowChanges", { count: changes.length }) : t("activityShowDetail")}
+            <ChevronIcon open={expanded} />
+          </button>
+        </div>
+
+        {expanded && (
+          <div id={detailId} className="mt-2 space-y-3 rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm dark:border-gray-800 dark:bg-white/[0.03]">
+            {changes.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300">{t("logChanges")}</p>
+                {/* Điện thoại: mỗi thay đổi một khối; từ sm: bảng 3 cột Mục | Trước | Sau. */}
+                <ul className="space-y-2 sm:hidden">
+                  {changes.map((line, index) => (
+                    <li key={index} className="rounded-lg bg-white p-2 dark:bg-gray-900">
+                      <p className="font-medium text-gray-700 dark:text-gray-200">{line.field}</p>
+                      <p className="mt-0.5 break-words text-xs text-gray-500 dark:text-gray-400">{t("logBefore")}: <span className="line-through">{line.before || "—"}</span></p>
+                      <p className="break-words text-xs font-medium text-success-700 dark:text-success-400">{t("logAfter")}: {line.after || "—"}</p>
+                    </li>
+                  ))}
+                </ul>
+                <div className="hidden overflow-x-auto custom-scrollbar sm:block">
+                  <table className="w-full min-w-[420px] table-fixed text-left text-sm">
+                    <thead>
+                      <tr className="text-xs text-gray-500 dark:text-gray-400">
+                        <th className="w-1/4 pb-1 pr-3 font-medium">{t("logField")}</th>
+                        <th className="w-[37.5%] pb-1 pr-3 font-medium">{t("logBefore")}</th>
+                        <th className="pb-1 font-medium">{t("logAfter")}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200/70 dark:divide-gray-800">
+                      {changes.map((line, index) => (
+                        <tr key={index} className="align-top">
+                          <td className="break-words py-1.5 pr-3 font-medium text-gray-700 dark:text-gray-200">{line.field}</td>
+                          <td className="break-words py-1.5 pr-3 text-gray-400 line-through decoration-gray-300 dark:text-gray-500">{line.before || "—"}</td>
+                          <td className="break-words py-1.5 font-medium text-success-700 dark:text-success-400">{line.after || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {notes.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">{t("logContent")}</p>
+                <ul className="list-disc space-y-1 pl-5 text-gray-600 dark:text-gray-300">
+                  {notes.map((line, index) => <li key={index} className="break-words">{line.text}</li>)}
+                </ul>
+              </div>
+            )}
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+              <dt className="text-gray-500 dark:text-gray-400">{t("logExactTime")}</dt>
+              <dd className="text-gray-700 dark:text-gray-200">{dateTime(log.createdAt, language, true)}</dd>
+              {log.username && (
+                <>
+                  <dt className="text-gray-500 dark:text-gray-400">{t("username")}</dt>
+                  <dd className="break-all text-gray-700 dark:text-gray-200">{log.username}</dd>
+                </>
+              )}
+              {log.device && (
+                <>
+                  <dt className="text-gray-500 dark:text-gray-400">{t("activityDevice")}</dt>
+                  <dd className="break-words text-gray-700 dark:text-gray-200">{log.device}</dd>
+                </>
+              )}
+              {log.ipAddress && (
+                <>
+                  <dt className="text-gray-500 dark:text-gray-400">{t("activityIp")}</dt>
+                  <dd className="break-all text-gray-700 dark:text-gray-200">{log.ipAddress}</dd>
+                </>
+              )}
+            </dl>
+          </div>
+        )}
       </div>
     </article>
   );
@@ -259,12 +306,13 @@ export default function ActivityLogsPage() {
   const loadMoreAbortRef = useRef<AbortController | null>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const [actors, setActors] = useState<ActivityActor[]>([]);
-  const [activityUser, setActivityUser] = useState("all");
-  const [activityAction, setActivityAction] = useState("all");
-  const [activityRole, setActivityRole] = useState("all");
-  const [activityStatus, setActivityStatus] = useState<"all" | "success" | "failed">("all");
-  const [activityDateFrom, setActivityDateFrom] = useState("");
-  const [activityDateTo, setActivityDateTo] = useState("");
+  const [activityUser, setActivityUser] = useState("");
+  const [activityGroup, setActivityGroup] = useState<ActivityGroupKey | "">("");
+  const [activityAction, setActivityAction] = useState("");
+  const [activityStatus, setActivityStatus] = useState<"" | "success" | "failed">("");
+  const [activityPeriod, setActivityPeriod] = useState<ActivityPeriod>("all");
+  const [customRange, setCustomRange] = useState({ from: "", to: "" });
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -296,6 +344,17 @@ export default function ActivityLogsPage() {
     return () => window.clearTimeout(timer);
   }, [query]);
 
+  // Khoảng ngày của lựa chọn thời gian (chuỗi YYYY-MM-DD nên dùng làm phụ thuộc được).
+  const { from: activityFrom, to: activityTo } = activityPeriodRange(activityPeriod, customRange);
+  const activityFilters = useMemo<ActivityLogFilters>(() => ({
+    userId: activityUser ? Number(activityUser) : undefined,
+    ...activityActionQuery(activityGroup, activityAction),
+    status: activityStatus || undefined,
+    from: activityFrom || undefined,
+    to: activityTo || undefined,
+    q: debouncedQuery || undefined,
+  }), [activityAction, activityFrom, activityGroup, activityStatus, activityTo, activityUser, debouncedQuery]);
+
   useEffect(() => {
     if (!canViewLogs || activeTab !== "activity") return;
     const controller = new AbortController();
@@ -306,16 +365,7 @@ export default function ActivityLogsPage() {
       setLoadingMore(false);
       setLoadMoreError("");
       setError("");
-      getActivityLogBatch({
-        limit: ACTIVITY_BATCH_SIZE,
-        userId: activityUser === "all" ? undefined : Number(activityUser),
-        action: activityAction === "all" ? undefined : activityAction,
-        role: activityRole === "all" ? undefined : activityRole,
-        status: activityStatus === "all" ? undefined : activityStatus,
-        from: activityDateFrom || undefined,
-        to: activityDateTo || undefined,
-        q: debouncedQuery || undefined,
-      }, controller.signal)
+      getActivityLogBatch({ limit: ACTIVITY_BATCH_SIZE, ...activityFilters }, controller.signal)
         .then((result) => {
           if (generation !== batchGenerationRef.current) return;
           setLogs(result.logs);
@@ -335,7 +385,7 @@ export default function ActivityLogsPage() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [activeTab, activityAction, activityDateFrom, activityDateTo, activityRole, activityStatus, activityUser, canViewLogs, debouncedQuery, reloadKey, t]);
+  }, [activeTab, activityFilters, canViewLogs, reloadKey, t]);
 
   /** Tải lô tiếp theo (cũ hơn) nối vào cuối danh sách. */
   const loadMoreActivity = useCallback(() => {
@@ -345,17 +395,7 @@ export default function ActivityLogsPage() {
     loadMoreAbortRef.current = controller;
     setLoadingMore(true);
     setLoadMoreError("");
-    getActivityLogBatch({
-      limit: ACTIVITY_BATCH_SIZE,
-      cursor: nextCursor,
-      userId: activityUser === "all" ? undefined : Number(activityUser),
-      action: activityAction === "all" ? undefined : activityAction,
-      role: activityRole === "all" ? undefined : activityRole,
-      status: activityStatus === "all" ? undefined : activityStatus,
-      from: activityDateFrom || undefined,
-      to: activityDateTo || undefined,
-      q: debouncedQuery || undefined,
-    }, controller.signal)
+    getActivityLogBatch({ limit: ACTIVITY_BATCH_SIZE, cursor: nextCursor, ...activityFilters }, controller.signal)
       .then((result) => {
         if (generation !== batchGenerationRef.current) return;
         // Bỏ dòng trùng (phòng khi có log mới chen vào giữa hai lần tải).
@@ -373,7 +413,7 @@ export default function ActivityLogsPage() {
       .finally(() => {
         if (generation === batchGenerationRef.current) setLoadingMore(false);
       });
-  }, [activityAction, activityDateFrom, activityDateTo, activityRole, activityStatus, activityUser, debouncedQuery, hasMore, loading, loadingMore, nextCursor, t]);
+  }, [activityFilters, hasMore, loading, loadingMore, nextCursor, t]);
 
   // Cuộn tới gần cuối danh sách thì tự tải tiếp (vẫn có nút "Tải thêm" nếu trình duyệt không hỗ trợ).
   useEffect(() => {
@@ -473,8 +513,10 @@ export default function ActivityLogsPage() {
 
   const activitySuggestions = useMemo(() => Array.from(new Set([
     ...actors.flatMap((item) => [item.name, item.username]),
-    ...logs.flatMap((log) => [actionLabel(log.action, t), activityLogSummary(log.action, log.detail, log.location, language)]),
-  ].filter((value): value is string => Boolean(value)))), [actors, language, logs, t]);
+    ...logs.map((log) => activityLogSummary(log.action, log.detail, log.location, language)),
+  ].filter((value): value is string => Boolean(value)))), [actors, language, logs]);
+  const dayGroups = useMemo(() => groupActivityByDay(logs), [logs]);
+  const actionOptions = activityGroup ? ACTIVITY_GROUPS.filter((group) => group.key === activityGroup) : ACTIVITY_GROUPS;
 
   const clearEmailFilters = () => {
     setQuery("");
@@ -491,14 +533,44 @@ export default function ActivityLogsPage() {
 
   const clearActivityFilters = () => {
     setQuery("");
-    setActivityUser("all");
-    setActivityAction("all");
-    setActivityRole("all");
-    setActivityStatus("all");
-    setActivityDateFrom("");
-    setActivityDateTo("");
-    setPage(1);
+    setActivityUser("");
+    setActivityGroup("");
+    setActivityAction("");
+    setActivityStatus("");
+    setActivityPeriod("all");
+    setCustomRange({ from: "", to: "" });
   };
+
+  const changeGroup = (group: ActivityGroupKey | "") => {
+    setActivityGroup(group);
+    // Thao tác đang chọn không thuộc nhóm mới thì bỏ.
+    if (activityAction && group && activityGroupOf(activityAction) !== group) setActivityAction("");
+  };
+  // Chọn một thao tác thì nhóm đi theo thao tác đó (ô Thao tác chỉ còn các thao tác cùng nhóm).
+  const changeAction = (action: string) => {
+    setActivityAction(action);
+    if (action) setActivityGroup(activityGroupOf(action));
+  };
+
+  // Các bộ lọc đang bật, hiện thành thẻ có nút bỏ: nhìn là biết danh sách đang bị lọc theo gì.
+  const actorLabel = (id: string) => {
+    const found = actors.find((item) => String(item.id) === id);
+    return found ? found.name || found.username : `#${id}`;
+  };
+  const periodChipLabel = activityPeriod === "custom"
+    ? `${activityFrom ? new Date(`${activityFrom}T00:00`).toLocaleDateString(locale(language)) : "…"} – ${activityTo ? new Date(`${activityTo}T00:00`).toLocaleDateString(locale(language)) : "…"}`
+    : t(`logPeriod_${activityPeriod}`);
+  const activeChips: { key: string; label: string; clear: () => void }[] = [
+    ...(debouncedQuery ? [{ key: "q", label: `“${debouncedQuery}”`, clear: () => setQuery("") }] : []),
+    ...(activityPeriod !== "all" ? [{ key: "period", label: periodChipLabel, clear: () => { setActivityPeriod("all"); setCustomRange({ from: "", to: "" }); } }] : []),
+    ...(activityUser ? [{ key: "user", label: actorLabel(activityUser), clear: () => setActivityUser("") }] : []),
+    ...(activityGroup && !activityAction ? [{ key: "group", label: t(`logGroup_${activityGroup}`), clear: () => setActivityGroup("") }] : []),
+    ...(activityAction ? [{ key: "action", label: activityActionLabel(activityAction, t), clear: () => { setActivityAction(""); setActivityGroup(""); } }] : []),
+    ...(activityStatus ? [{ key: "status", label: activityStatus === "failed" ? t("activityFailed") : t("activitySucceeded"), clear: () => setActivityStatus("") }] : []),
+  ];
+  // Số bộ lọc trên nút "Bộ lọc" ở điện thoại (ngoài ô tìm kiếm).
+  const activeFilterCount = activeChips.filter((chip) => chip.key !== "q").length;
+  const mobileShow = filtersOpen ? "" : "max-md:hidden";
 
   if (!canViewLogs) return <div className="flex min-h-[50vh] items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>;
 
@@ -506,31 +578,124 @@ export default function ActivityLogsPage() {
     <section className="space-y-3 md:space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2 sm:items-end sm:gap-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold sm:text-xl md:text-2xl text-gray-800 dark:text-white/90">{t("activityLogs")}</h1>
+          <h1 className="text-lg font-semibold sm:text-xl md:text-2xl text-gray-800 dark:text-white/90">{activeTab === "activity" ? t("operationHistory") : t("emailLogs")}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 max-sm:hidden">{activeTab === "activity" ? t("activityLogsDetailedDescription") : t("activityLogsDescription")}</p>
         </div>
-        <button type="button" onClick={refresh} disabled={loading} className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">{loading ? t("loading") : t("refreshData")}</button>
+        <button type="button" onClick={refresh} disabled={loading} className="h-10 rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">{loading ? t("loading") : t("refreshData")}</button>
       </div>
-      {/* Bỏ tab bar: mục nào trên sidebar được click thì hiện đúng mục đó — không cần chuyển tab trên trang */}
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+
+      {activeTab === "activity" && (
+        // Thanh lọc (cùng kiểu trang Đề nghị thanh toán): điện thoại chỉ hiện ô tìm + nút "Bộ lọc".
+        <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900 md:rounded-2xl md:px-4 md:py-3.5">
+          <div className="grid grid-cols-2 gap-2 md:flex md:flex-row md:flex-wrap md:items-end md:gap-3">
+            <div className="col-span-2 min-w-0 md:w-80 md:flex-none">
+              <span className={`${LABEL_CLASS} max-md:sr-only`}>{t("logFilterSearch")}</span>
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <SearchSuggestions value={query} onChange={setQuery} suggestions={activitySuggestions}
+                    placeholder={t("searchActivityLogs")} ariaLabel={t("logFilterSearch")} className={INPUT_CLASS} />
+                </div>
+                <MobileFilterToggle open={filtersOpen} onToggle={() => setFiltersOpen((open) => !open)} activeCount={activeFilterCount} controls="activity-filter-panel" />
+              </div>
+            </div>
+            <div id="activity-filter-panel" className={`${mobileShow} col-span-2 min-w-0 md:w-44`}>
+              <label htmlFor="activity-filter-period" className={LABEL_CLASS}>{t("logFilterPeriod")}</label>
+              <select id="activity-filter-period" value={activityPeriod} onChange={(event) => setActivityPeriod(event.target.value as ActivityPeriod)} className={INPUT_CLASS}>
+                {ACTIVITY_PERIODS.map((period) => <option key={period} value={period}>{t(`logPeriod_${period}`)}</option>)}
+              </select>
+            </div>
+            {activityPeriod === "custom" && (
+              <div className={`${mobileShow} col-span-2 grid grid-cols-2 gap-2 md:flex md:gap-3`}>
+                <div className="min-w-0 md:w-40">
+                  <label htmlFor="activity-filter-from" className={LABEL_CLASS}>{t("dateFrom")}</label>
+                  <input id="activity-filter-from" type="date" value={customRange.from} max={customRange.to || undefined}
+                    onChange={(event) => setCustomRange((range) => ({ ...range, from: event.target.value }))} className={INPUT_CLASS} />
+                </div>
+                <div className="min-w-0 md:w-40">
+                  <label htmlFor="activity-filter-to" className={LABEL_CLASS}>{t("dateTo")}</label>
+                  <input id="activity-filter-to" type="date" value={customRange.to} min={customRange.from || undefined}
+                    onChange={(event) => setCustomRange((range) => ({ ...range, to: event.target.value }))} className={INPUT_CLASS} />
+                </div>
+              </div>
+            )}
+            <div className={`${mobileShow} col-span-2 min-w-0 md:w-52`}>
+              <label htmlFor="activity-filter-user" className={LABEL_CLASS}>{t("logFilterUser")}</label>
+              <select id="activity-filter-user" value={activityUser} onChange={(event) => setActivityUser(event.target.value)} className={INPUT_CLASS}>
+                <option value="">{t("allUsers")}</option>
+                {actors.map((item) => <option key={item.id} value={String(item.id)}>{item.name || item.username}{item.name && item.username ? ` · @${item.username}` : ""}</option>)}
+              </select>
+            </div>
+            <div className={`${mobileShow} col-span-2 min-w-0 md:w-52`}>
+              <label htmlFor="activity-filter-group" className={LABEL_CLASS}>{t("logFilterGroup")}</label>
+              <select id="activity-filter-group" value={activityGroup} onChange={(event) => changeGroup(event.target.value as ActivityGroupKey | "")} className={INPUT_CLASS}>
+                <option value="">{t("logAllGroups")}</option>
+                {ACTIVITY_GROUPS.map((group) => <option key={group.key} value={group.key}>{t(`logGroup_${group.key}`)}</option>)}
+              </select>
+            </div>
+            <div className={`${mobileShow} col-span-2 min-w-0 md:w-60`}>
+              <label htmlFor="activity-filter-action" className={LABEL_CLASS}>{t("logFilterAction")}</label>
+              <select id="activity-filter-action" value={activityAction} onChange={(event) => changeAction(event.target.value)} className={INPUT_CLASS}>
+                <option value="">{activityGroup ? t("logAllActionsInGroup") : t("allActions")}</option>
+                {actionOptions.map((group) => (
+                  <optgroup key={group.key} label={t(`logGroup_${group.key}`)}>
+                    {group.actions.map(([code, labelKey]) => <option key={code} value={code}>{t(labelKey)}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <div className={`${mobileShow} col-span-2 min-w-0 md:w-36`}>
+              <label htmlFor="activity-filter-status" className={LABEL_CLASS}>{t("logFilterResult")}</label>
+              <select id="activity-filter-status" value={activityStatus} onChange={(event) => setActivityStatus(event.target.value as "" | "success" | "failed")} className={INPUT_CLASS}>
+                <option value="">{t("allResults")}</option>
+                <option value="success">{t("activitySucceeded")}</option>
+                <option value="failed">{t("activityFailed")}</option>
+              </select>
+            </div>
+          </div>
+
+          {activeChips.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 dark:border-gray-800">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{t("logActiveFilters")}</span>
+              {activeChips.map((chip) => (
+                <span key={chip.key} className="inline-flex max-w-full items-center gap-1 rounded-full border border-brand-200 bg-brand-50 py-0.5 pl-2.5 pr-1 text-xs font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                  <span className="truncate">{chip.label}</span>
+                  <button type="button" onClick={chip.clear} aria-label={t("logRemoveFilter", { label: chip.label })} title={t("logRemoveFilter", { label: chip.label })}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full hover:bg-brand-100 dark:hover:bg-brand-500/20">
+                    <span aria-hidden="true">×</span>
+                  </button>
+                </span>
+              ))}
+              <button type="button" onClick={clearActivityFilters} className="h-8 rounded-lg px-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("clearFilters")}</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Bỏ tab bar: mục nào trên sidebar được click thì hiện đúng mục đó — không cần chuyển tab trên trang.
+          overflow-clip (không phải overflow-hidden) để tiêu đề ngày dính ở đầu màn hình khi cuộn. */}
+      <div className="overflow-clip rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        {activeTab === "activity" ? (
+          <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-gray-800 sm:px-5">
+            <p className="text-xs text-gray-500 dark:text-gray-400">{countLabel}</p>
+            {loading && !isEmpty && <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" aria-label={t("loading")} />}
+          </div>
+        ) : (
         <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="font-semibold text-gray-800 dark:text-white/90">{activeTab === "activity" ? t("operationHistory") : t("emailHistory")}</h2>
+              <h2 className="font-semibold text-gray-800 dark:text-white/90">{t("emailHistory")}</h2>
               <p className="mt-0.5 text-xs text-gray-500">{countLabel}</p>
             </div>
             <SearchSuggestions
               value={query}
               onChange={(value) => { setQuery(value); setPage(1); }}
-              suggestions={activeTab === "activity"
-                ? activitySuggestions
-                : emailLogs.flatMap((log) => [log.supplierName, log.supplierEmail, log.subject, log.userName, log.username]).filter((value): value is string => Boolean(value))}
-              placeholder={activeTab === "activity" ? t("searchActivityLogs") : t("searchEmailLogs")}
-              ariaLabel={activeTab === "activity" ? t("searchActivityLogs") : t("searchEmailLogs")}
+              suggestions={emailLogs.flatMap((log) => [log.supplierName, log.supplierEmail, log.subject, log.userName, log.username]).filter((value): value is string => Boolean(value))}
+              placeholder={t("searchEmailLogs")}
+              ariaLabel={t("searchEmailLogs")}
               className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:max-w-sm"
             />
           </div>
-          {activeTab === "email" && <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2">
             <div className="flex flex-wrap gap-2">{(["all", "sent", "not sent"] as const).map((status) => <button key={status} type="button" aria-pressed={emailStatus === status} onClick={() => { setEmailStatus(status); setPage(1); }} className={`h-9 rounded-lg border px-3 text-xs font-semibold ${emailStatus === status ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 text-gray-500 dark:border-gray-700"}`}>{status === "all" ? t("allStatuses") : status === "sent" ? t("emailSentStatus") : t("emailNotSentStatus")} ({emailStatusCounts[status]})</button>)}</div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               <select value={supplierFilter} onChange={(event) => { setSupplierFilter(event.target.value); setPage(1); }} aria-label={t("emailSupplierFilter")} className={SELECT_CLASS}>
@@ -562,40 +727,38 @@ export default function ActivityLogsPage() {
               </div>
               <button type="button" onClick={clearEmailFilters} className="h-10 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50 md:ml-auto dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("clearFilters")}</button>
             </div>
-          </div>}
-          {activeTab === "activity" && <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(4,minmax(0,1fr))_auto_auto_auto]">
-            <select value={activityUser} onChange={(event) => { setActivityUser(event.target.value); setPage(1); }} aria-label={t("activityUserFilter")} className={SELECT_CLASS}>
-              <option value="all">{t("allUsers")}</option>
-              {actors.map((item) => <option key={item.id} value={String(item.id)}>{item.name || item.username}{item.name && item.username ? ` (${item.username})` : ""}</option>)}
-            </select>
-            <select value={activityAction} onChange={(event) => { setActivityAction(event.target.value); setPage(1); }} aria-label={t("activityActionFilter")} className={SELECT_CLASS}>
-              <option value="all">{t("allActions")}</option>
-              {Object.keys(ACTION_LABEL_KEYS).filter((action) => action !== "SEND_EMAIL").map((action) => <option key={action} value={action}>{actionLabel(action, t)}</option>)}
-            </select>
-            <select value={activityRole} onChange={(event) => { setActivityRole(event.target.value); setPage(1); }} aria-label={t("activityRoleFilter")} className={SELECT_CLASS}>
-              <option value="all">{t("allRoles")}</option>
-              {ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
-            </select>
-            <select value={activityStatus} onChange={(event) => { setActivityStatus(event.target.value as "all" | "success" | "failed"); setPage(1); }} aria-label={t("activityStatusFilter")} className={SELECT_CLASS}>
-              <option value="all">{t("allResults")}</option>
-              <option value="success">{t("activitySucceeded")}</option>
-              <option value="failed">{t("activityFailed")}</option>
-            </select>
-            <input type="date" value={activityDateFrom} onChange={(event) => { setActivityDateFrom(event.target.value); setPage(1); }} aria-label={t("dateFrom")} title={t("dateFrom")} className={SELECT_CLASS} />
-            <input type="date" value={activityDateTo} onChange={(event) => { setActivityDateTo(event.target.value); setPage(1); }} aria-label={t("dateTo")} title={t("dateTo")} className={SELECT_CLASS} />
-            <button type="button" onClick={clearActivityFilters} className="h-10 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("clearFilters")}</button>
-          </div>}
+          </div>
         </div>
+        )}
         {error ? (
           <div className="m-4 rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">{error}</div>
         ) : loading && isEmpty ? (
           <div className="flex min-h-52 items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>
         ) : isEmpty ? (
-          <div className="flex min-h-52 items-center justify-center px-4 text-center text-sm text-gray-500">{activeTab === "email" ? t("noEmailLogs") : t("noActivityLogs")}</div>
+          <div className="flex min-h-52 flex-col items-center justify-center gap-3 px-4 text-center text-sm text-gray-500">
+            <p>{activeTab === "email" ? t("noEmailLogs") : activeChips.length > 0 ? t("logNoMatch") : t("noActivityLogs")}</p>
+            {activeTab === "activity" && activeChips.length > 0 && (
+              <button type="button" onClick={clearActivityFilters} className="h-10 rounded-lg border border-gray-200 px-4 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/[0.04]">{t("clearFilters")}</button>
+            )}
+          </div>
         ) : activeTab === "activity" ? (
           <div>
-            <div className={`divide-y divide-gray-100 transition-opacity dark:divide-gray-800 ${loading ? "opacity-60" : ""}`} aria-busy={loading || loadingMore}>
-              {logs.map((log) => <ActivityRow key={log.id} log={log} />)}
+            <div className={`transition-opacity ${loading ? "opacity-60" : ""}`} aria-busy={loading || loadingMore}>
+              {dayGroups.map((group, index) => (
+                <section key={`${group.day}-${index}`} aria-label={dayHeading(group.day, language, t)} className="border-t border-gray-200 first:border-t-0 dark:border-gray-800">
+                  {/* Tiêu đề ngày dính dưới header app khi cuộn: luôn biết đang xem ngày nào. */}
+                  <h2 className="sticky top-[65px] z-10 border-b border-gray-200 bg-gray-50/95 px-4 py-2 text-xs font-semibold text-gray-600 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95 dark:text-gray-300 sm:px-5 lg:top-[73px]">
+                    {dayHeading(group.day, language, t)}
+                  </h2>
+                  <div className="divide-y divide-gray-200/80 dark:divide-gray-800">
+                    {group.items.map((log) => (
+                      <ActivityRow key={log.id} log={log}
+                        onFilterUser={String(log.userId) === activityUser ? undefined : (userId) => setActivityUser(String(userId))}
+                        onFilterAction={log.action.trim().toUpperCase() === activityAction ? undefined : changeAction} />
+                    ))}
+                  </div>
+                </section>
+              ))}
             </div>
             {/* Mốc cuối danh sách: lọt vào màn hình (còn ~600px) thì tải lô tiếp theo */}
             <div ref={loadMoreSentinelRef} className="flex min-h-14 items-center justify-center border-t border-gray-100 px-4 py-3 dark:border-gray-800">

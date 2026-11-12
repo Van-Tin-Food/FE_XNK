@@ -43,6 +43,8 @@ export interface ActivityActor {
 export interface ActivityLogFilters {
   userId?: number;
   action?: string;
+  /** Lọc theo nhóm chức năng: mọi mã thao tác của nhóm (BE bỏ qua khi có `action`). */
+  actions?: string[];
   role?: string;
   status?: "success" | "failed";
   from?: string;
@@ -127,6 +129,7 @@ function filterParams(params: URLSearchParams, filters: ActivityLogFilters) {
     const value = filters[key];
     if (value !== undefined && value !== "") params.set(key, String(value));
   }
+  if (filters.actions?.length) params.set("actions", filters.actions.join(","));
 }
 
 /**

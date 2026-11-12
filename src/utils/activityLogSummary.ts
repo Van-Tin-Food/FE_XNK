@@ -35,6 +35,17 @@ export function activityLogSummary(
     const count = bills.match(/^(\d+ B\/L)/)?.[1];
     return count ? `${head} · ${count}` : head;
   }
+  // Đề nghị thanh toán: nội dung bắt đầu bằng mã đề nghị ("DNTT-001; ..." hoặc "DNTT-001 | ..."). Dòng chính = mã đề nghị
+  // + các ý đầu (số tiền, lý do từ chối, thay đổi...), bỏ phần "Sau khi sửa: <toàn bộ đề nghị>" (xem ở chi tiết).
+  if (/^PAYMENT_(REQUEST_|CONTAINER_REPAIR)/i.test(action)) {
+    const [requestId = "", ...parts] = detail.split(/\s*;\s+|\s+\|\s+/);
+    if (/^[^\s:]{2,40}$/.test(requestId.trim())) {
+      const subject = `${language === "en" ? "Request" : "Đề nghị"} ${requestId.trim()}`;
+      const fullCopyAt = parts.findIndex((part) => /^Sau khi sửa:/i.test(part));
+      const rest = (fullCopyAt >= 0 ? parts.slice(0, fullCopyAt) : parts).filter(Boolean).join(" | ");
+      return rest ? compactChanges(subject, rest) : subject;
+    }
+  }
   const orderCode = detail.match(/(?:^|[\s;])(?:đơn(?:\s+hàng)?|order)\s+([^\s;,]+)/i)?.[1];
   const documentCode = location.match(/\/Documents\/([A-Z0-9_]+)/i)?.[1]
     || detail.match(/chứng từ\s+([A-Z0-9_]+)/i)?.[1];

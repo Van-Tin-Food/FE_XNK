@@ -22,6 +22,20 @@ test("vị trí: mã màn hình đổi thành đường dẫn dễ đọc", () =
   assert.deepEqual(activityLocationParts("GoogleChat", t), ["locGoogleChat", "locPaymentRequests"]);
 });
 
+test("vị trí: các màn hình BE tự ghi log cũng có tên dễ đọc", () => {
+  assert.deepEqual(activityLocationParts("ShipmentDetail/Documents/BL", t), ["locHome", "locOrderDetail", "locDocuments", "BL"]);
+  assert.deepEqual(activityLocationParts("ShipmentDetail/Overview", t), ["locHome", "locOrderDetail", "locOverview"]);
+  assert.deepEqual(activityLocationParts("ShipmentDetailModal/Costs", t), ["locHome", "locOrderDetail", "locCosts"]);
+  assert.deepEqual(activityLocationParts("MasterData/PaymentCategory", t), ["masterDataManagement", "PaymentCategories"]);
+  assert.deepEqual(activityLocationParts("MasterData/kho", t), ["masterDataManagement", "WarehouseLower"]);
+  assert.deepEqual(activityLocationParts("MyCosts", t), ["myCosts"]);
+  assert.deepEqual(activityLocationParts("CostReport", t), ["costPayableReport"]);
+  assert.deepEqual(activityLocationParts("BankTransactions", t), ["bankTransactionsMenu"]);
+  assert.deepEqual(activityLocationParts("Profile/Signature", t), ["myProfile", "locSignature"]);
+  assert.deepEqual(activityLocationParts("System/AutoDocumentSync/DON_KD", t), ["locSystem", "documentSync", "DON_KD"]);
+  assert.deepEqual(activityLocationParts("System/EtaArrivalReminder", t), ["locSystem", "locEtaReminder"]);
+});
+
 test("vị trí: mã lạ hoặc rỗng không làm lỗi", () => {
   assert.deepEqual(activityLocationParts("", t), []);
   assert.deepEqual(activityLocationParts("SomethingNew/Tab", t), ["SomethingNew/Tab"]);

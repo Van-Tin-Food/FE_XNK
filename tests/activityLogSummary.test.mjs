@@ -45,3 +45,13 @@ test("arrival reminder: main line shows date + number of B/L", () => {
     "Hệ thống tự động xử lý: thông báo hàng sắp về ngày 05/11/2026 (ETA từ hôm nay đến 30 ngày tới, chưa báo lần nào) · 2 B/L",
   );
 });
+
+test("payment request logs lead with the request number and the key point", () => {
+  assert.equal(activityLogSummary("PAYMENT_REQUEST_APPROVE", "DNTT-001; 1000000 VND; người duyệt: An (an@x.vn)", "GoogleChat"), "Đề nghị DNTT-001 · 1000000 VND; người duyệt: An (an@x.vn)");
+  assert.equal(activityLogSummary("PAYMENT_REQUEST_REJECT", "DNTT-002; lý do: thiếu hóa đơn; người từ chối: Bình (b@x.vn)", "GoogleChat", "en"), "Request DNTT-002 · lý do: thiếu hóa đơn; người từ chối: Bình (b@x.vn)");
+  assert.equal(
+    activityLogSummary("PAYMENT_REQUEST_UPDATE", "DNTT-003 | Số tiền: 100 → 200 | Sau khi sửa: DNTT-003 | Số tiền: 200 | Chi phí (0): (không có)", "PaymentRequests"),
+    "Đề nghị DNTT-003 · Số tiền: 100 → 200",
+  );
+  assert.equal(activityLogSummary("PAYMENT_REQUEST_SEND", "DNTT-004", "PaymentRequests"), "Đề nghị DNTT-004");
+});
